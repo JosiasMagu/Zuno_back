@@ -100,9 +100,15 @@ export class PaymentsController {
 
   @Patch(':id/release')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Liberar pagamento retido' })
+  @ApiOperation({
+    summary: 'Liberar pagamento retido',
+    description:
+      'Só o CLIENT (confirma recepção do equipamento) ou ADMIN pode liberar. ' +
+      'O OWNER nunca pode liberar o seu próprio pagamento — ' +
+      'isso quebraria a garantia central do cofre digital.',
+  })
   @ApiParam({ name: 'id', description: 'ID do pagamento' })
   @ApiResponse({ status: 200, description: 'Pagamento liberado com sucesso.' })
   @ApiResponse({ status: 400, description: 'Operação inválida.' })
