@@ -410,12 +410,15 @@ export class PaymentsService {
       throw new NotFoundException('Utilizador não encontrado.');
     }
 
+    // Só o CLIENT (confirma recepção do equipamento) ou ADMIN pode liberar.
+    // O OWNER NUNCA pode liberar o seu próprio pagamento —
+    // isso quebraria a garantia central do cofre digital.
     const canRelease =
-      user.role === UserRole.ADMIN || payment.ownerId === userId;
+      user.role === UserRole.ADMIN || payment.clientId === userId;
 
     if (!canRelease) {
       throw new ForbiddenException(
-        'Não tens permissão para liberar este pagamento.',
+        'Só o cliente que fez a reserva ou um administrador pode liberar o pagamento.',
       );
     }
 

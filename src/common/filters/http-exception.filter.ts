@@ -8,7 +8,6 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 
-
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
@@ -42,7 +41,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
         details = resp.error;
       }
     } else if (exception instanceof Error) {
-      // Erro inesperado — loga internamente mas não expõe ao cliente
       this.logger.error(
         `Unhandled error on ${request.method} ${request.url}`,
         exception.stack,

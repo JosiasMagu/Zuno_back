@@ -19,11 +19,14 @@ import { DatabaseModule } from './shared/db/database.module';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    // Rate limiting global — 100 requests por 60 segundos por IP.
+    // Rotas sensíveis (login, register) têm limites mais apertados
+    // via @Throttle() aplicado directamente no controller.
     ThrottlerModule.forRoot([
       {
         name: 'global',
-        ttl: 60_000, 
-        limit: 100,  
+        ttl: 60_000, // janela de 60 segundos
+        limit: 100,  // máximo 100 requests por IP por janela
       },
     ]),
     DatabaseModule,
