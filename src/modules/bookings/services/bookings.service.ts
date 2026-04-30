@@ -1,0 +1,624 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { BookingStatus, EquipmentStatus, Prisma, UserRole } from '@prisma/client';
+
+import { PrismaService } from '../../../shared/db/prisma.service';
+import { CreateBookingDto } from '../dto/create-booking.dto';
+import { FindBookingsQueryDto } from '../dto/find-bookings-query.dto';
+import { UpdateBookingStatusDto } from '../dto/update-booking-status.dto';
+import { BookingPresenter } from '../presenters/booking.presenter';
+
+@Injectable()
+export class BookingsService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async create(clientId: string, dto: CreateBookingDto) {
+    const equipmentId = dto.equipmentId.trim();
+
+    const equipment = await this.prisma.equipment.findUnique({
+      where: { id: equipmentId },
+      include: {
+        owner: {
+          select: {
+            id: true,
+            name: true,
+            avatarUrl: true,
+          },
+        },
+        category: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+      },
+    });
+
+    if (!equipment) {
+      throw new NotFoundException('Equipamento não encontrado.');
+    }
+
+    if (equipment.status !== EquipmentStatus.ACTIVE) {
+      throw new BadRequestException(
+        'Este equipamento não está disponível para reserva.',
+      );
+    }
+
+    if (!equipment.isAvailable) {
+      throw new BadRequestException('Este equipamento não está disponível.');
+    }
+
+    if (equipment.ownerId === clientId) {
+      throw new BadRequestException(
+        'Não podes reservar o teu próprio equipamento.',
+      );
+    }
+
+    const startDate = new Date(dto.startDate);
+    const endDate = new Date(dto.endDate);
+
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+      throw new BadRequestException('Datas inválidas.');
+    }
+
+    const normalizedStartDate = this.startOfDay(startDate);
+    const normalizedEndDate = this.startOfDay(endDate);
+    const today = this.startOfDay(new Date());
+
+    if (normalizedStartDate < today) {
+      throw new BadRequestException('A data inicial não pode ser no passado.');
+    }
+
+    if (normalizedEndDate <= normalizedStartDate) {
+      throw new BadRequestException(
+        'A data final deve ser maior que a data inicial.',
+      );
+    }
+
+    const totalDays = this.calculateTotalDays(
+      normalizedStartDate,
+      normalizedEndDate,
+    );
+
+    if (totalDays < 1) {
+      throw new BadRequestException('A reserva deve ter pelo menos 1 dia.');
+    }
+
+    const conflictingBooking = await this.prisma.booking.findFirst({
+      where: {
+        equipmentId: equipment.id,
+        status: {
+          in: [
+            BookingStatus.PENDING,
+            BookingStatus.CONFIRMED,
+            BookingStatus.ACTIVE,
+          ],
+        },
+        AND: [
+          {
+            startDate: {
+              lt: normalizedEndDate,
+            },
+          },
+          {
+            endDate: {
+              gt: normalizedStartDate,
+            },
+          },
+        ],
+      },
+    });
+
+    if (conflictingBooking) {
+      throw new BadRequestException(
+        'Já existe uma reserva para este equipamento nesse período.',
+      );
+    }
+
+    const rentalAmount = Number(equipment.pricePerDay) * totalDays;
+    const depositAmount = Number(equipment.depositAmount ?? 0);
+    const platformFee = this.calculatePlatformFee(rentalAmount);
+    const totalAmount = rentalAmount + depositAmount + platformFee;
+
+    const booking = await this.prisma.booking.create({
+      data: {
+        clientId,
+        equipmentId: equipment.id,
+        ownerId: equipment.ownerId,
+        startDate: normalizedStartDate,
+        endDate: normalizedEndDate,
+        totalDays,
+        rentalAmount,
+        depositAmount,
+        platformFee,
+        totalAmount,
+        deliveryAddress: dto.deliveryAddress?.trim() || null,
+        clientNote: dto.clientNote?.trim() || null,
+        status: BookingStatus.PENDING,
+      },
+      include: {
+        client: {
+          select: {
+            id: true,
+            name: true,
+            avatarUrl: true,
+          },
+        },
+        owner: {
+          select: {
+            id: true,
+            name: true,
+            avatarUrl: true,
+          },
+        },
+        equipment: {
+          select: {
+            id: true,
+            title: true,
+            location: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    return {
+      message: 'Reserva criada com sucesso.',
+      data: BookingPresenter.toListItem(booking),
+    };
+  }
+
+  async findMyBookings(userId: string, query: FindBookingsQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const skip = (page - 1) * limit;
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        role: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Utilizador não encontrado.');
+    }
+
+    const where: Prisma.BookingWhereInput =
+      user.role === UserRole.ADMIN
+        ? {
+            ...(query.status ? { status: query.status } : {}),
+          }
+        : {
+            clientId: userId,
+            ...(query.status ? { status: query.status } : {}),
+          };
+
+    const [items, total] = await Promise.all([
+      this.prisma.booking.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: {
+          createdAt: 'desc',
+        },
+        include: {
+          equipment: {
+            select: {
+              id: true,
+              title: true,
+              location: true,
+              status: true,
+            },
+          },
+          owner: {
+            select: {
+              id: true,
+              name: true,
+              avatarUrl: true,
+            },
+          },
+        },
+      }),
+      this.prisma.booking.count({ where }),
+    ]);
+
+    return {
+      message: 'Reservas obtidas com sucesso.',
+      data: items.map((item) => BookingPresenter.toListItem(item)),
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: page * limit < total,
+        hasPreviousPage: page > 1,
+      },
+    };
+  }
+
+  async findOwnerBookings(userId: string, query: FindBookingsQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const skip = (page - 1) * limit;
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        role: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Utilizador não encontrado.');
+    }
+
+    const where: Prisma.BookingWhereInput =
+      user.role === UserRole.ADMIN
+        ? {
+            ...(query.status ? { status: query.status } : {}),
+          }
+        : {
+            ownerId: userId,
+            ...(query.status ? { status: query.status } : {}),
+          };
+
+    const [items, total] = await Promise.all([
+      this.prisma.booking.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: {
+          createdAt: 'desc',
+        },
+        include: {
+          equipment: {
+            select: {
+              id: true,
+              title: true,
+              location: true,
+              status: true,
+            },
+          },
+          client: {
+            select: {
+              id: true,
+              name: true,
+              avatarUrl: true,
+            },
+          },
+        },
+      }),
+      this.prisma.booking.count({ where }),
+    ]);
+
+    return {
+      message: 'Reservas do proprietário obtidas com sucesso.',
+      data: items.map((item) => BookingPresenter.toListItem(item)),
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: page * limit < total,
+        hasPreviousPage: page > 1,
+      },
+    };
+  }
+
+  async findOne(userId: string, bookingId: string) {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: {
+        client: {
+          select: {
+            id: true,
+            name: true,
+            avatarUrl: true,
+          },
+        },
+        owner: {
+          select: {
+            id: true,
+            name: true,
+            avatarUrl: true,
+          },
+        },
+        equipment: {
+          select: {
+            id: true,
+            title: true,
+            description: true,
+            location: true,
+            status: true,
+            pricePerDay: true,
+            depositAmount: true,
+          },
+        },
+      },
+    });
+
+    if (!booking) {
+      throw new NotFoundException('Reserva não encontrada.');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        role: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Utilizador não encontrado.');
+    }
+
+    const canView =
+      user.role === UserRole.ADMIN ||
+      booking.clientId === userId ||
+      booking.ownerId === userId;
+
+    if (!canView) {
+      throw new ForbiddenException(
+        'Não tens permissão para ver esta reserva.',
+      );
+    }
+
+    return {
+      message: 'Reserva obtida com sucesso.',
+      data: BookingPresenter.toDetails(booking),
+    };
+  }
+
+  async confirm(userId: string, bookingId: string) {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: {
+        equipment: {
+          select: {
+            id: true,
+            status: true,
+            isAvailable: true,
+          },
+        },
+      },
+    });
+
+    if (!booking) {
+      throw new NotFoundException('Reserva não encontrada.');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        role: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Utilizador não encontrado.');
+    }
+
+    const canConfirm =
+      user.role === UserRole.ADMIN || booking.ownerId === userId;
+
+    if (!canConfirm) {
+      throw new ForbiddenException(
+        'Não tens permissão para confirmar esta reserva.',
+      );
+    }
+
+    if (booking.status !== BookingStatus.PENDING) {
+      throw new BadRequestException(
+        'Apenas reservas pendentes podem ser confirmadas.',
+      );
+    }
+
+    if (booking.equipment.status !== EquipmentStatus.ACTIVE) {
+      throw new BadRequestException(
+        'Não é possível confirmar uma reserva de equipamento inativo.',
+      );
+    }
+
+    if (!booking.equipment.isAvailable) {
+      throw new BadRequestException(
+        'Não é possível confirmar reserva de equipamento indisponível.',
+      );
+    }
+
+    const conflictingBooking = await this.prisma.booking.findFirst({
+      where: {
+        id: {
+          not: booking.id,
+        },
+        equipmentId: booking.equipmentId,
+        status: {
+          in: [BookingStatus.CONFIRMED, BookingStatus.ACTIVE],
+        },
+        AND: [
+          {
+            startDate: {
+              lt: booking.endDate,
+            },
+          },
+          {
+            endDate: {
+              gt: booking.startDate,
+            },
+          },
+        ],
+      },
+    });
+
+    if (conflictingBooking) {
+      throw new BadRequestException(
+        'Já existe outra reserva confirmada para este equipamento nesse período.',
+      );
+    }
+
+    const updatedBooking = await this.prisma.booking.update({
+      where: { id: bookingId },
+      data: {
+        status: BookingStatus.CONFIRMED,
+        confirmedAt: new Date(),
+      },
+      include: {
+        client: {
+          select: {
+            id: true,
+            name: true,
+            avatarUrl: true,
+          },
+        },
+        owner: {
+          select: {
+            id: true,
+            name: true,
+            avatarUrl: true,
+          },
+        },
+        equipment: {
+          select: {
+            id: true,
+            title: true,
+            location: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    return {
+      message: 'Reserva confirmada com sucesso.',
+      data: BookingPresenter.toListItem(updatedBooking),
+    };
+  }
+
+  async cancel(userId: string, bookingId: string, dto: UpdateBookingStatusDto) {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: {
+        equipment: {
+          select: {
+            id: true,
+            title: true,
+            location: true,
+            status: true,
+          },
+        },
+        client: {
+          select: {
+            id: true,
+            name: true,
+            avatarUrl: true,
+          },
+        },
+        owner: {
+          select: {
+            id: true,
+            name: true,
+            avatarUrl: true,
+          },
+        },
+      },
+    });
+
+    if (!booking) {
+      throw new NotFoundException('Reserva não encontrada.');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        role: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Utilizador não encontrado.');
+    }
+
+    const canCancel =
+      user.role === UserRole.ADMIN ||
+      booking.clientId === userId ||
+      booking.ownerId === userId;
+
+    if (!canCancel) {
+      throw new ForbiddenException(
+        'Não tens permissão para cancelar esta reserva.',
+      );
+    }
+
+    if (
+      booking.status !== BookingStatus.PENDING &&
+      booking.status !== BookingStatus.CONFIRMED
+    ) {
+      throw new BadRequestException(
+        'Apenas reservas pendentes ou confirmadas podem ser canceladas.',
+      );
+    }
+
+    const cancellationReason = dto.reason?.trim() || null;
+
+    const updatedBooking = await this.prisma.booking.update({
+      where: { id: bookingId },
+      data: {
+        status: BookingStatus.CANCELLED,
+        cancelledAt: new Date(),
+        cancellationReason,
+      },
+      include: {
+        client: {
+          select: {
+            id: true,
+            name: true,
+            avatarUrl: true,
+          },
+        },
+        owner: {
+          select: {
+            id: true,
+            name: true,
+            avatarUrl: true,
+          },
+        },
+        equipment: {
+          select: {
+            id: true,
+            title: true,
+            location: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    return {
+      message: 'Reserva cancelada com sucesso.',
+      data: BookingPresenter.toListItem(updatedBooking),
+    };
+  }
+
+  private calculateTotalDays(startDate: Date, endDate: Date) {
+    const diffMs = endDate.getTime() - startDate.getTime();
+    return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  }
+
+  private calculatePlatformFee(rentalAmount: number) {
+    return Number((rentalAmount * 0.1).toFixed(2));
+  }
+
+  private startOfDay(date: Date) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  }
+}
