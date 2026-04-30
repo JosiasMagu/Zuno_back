@@ -223,21 +223,21 @@ export class AuthService {
     phone: string,
     role: UserRole,
   ) {
+    // getOrThrow lança InternalServerErrorException se a variável não existir.
+    // Nunca usar fallback com string hardcoded — seria uma vulnerabilidade crítica.
     const accessSecret =
-      this.configService.get<string>('JWT_ACCESS_SECRET') ||
-      'super_secret_access';
+      this.configService.getOrThrow<string>('JWT_ACCESS_SECRET');
 
     const refreshSecret =
-      this.configService.get<string>('JWT_REFRESH_SECRET') ||
-      'super_secret_refresh';
+      this.configService.getOrThrow<string>('JWT_REFRESH_SECRET');
 
-    const accessExpiresIn =
-      (this.configService.get<string>('JWT_ACCESS_EXPIRES_IN') ||
-        '15m') as StringValue;
+    const accessExpiresIn = (this.configService.get<string>(
+      'JWT_ACCESS_EXPIRES_IN',
+    ) ?? '15m') as StringValue;
 
-    const refreshExpiresIn =
-      (this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ||
-        '7d') as StringValue;
+    const refreshExpiresIn = (this.configService.get<string>(
+      'JWT_REFRESH_EXPIRES_IN',
+    ) ?? '7d') as StringValue;
 
     const payload = {
       sub: userId,
@@ -281,8 +281,7 @@ export class AuthService {
 
   private async verifyRefreshToken(refreshToken: string) {
     const refreshSecret =
-      this.configService.get<string>('JWT_REFRESH_SECRET') ||
-      'super_secret_refresh';
+      this.configService.getOrThrow<string>('JWT_REFRESH_SECRET');
 
     try {
       return await this.jwtService.verifyAsync<{

@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 
 import { AuthModule } from './modules/auth/auth.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
@@ -17,6 +19,13 @@ import { DatabaseModule } from './shared/db/database.module';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    ThrottlerModule.forRoot([
+      {
+        name: 'global',
+        ttl: 60_000, 
+        limit: 100,  
+      },
+    ]),
     DatabaseModule,
     AuthModule,
     UsersModule,
@@ -29,6 +38,12 @@ import { DatabaseModule } from './shared/db/database.module';
     ChatModule,
   ],
   controllers: [],
-  providers: [],
+  providers: [
+    // Aplica o ThrottlerGuard globalmente a todas as rotas
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}

@@ -15,13 +15,14 @@ import { ConfigService } from '@nestjs/config';
 import { ChatService } from '../services/chat.service';
 import { ChatPresenter } from '../presenters/chat.presenter';
 
-// Mapa em memória: userId → Set de socket IDs
-// Permite que o mesmo utilizador esteja ligado em múltiplos dispositivos
 const userSockets = new Map<string, Set<string>>();
 
 @WebSocketGateway({
   cors: {
-    origin: '*', // Ajustar para o domínio real em produção
+    origin: (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000,http://localhost:8081')
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean),
     credentials: true,
   },
   namespace: '/chat',
@@ -36,7 +37,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly configService: ConfigService,
   ) {}
 
-  // ─── Ligação estabelecida ─────────────────────────────────────────────────
 
   async handleConnection(client: Socket) {
     try {
@@ -49,17 +49,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
       userSockets.get(userId)!.add(client.id);
 
-      // O cliente entra automaticamente nas suas salas de conversa
-      // (cada conversa é uma room com o conversationId)
+      // (cada conversa e uma room com o conversationId)
       console.log(`[Chat] User ${userId} connected (socket: ${client.id})`);
     } catch {
-      // Token inválido — desligar imediatamente
       client.emit('error', { message: 'Token inválido. Ligação recusada.' });
       client.disconnect();
     }
   }
 
-  // ─── Desligação ───────────────────────────────────────────────────────────
 
   handleDisconnect(client: Socket) {
     const userId = client.data.userId as string | undefined;
@@ -72,8 +69,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  // ─── Entrar numa conversa (subscrever à room) ─────────────────────────────
-
+  
   @SubscribeMessage('join_conversation')
   async handleJoinConversation(
     @ConnectedSocket() client: Socket,
@@ -85,7 +81,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       throw new WsException('conversationId é obrigatório.');
     }
 
-    // O ChatService já verifica se o utilizador é participante
     try {
       await this.chatService.findConversation(userId, data.conversationId, {
         page: 1,
@@ -99,7 +94,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.emit('joined_conversation', { conversationId: data.conversationId });
   }
 
-  // ─── Sair de uma conversa ─────────────────────────────────────────────────
 
   @SubscribeMessage('leave_conversation')
   async handleLeaveConversation(
@@ -110,7 +104,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.emit('left_conversation', { conversationId: data.conversationId });
   }
 
-  // ─── Enviar mensagem ──────────────────────────────────────────────────────
 
   @SubscribeMessage('send_message')
   async handleSendMessage(
@@ -132,14 +125,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const formatted = ChatPresenter.toMessage(message);
 
-      // Emitir a mensagem para todos os sockets na room da conversa
-      // (inclui o próprio remetente para confirmar recepção)
       this.server
         .to(data.conversationId)
         .emit('new_message', { data: formatted });
 
-      // Se o destinatário estiver online mas não na room, notificá-lo
-      // para actualizar a lista de conversas (badge de não lidos)
       this.notifyRecipient(userId, data.conversationId, formatted);
 
       return { event: 'message_sent', data: formatted };
@@ -161,7 +150,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     if (!data?.conversationId) return;
 
-    // Emitir para todos na room excepto o próprio
     client.to(data.conversationId).emit('user_typing', { userId });
   }
 
@@ -184,9 +172,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     conversationId: string,
     message: ReturnType<typeof ChatPresenter.toMessage>,
   ) {
-    // Emitir notificação pessoal ao destinatário via socket pessoal
-    // O front usa isto para actualizar o badge de mensagens não lidas
-    // Nota: o recipient é identificado pelo conversationId — o front
     // já sabe de qual conversa veio a notificação
     this.server.to(conversationId).emit('conversation_updated', {
       conversationId,
@@ -199,9 +184,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // ─── Extrair userId do token JWT no handshake ─────────────────────────────
 
   private async extractUserIdFromSocket(client: Socket): Promise<string> {
-    // O front deve enviar o token no handshake:
-    // socket = io('/chat', { auth: { token: 'Bearer eyJ...' } })
-    // ou nos headers: { Authorization: 'Bearer eyJ...' }
     const authHeader =
       client.handshake.auth?.token ||
       client.handshake.headers?.authorization;
