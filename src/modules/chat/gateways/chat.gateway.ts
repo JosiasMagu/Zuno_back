@@ -43,13 +43,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const userId = await this.extractUserIdFromSocket(client);
       client.data.userId = userId;
 
-      // Registar socket no mapa de utilizadores
       if (!userSockets.has(userId)) {
         userSockets.set(userId, new Set());
       }
       userSockets.get(userId)!.add(client.id);
 
-      // (cada conversa e uma room com o conversationId)
       console.log(`[Chat] User ${userId} connected (socket: ${client.id})`);
     } catch {
       client.emit('error', { message: 'Token inválido. Ligação recusada.' });
@@ -69,7 +67,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  
+  // ─── Entrar numa conversa (subscrever à room) ─────────────────────────────
+
   @SubscribeMessage('join_conversation')
   async handleJoinConversation(
     @ConnectedSocket() client: Socket,
@@ -139,7 +138,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  // ─── Indicador de "a escrever..." ─────────────────────────────────────────
 
   @SubscribeMessage('typing')
   handleTyping(
@@ -165,14 +163,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.to(data.conversationId).emit('user_stop_typing', { userId });
   }
 
-  // ─── Helper: notificar destinatário fora da room ──────────────────────────
 
   private notifyRecipient(
     senderId: string,
     conversationId: string,
     message: ReturnType<typeof ChatPresenter.toMessage>,
   ) {
-    // já sabe de qual conversa veio a notificação
     this.server.to(conversationId).emit('conversation_updated', {
       conversationId,
       lastMessage: message.content,

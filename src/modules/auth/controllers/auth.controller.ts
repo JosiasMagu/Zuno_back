@@ -21,7 +21,6 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
-  // Máximo 5 registos por minuto por IP — protege contra criação massiva de contas
   @Throttle({ global: { ttl: 60_000, limit: 5 } })
   @ApiOperation({ summary: 'Registrar novo utilizador' })
   @ApiBody({ type: RegisterDto })
@@ -32,7 +31,6 @@ export class AuthController {
   }
 
   @Post('login')
-  // Máximo 10 tentativas de login por minuto por IP — protege contra brute force
   @Throttle({ global: { ttl: 60_000, limit: 10 } })
   @ApiOperation({ summary: 'Autenticar utilizador' })
   @ApiBody({ type: LoginDto })

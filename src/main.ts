@@ -16,7 +16,6 @@ async function bootstrap() {
   app.use(compression());
   app.use(cookieParser());
 
-  // Exemplo no .env: ALLOWED_ORIGINS=https://zuno.app,https://www.zuno.app
   const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000,http://localhost:8081')
     .split(',')
     .map((o) => o.trim())
@@ -31,7 +30,6 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // Exception filter global — devolve respostas limpas e consistentes
   app.useGlobalFilters(new HttpExceptionFilter());
 
   app.useGlobalPipes(
