@@ -41,6 +41,11 @@ export class AuthController {
   }
 
   @Post('refresh')
+  // ── Throttle no refresh ────────────────────────────────────────────────────
+  // Endpoint sem limite é o alvo natural de força bruta após obtenção de um
+  // token. 20 pedidos por minuto é suficiente para qualquer uso legítimo
+  // (apps mobile com reconexão automática) e bloqueia tentativas de ataque.
+  @Throttle({ global: { ttl: 60_000, limit: 20 } })
   @ApiOperation({ summary: 'Renovar access token' })
   @ApiBody({ type: RefreshTokenDto })
   @ApiResponse({ status: 201, description: 'Token renovado com sucesso.' })
@@ -50,6 +55,7 @@ export class AuthController {
   }
 
   @Post('logout')
+  @Throttle({ global: { ttl: 60_000, limit: 10 } })
   @ApiOperation({ summary: 'Encerrar sessão do utilizador' })
   @ApiBody({ type: RefreshTokenDto })
   @ApiResponse({ status: 201, description: 'Logout realizado com sucesso.' })
