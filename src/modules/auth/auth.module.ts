@@ -17,12 +17,11 @@ import { JwtStrategy } from './strategies/jwt.strategy';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
-        const jwtSecret =
-          configService.get<string>('JWT_ACCESS_SECRET') ||
-          'super_secret_access';
+        const jwtSecret = configService.getOrThrow<string>('JWT_ACCESS_SECRET');
 
-        const jwtExpiresIn = (configService.get<string>('JWT_ACCESS_EXPIRES_IN') ||
-          '15m') as StringValue;
+        const jwtExpiresIn = (
+          configService.get<string>('JWT_ACCESS_EXPIRES_IN') ?? '15m'
+        ) as StringValue;
 
         return {
           secret: jwtSecret,

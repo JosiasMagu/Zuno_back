@@ -1,4 +1,4 @@
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
@@ -9,6 +9,7 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  const logger = new Logger('Bootstrap');
 
   app.setGlobalPrefix('api/v1');
 
@@ -16,7 +17,9 @@ async function bootstrap() {
   app.use(compression());
   app.use(cookieParser());
 
-  const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000,http://localhost:8081')
+  const allowedOrigins = (
+    process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000,http://localhost:8081'
+  )
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean);
@@ -40,29 +43,37 @@ async function bootstrap() {
     }),
   );
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Zuno API')
-    .setDescription('API oficial da plataforma Zuno')
-    .setVersion('1.0.0')
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        description: 'Insere o access token JWT',
-      },
-      'access-token',
-    )
-    .build();
+  // ── Swagger apenas fora de produção ─────────────────────────────────────────
+  // Em produção, expor /docs revela toda a estrutura da API publicamente —
+  // endpoints, parâmetros, modelos de dados e exemplos de payloads.
+  // Num sistema de pagamentos isso é um risco desnecessário.
+  if (process.env.NODE_ENV !== 'production') {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('Zuno API')
+      .setDescription('API oficial da plataforma Zuno')
+      .setVersion('1.0.0')
+      .addBearerAuth(
+        {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'Insere o access token JWT',
+        },
+        'access-token',
+      )
+      .build();
 
-  const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('docs', app, swaggerDocument);
+    const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('docs', app, swaggerDocument);
+
+    logger.log(`Swagger disponível em http://localhost:${process.env.PORT || 3000}/docs`);
+  }
 
   const port = Number(process.env.PORT) || 3000;
   await app.listen(port);
 
-  console.log(`Zuno API running on http://localhost:${port}/api/v1`);
-  console.log(`Swagger available at http://localhost:${port}/docs`);
+  logger.log(`Zuno API a correr em http://localhost:${port}/api/v1`);
+  logger.log(`Ambiente: ${process.env.NODE_ENV ?? 'development'}`);
 }
 
 bootstrap();

@@ -19,23 +19,14 @@ export class BookingsService {
   async create(clientId: string, dto: CreateBookingDto) {
     const equipmentId = dto.equipmentId.trim();
 
+    // ── 1. Carregar e validar equipamento ANTES da transacção ────────────────
+    // Leituras que não mudam de forma concorrente são feitas fora para não
+    // segurar o lock da transacção mais tempo do que o necessário.
     const equipment = await this.prisma.equipment.findUnique({
       where: { id: equipmentId },
       include: {
-        owner: {
-          select: {
-            id: true,
-            name: true,
-            avatarUrl: true,
-          },
-        },
-        category: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-          },
-        },
+        owner: { select: { id: true, name: true, avatarUrl: true } },
+        category: { select: { id: true, name: true, slug: true } },
       },
     });
 
@@ -59,6 +50,7 @@ export class BookingsService {
       );
     }
 
+    // ── 2. Validar e normalizar datas ────────────────────────────────────────
     const startDate = new Date(dto.startDate);
     const endDate = new Date(dto.endDate);
 
@@ -80,97 +72,109 @@ export class BookingsService {
       );
     }
 
-    const totalDays = this.calculateTotalDays(
-      normalizedStartDate,
-      normalizedEndDate,
-    );
+    const totalDays = this.calculateTotalDays(normalizedStartDate, normalizedEndDate);
 
     if (totalDays < 1) {
       throw new BadRequestException('A reserva deve ter pelo menos 1 dia.');
     }
 
-    const conflictingBooking = await this.prisma.booking.findFirst({
-      where: {
-        equipmentId: equipment.id,
-        status: {
-          in: [
-            BookingStatus.PENDING,
-            BookingStatus.CONFIRMED,
-            BookingStatus.ACTIVE,
-          ],
-        },
-        AND: [
-          {
-            startDate: {
-              lt: normalizedEndDate,
-            },
-          },
-          {
-            endDate: {
-              gt: normalizedStartDate,
-            },
-          },
-        ],
-      },
-    });
-
-    if (conflictingBooking) {
-      throw new BadRequestException(
-        'Já existe uma reserva para este equipamento nesse período.',
-      );
-    }
-
+    // ── 3. Calcular valores ──────────────────────────────────────────────────
     const rentalAmount = Number(equipment.pricePerDay) * totalDays;
     const depositAmount = Number(equipment.depositAmount ?? 0);
     const platformFee = this.calculatePlatformFee(rentalAmount);
     const totalAmount = rentalAmount + depositAmount + platformFee;
 
-    const booking = await this.prisma.booking.create({
-      data: {
-        clientId,
-        equipmentId: equipment.id,
-        ownerId: equipment.ownerId,
-        startDate: normalizedStartDate,
-        endDate: normalizedEndDate,
-        totalDays,
-        rentalAmount,
-        depositAmount,
-        platformFee,
-        totalAmount,
-        deliveryAddress: dto.deliveryAddress?.trim() || null,
-        clientNote: dto.clientNote?.trim() || null,
-        status: BookingStatus.PENDING,
+    // ── 4. Transacção SERIALIZABLE — elimina a race condition ────────────────
+    //
+    // PROBLEMA ANTERIOR: o findFirst e o create eram dois passos separados.
+    // Se dois pedidos chegassem em simultâneo, ambos passavam a verificação
+    // de conflito e ambos criavam a reserva — dupla reserva garantida.
+    //
+    // SOLUÇÃO: com isolationLevel Serializable, o PostgreSQL garante que dois
+    // findFirst + create concorrentes sobre o mesmo equipamento se comportam
+    // como se fossem executados em série. O segundo a chegar recebe P2034
+    // (serialization failure) que convertemos numa mensagem clara.
+    //
+    const conflictWhere: Prisma.BookingWhereInput = {
+      equipmentId: equipment.id,
+      status: {
+        in: [BookingStatus.PENDING, BookingStatus.CONFIRMED, BookingStatus.ACTIVE],
       },
-      include: {
-        client: {
-          select: {
-            id: true,
-            name: true,
-            avatarUrl: true,
-          },
-        },
-        owner: {
-          select: {
-            id: true,
-            name: true,
-            avatarUrl: true,
-          },
-        },
-        equipment: {
-          select: {
-            id: true,
-            title: true,
-            location: true,
-            status: true,
-          },
-        },
-      },
-    });
-
-    return {
-      message: 'Reserva criada com sucesso.',
-      data: BookingPresenter.toListItem(booking),
+      AND: [
+        { startDate: { lt: normalizedEndDate } },
+        { endDate: { gt: normalizedStartDate } },
+      ],
     };
+
+    // ── Transacção SERIALIZABLE com const interno ────────────────────────────
+    // Declarar `booking` como const DENTRO do try é o padrão que o TypeScript
+    // consegue inferir correctamente — inclui os tipos das relações do `include`.
+    // Se usarmos `let` fora + try/catch, o TS perde a inferência dos includes
+    // e bate no tipo base do Booking sem relações (erro na linha do Presenter).
+    try {
+      const booking = await this.prisma.$transaction(
+        async (tx) => {
+          const conflict = await tx.booking.findFirst({
+            where: conflictWhere,
+            select: { id: true },
+          });
+
+          if (conflict) {
+            throw new BadRequestException(
+              'Já existe uma reserva para este equipamento nesse período.',
+            );
+          }
+
+          return tx.booking.create({
+            data: {
+              clientId,
+              equipmentId: equipment.id,
+              ownerId: equipment.ownerId,
+              startDate: normalizedStartDate,
+              endDate: normalizedEndDate,
+              totalDays,
+              rentalAmount,
+              depositAmount,
+              platformFee,
+              totalAmount,
+              deliveryAddress: dto.deliveryAddress?.trim() || null,
+              clientNote: dto.clientNote?.trim() || null,
+              status: BookingStatus.PENDING,
+            },
+            include: {
+              client: { select: { id: true, name: true, avatarUrl: true } },
+              owner: { select: { id: true, name: true, avatarUrl: true } },
+              equipment: {
+                select: { id: true, title: true, location: true, status: true },
+              },
+            },
+          });
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          timeout: 5000,
+        },
+      );
+
+      return {
+        message: 'Reserva criada com sucesso.',
+        data: BookingPresenter.toListItem(booking),
+      };
+    } catch (error) {
+      // P2034 = falha de serialização ou deadlock do Prisma/PostgreSQL.
+      // Acontece exactamente quando dois pedidos concorrentes tentam criar
+      // reservas sobrepostas — relanço como mensagem legível pelo utilizador.
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2034'
+      ) {
+        throw new BadRequestException(
+          'Já existe uma reserva para este equipamento nesse período.',
+        );
+      }
+      // Excepções de negócio (BadRequestException, etc.) passam sem alteração.
+      throw error;
+    }
   }
 
   async findMyBookings(userId: string, query: FindBookingsQueryDto) {
@@ -180,10 +184,7 @@ export class BookingsService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: {
-        id: true,
-        role: true,
-      },
+      select: { id: true, role: true },
     });
 
     if (!user) {
@@ -192,38 +193,18 @@ export class BookingsService {
 
     const where: Prisma.BookingWhereInput =
       user.role === UserRole.ADMIN
-        ? {
-            ...(query.status ? { status: query.status } : {}),
-          }
-        : {
-            clientId: userId,
-            ...(query.status ? { status: query.status } : {}),
-          };
+        ? { ...(query.status ? { status: query.status } : {}) }
+        : { clientId: userId, ...(query.status ? { status: query.status } : {}) };
 
     const [items, total] = await Promise.all([
       this.prisma.booking.findMany({
         where,
         skip,
         take: limit,
-        orderBy: {
-          createdAt: 'desc',
-        },
+        orderBy: { createdAt: 'desc' },
         include: {
-          equipment: {
-            select: {
-              id: true,
-              title: true,
-              location: true,
-              status: true,
-            },
-          },
-          owner: {
-            select: {
-              id: true,
-              name: true,
-              avatarUrl: true,
-            },
-          },
+          equipment: { select: { id: true, title: true, location: true, status: true } },
+          owner: { select: { id: true, name: true, avatarUrl: true } },
         },
       }),
       this.prisma.booking.count({ where }),
@@ -250,10 +231,7 @@ export class BookingsService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: {
-        id: true,
-        role: true,
-      },
+      select: { id: true, role: true },
     });
 
     if (!user) {
@@ -262,38 +240,18 @@ export class BookingsService {
 
     const where: Prisma.BookingWhereInput =
       user.role === UserRole.ADMIN
-        ? {
-            ...(query.status ? { status: query.status } : {}),
-          }
-        : {
-            ownerId: userId,
-            ...(query.status ? { status: query.status } : {}),
-          };
+        ? { ...(query.status ? { status: query.status } : {}) }
+        : { ownerId: userId, ...(query.status ? { status: query.status } : {}) };
 
     const [items, total] = await Promise.all([
       this.prisma.booking.findMany({
         where,
         skip,
         take: limit,
-        orderBy: {
-          createdAt: 'desc',
-        },
+        orderBy: { createdAt: 'desc' },
         include: {
-          equipment: {
-            select: {
-              id: true,
-              title: true,
-              location: true,
-              status: true,
-            },
-          },
-          client: {
-            select: {
-              id: true,
-              name: true,
-              avatarUrl: true,
-            },
-          },
+          equipment: { select: { id: true, title: true, location: true, status: true } },
+          client: { select: { id: true, name: true, avatarUrl: true } },
         },
       }),
       this.prisma.booking.count({ where }),
@@ -317,20 +275,8 @@ export class BookingsService {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
       include: {
-        client: {
-          select: {
-            id: true,
-            name: true,
-            avatarUrl: true,
-          },
-        },
-        owner: {
-          select: {
-            id: true,
-            name: true,
-            avatarUrl: true,
-          },
-        },
+        client: { select: { id: true, name: true, avatarUrl: true } },
+        owner: { select: { id: true, name: true, avatarUrl: true } },
         equipment: {
           select: {
             id: true,
@@ -351,10 +297,7 @@ export class BookingsService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: {
-        id: true,
-        role: true,
-      },
+      select: { id: true, role: true },
     });
 
     if (!user) {
@@ -367,9 +310,7 @@ export class BookingsService {
       booking.ownerId === userId;
 
     if (!canView) {
-      throw new ForbiddenException(
-        'Não tens permissão para ver esta reserva.',
-      );
+      throw new ForbiddenException('Não tens permissão para ver esta reserva.');
     }
 
     return {
@@ -382,13 +323,7 @@ export class BookingsService {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
       include: {
-        equipment: {
-          select: {
-            id: true,
-            status: true,
-            isAvailable: true,
-          },
-        },
+        equipment: { select: { id: true, status: true, isAvailable: true } },
       },
     });
 
@@ -398,18 +333,14 @@ export class BookingsService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: {
-        id: true,
-        role: true,
-      },
+      select: { id: true, role: true },
     });
 
     if (!user) {
       throw new NotFoundException('Utilizador não encontrado.');
     }
 
-    const canConfirm =
-      user.role === UserRole.ADMIN || booking.ownerId === userId;
+    const canConfirm = user.role === UserRole.ADMIN || booking.ownerId === userId;
 
     if (!canConfirm) {
       throw new ForbiddenException(
@@ -437,24 +368,12 @@ export class BookingsService {
 
     const conflictingBooking = await this.prisma.booking.findFirst({
       where: {
-        id: {
-          not: booking.id,
-        },
+        id: { not: booking.id },
         equipmentId: booking.equipmentId,
-        status: {
-          in: [BookingStatus.CONFIRMED, BookingStatus.ACTIVE],
-        },
+        status: { in: [BookingStatus.CONFIRMED, BookingStatus.ACTIVE] },
         AND: [
-          {
-            startDate: {
-              lt: booking.endDate,
-            },
-          },
-          {
-            endDate: {
-              gt: booking.startDate,
-            },
-          },
+          { startDate: { lt: booking.endDate } },
+          { endDate: { gt: booking.startDate } },
         ],
       },
     });
@@ -467,33 +386,11 @@ export class BookingsService {
 
     const updatedBooking = await this.prisma.booking.update({
       where: { id: bookingId },
-      data: {
-        status: BookingStatus.CONFIRMED,
-        confirmedAt: new Date(),
-      },
+      data: { status: BookingStatus.CONFIRMED, confirmedAt: new Date() },
       include: {
-        client: {
-          select: {
-            id: true,
-            name: true,
-            avatarUrl: true,
-          },
-        },
-        owner: {
-          select: {
-            id: true,
-            name: true,
-            avatarUrl: true,
-          },
-        },
-        equipment: {
-          select: {
-            id: true,
-            title: true,
-            location: true,
-            status: true,
-          },
-        },
+        client: { select: { id: true, name: true, avatarUrl: true } },
+        owner: { select: { id: true, name: true, avatarUrl: true } },
+        equipment: { select: { id: true, title: true, location: true, status: true } },
       },
     });
 
@@ -507,28 +404,9 @@ export class BookingsService {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
       include: {
-        equipment: {
-          select: {
-            id: true,
-            title: true,
-            location: true,
-            status: true,
-          },
-        },
-        client: {
-          select: {
-            id: true,
-            name: true,
-            avatarUrl: true,
-          },
-        },
-        owner: {
-          select: {
-            id: true,
-            name: true,
-            avatarUrl: true,
-          },
-        },
+        equipment: { select: { id: true, title: true, location: true, status: true } },
+        client: { select: { id: true, name: true, avatarUrl: true } },
+        owner: { select: { id: true, name: true, avatarUrl: true } },
       },
     });
 
@@ -538,10 +416,7 @@ export class BookingsService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: {
-        id: true,
-        role: true,
-      },
+      select: { id: true, role: true },
     });
 
     if (!user) {
@@ -578,28 +453,9 @@ export class BookingsService {
         cancellationReason,
       },
       include: {
-        client: {
-          select: {
-            id: true,
-            name: true,
-            avatarUrl: true,
-          },
-        },
-        owner: {
-          select: {
-            id: true,
-            name: true,
-            avatarUrl: true,
-          },
-        },
-        equipment: {
-          select: {
-            id: true,
-            title: true,
-            location: true,
-            status: true,
-          },
-        },
+        client: { select: { id: true, name: true, avatarUrl: true } },
+        owner: { select: { id: true, name: true, avatarUrl: true } },
+        equipment: { select: { id: true, title: true, location: true, status: true } },
       },
     });
 
@@ -609,16 +465,18 @@ export class BookingsService {
     };
   }
 
-  private calculateTotalDays(startDate: Date, endDate: Date) {
+  // ── Helpers privados ───────────────────────────────────────────────────────
+
+  private calculateTotalDays(startDate: Date, endDate: Date): number {
     const diffMs = endDate.getTime() - startDate.getTime();
     return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
   }
 
-  private calculatePlatformFee(rentalAmount: number) {
+  private calculatePlatformFee(rentalAmount: number): number {
     return Number((rentalAmount * 0.1).toFixed(2));
   }
 
-  private startOfDay(date: Date) {
+  private startOfDay(date: Date): Date {
     return new Date(date.getFullYear(), date.getMonth(), date.getDate());
   }
 }
