@@ -1,14 +1,8 @@
-<<<<<<< HEAD
-
-# Zuno API
-=======
 # CLAUDE.md — Zuno Backend
->>>>>>> bc2c9ad (nova mudanca)
 
 Documento de contexto para sessões de desenvolvimento com IA.
 Actualizado sempre que uma decisão arquitectural importante é tomada.
 
----
 
 ## O que é o Zuno
 
@@ -18,12 +12,6 @@ Pagamento via M-Pesa com sistema de escrow (cofre digital).
 
 **Stack:** NestJS + Prisma + PostgreSQL + Socket.io + Cloudinary
 
-<<<<<<< HEAD
-```bash
-/api/v1
->>>>>>> 0f7373e (first commit)
-=======
----
 
 ## Estrutura de módulos
 
@@ -139,4 +127,3 @@ Cada módulo tem uma pasta `presenters/` com uma classe estática que formata os
 - `getOrThrow` para variáveis de ambiente obrigatórias, `get` para opcionais com default seguro.
 - Moeda: Metical (MZN). Método de pagamento: M-Pesa.
 - Língua das mensagens de erro: Português.
->>>>>>> bc2c9ad (nova mudanca)
