@@ -38,9 +38,7 @@ export class ChatService {
     if (!client) throw new NotFoundException('Utilizador não encontrado.');
 
     if (client.role !== UserRole.CLIENT) {
-      throw new ForbiddenException(
-        'Só clientes podem iniciar conversas.',
-      );
+      throw new ForbiddenException('Só clientes podem iniciar conversas.');
     }
 
     // Verificar se o equipment existe e está activo
@@ -50,7 +48,9 @@ export class ChatService {
     });
 
     if (!equipment || equipment.status !== EquipmentStatus.ACTIVE) {
-      throw new NotFoundException('Equipamento não encontrado ou indisponível.');
+      throw new NotFoundException(
+        'Equipamento não encontrado ou indisponível.',
+      );
     }
 
     // Cliente não pode contactar o seu próprio equipment
@@ -60,7 +60,6 @@ export class ChatService {
       );
     }
 
-    // Verificar se já existe conversa entre este cliente e owner sobre este equipment
     const existing = await this.prisma.conversation.findUnique({
       where: {
         clientId_ownerId_equipmentId: {
@@ -77,7 +76,6 @@ export class ChatService {
     });
 
     if (existing) {
-      // Conversa já existe — envia a mensagem na conversa existente e devolve
       const message = await this.sendMessageToConversation(
         clientId,
         existing.id,
@@ -94,7 +92,6 @@ export class ChatService {
       };
     }
 
-    // Criar conversa e primeira mensagem numa transacção
     const now = new Date();
     const { conversation, msg } = await this.prisma.$transaction(async (tx) => {
       const conversation = await tx.conversation.create({
@@ -134,8 +131,6 @@ export class ChatService {
     };
   }
 
-  // ─── Listar conversas do utilizador ───────────────────────────────────────
-
   async findMyConversations(userId: string) {
     const conversations = await this.prisma.conversation.findMany({
       where: {
@@ -157,9 +152,11 @@ export class ChatService {
     };
   }
 
-  // ─── Detalhe de uma conversa + mensagens ─────────────────────────────────
-
-  async findConversation(userId: string, conversationId: string, query: FindMessagesQueryDto) {
+  async findConversation(
+    userId: string,
+    conversationId: string,
+    query: FindMessagesQueryDto,
+  ) {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
       include: {
@@ -173,7 +170,6 @@ export class ChatService {
       throw new NotFoundException('Conversa não encontrada.');
     }
 
-    // Verificar se o utilizador é participante
     const isParticipant =
       conversation.clientId === userId || conversation.ownerId === userId;
 
@@ -188,7 +184,7 @@ export class ChatService {
     const [messages, total] = await Promise.all([
       this.prisma.message.findMany({
         where: { conversationId },
-        orderBy: { createdAt: 'desc' }, // mais recentes primeiro
+        orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
         include: { sender: { select: USER_SELECT } },
@@ -196,7 +192,6 @@ export class ChatService {
       this.prisma.message.count({ where: { conversationId } }),
     ]);
 
-    // Marcar como lidas as mensagens do outro utilizador
     await this.prisma.message.updateMany({
       where: {
         conversationId,
@@ -210,7 +205,7 @@ export class ChatService {
       message: 'Conversa obtida com sucesso.',
       data: {
         conversation: ChatPresenter.toConversation(conversation, userId),
-        messages: messages.map(ChatPresenter.toMessage),
+        messages: messages.map((m) => ChatPresenter.toMessage(m)),
         meta: {
           page,
           limit,
@@ -222,8 +217,6 @@ export class ChatService {
       },
     };
   }
-
-  // ─── Enviar mensagem (usado pelo WebSocket gateway e REST fallback) ────────
 
   async sendMessageToConversation(
     senderId: string,
@@ -261,7 +254,6 @@ export class ChatService {
         data: { conversationId, senderId, content: trimmed },
         include: { sender: { select: USER_SELECT } },
       }),
-      // Actualizar cache de última mensagem na conversa
       this.prisma.conversation.update({
         where: { id: conversationId },
         data: { lastMessage: trimmed, lastMessageAt: now },
@@ -270,8 +262,6 @@ export class ChatService {
 
     return message;
   }
-
-  // ─── Contar mensagens não lidas (para badge na UI) ────────────────────────
 
   async countUnread(userId: string) {
     const count = await this.prisma.message.count({

@@ -124,7 +124,10 @@ export class PaymentsController {
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Reembolsar pagamento' })
   @ApiParam({ name: 'id', description: 'ID do pagamento' })
-  @ApiResponse({ status: 200, description: 'Pagamento reembolsado com sucesso.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Pagamento reembolsado com sucesso.',
+  })
   @ApiResponse({ status: 400, description: 'Operação inválida.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Pagamento não encontrado.' })

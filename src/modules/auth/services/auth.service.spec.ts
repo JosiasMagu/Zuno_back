@@ -1,7 +1,4 @@
-import {
-  BadRequestException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -16,15 +13,13 @@ jest.mock('bcrypt', () => ({
   compare: jest.fn().mockResolvedValue(true),
 }));
 
-
-const USER_ID    = 'user-uuid-001';
+const USER_ID = 'user-uuid-001';
 const SESSION_ID = 'session-uuid-001';
-const PHONE      = '+258840000001';
-const EMAIL      = 'test@zuno.co.mz';
-const PASSWORD   = 'Senha@123';
-const ACCESS_TOKEN  = 'access-token-mock';
+const PHONE = '+258840000001';
+const EMAIL = 'test@zuno.co.mz';
+const PASSWORD = 'Senha@123';
+const ACCESS_TOKEN = 'access-token-mock';
 const REFRESH_TOKEN = 'refresh-token-mock';
-
 
 const makeUser = (overrides: Record<string, unknown> = {}) => ({
   id: USER_ID,
@@ -55,7 +50,6 @@ const makeSession = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-
 const makePrisma = () => ({
   user: {
     findUnique: jest.fn(),
@@ -67,7 +61,6 @@ const makePrisma = () => ({
     update: jest.fn(),
   },
 });
-
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -106,6 +99,8 @@ describe('AuthService', () => {
     service = module.get<AuthService>(AuthService);
     jwtService = module.get(JwtService);
     configService = module.get(ConfigService);
+
+    expect(configService).toBeDefined();
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -115,12 +110,19 @@ describe('AuthService', () => {
   // ───────────────────────────────────────────────────────────────────────────
 
   describe('register()', () => {
-    const dto = { name: 'Daniel Zuno', phone: PHONE, email: EMAIL, password: PASSWORD };
+    const dto = {
+      name: 'Daniel Zuno',
+      phone: PHONE,
+      email: EMAIL,
+      password: PASSWORD,
+    };
 
     it('regista o utilizador com sucesso e devolve tokens + dados seguros', async () => {
       prisma.user.findUnique.mockResolvedValue(null); // phone livre
       // segundo findUnique = verificação de email (também livre)
-      prisma.user.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+      prisma.user.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
       prisma.user.create.mockResolvedValue(makeUser());
       prisma.authSession.create.mockResolvedValue(makeSession());
 
@@ -190,7 +192,11 @@ describe('AuthService', () => {
       prisma.user.create.mockResolvedValue(makeUser({ email: null }));
       prisma.authSession.create.mockResolvedValue(makeSession());
 
-      await service.register({ name: 'Daniel', phone: PHONE, password: PASSWORD });
+      await service.register({
+        name: 'Daniel',
+        phone: PHONE,
+        password: PASSWORD,
+      });
 
       // findUnique chamado apenas 1 vez (telefone) — não verifica email
       expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
@@ -222,7 +228,8 @@ describe('AuthService', () => {
 
       const sessionCall = prisma.authSession.create.mock.calls[0][0];
       const expiresAt: Date = sessionCall.data.expiresAt;
-      const diffDays = (expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+      const diffDays =
+        (expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
       expect(diffDays).toBeGreaterThan(6);
       expect(diffDays).toBeLessThan(8);
     });
@@ -357,26 +364,36 @@ describe('AuthService', () => {
     });
 
     it('lança UnauthorizedException se token está vazio', async () => {
-      await expect(service.refreshToken('')).rejects.toThrow(UnauthorizedException);
-      await expect(service.refreshToken('   ')).rejects.toThrow(UnauthorizedException);
+      await expect(service.refreshToken('')).rejects.toThrow(
+        UnauthorizedException,
+      );
+      await expect(service.refreshToken('   ')).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('lança UnauthorizedException se JWT é inválido', async () => {
       jwtService.verifyAsync.mockRejectedValue(new Error('invalid token'));
 
-      await expect(service.refreshToken('token-invalido')).rejects.toThrow(UnauthorizedException);
+      await expect(service.refreshToken('token-invalido')).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('lança UnauthorizedException se o utilizador não existe', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.refreshToken(REFRESH_TOKEN)).rejects.toThrow(UnauthorizedException);
+      await expect(service.refreshToken(REFRESH_TOKEN)).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('lança UnauthorizedException se a conta está desactivada', async () => {
       prisma.user.findUnique.mockResolvedValue(makeUser({ isActive: false }));
 
-      await expect(service.refreshToken(REFRESH_TOKEN)).rejects.toThrow(UnauthorizedException);
+      await expect(service.refreshToken(REFRESH_TOKEN)).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('lança UnauthorizedException se não existe sessão activa correspondente', async () => {
@@ -384,7 +401,9 @@ describe('AuthService', () => {
       prisma.authSession.findMany.mockResolvedValue([makeSession()]);
       (bcrypt.compare as jest.Mock).mockResolvedValue(false); // nenhum hash corresponde
 
-      await expect(service.refreshToken(REFRESH_TOKEN)).rejects.toThrow(UnauthorizedException);
+      await expect(service.refreshToken(REFRESH_TOKEN)).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('lança UnauthorizedException e revoga a sessão se o token expirou', async () => {
@@ -396,7 +415,9 @@ describe('AuthService', () => {
       prisma.authSession.update.mockResolvedValue(expiredSession);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
 
-      await expect(service.refreshToken(REFRESH_TOKEN)).rejects.toThrow(UnauthorizedException);
+      await expect(service.refreshToken(REFRESH_TOKEN)).rejects.toThrow(
+        UnauthorizedException,
+      );
 
       // A sessão expirada deve ser revogada
       expect(prisma.authSession.update).toHaveBeenCalledWith(
@@ -412,7 +433,9 @@ describe('AuthService', () => {
       prisma.authSession.findMany.mockResolvedValue([]);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
 
-      await expect(service.refreshToken(REFRESH_TOKEN)).rejects.toThrow(UnauthorizedException);
+      await expect(service.refreshToken(REFRESH_TOKEN)).rejects.toThrow(
+        UnauthorizedException,
+      );
 
       const findManyCall = prisma.authSession.findMany.mock.calls[0][0];
       expect(findManyCall.where).toMatchObject({
@@ -446,28 +469,37 @@ describe('AuthService', () => {
 
     it('lança UnauthorizedException se token está vazio', async () => {
       await expect(service.logout('')).rejects.toThrow(UnauthorizedException);
-      await expect(service.logout('   ')).rejects.toThrow(UnauthorizedException);
+      await expect(service.logout('   ')).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('lança UnauthorizedException se JWT é inválido', async () => {
       jwtService.verifyAsync.mockRejectedValue(new Error('invalid'));
 
-      await expect(service.logout('token-invalido')).rejects.toThrow(UnauthorizedException);
+      await expect(service.logout('token-invalido')).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('lança UnauthorizedException se a sessão não existe ou já foi revogada', async () => {
       prisma.authSession.findMany.mockResolvedValue([makeSession()]);
       (bcrypt.compare as jest.Mock).mockResolvedValue(false); // nenhum hash corresponde
 
-      await expect(service.logout(REFRESH_TOKEN)).rejects.toThrow(UnauthorizedException);
+      await expect(service.logout(REFRESH_TOKEN)).rejects.toThrow(
+        UnauthorizedException,
+      );
       expect(prisma.authSession.update).not.toHaveBeenCalled();
     });
 
     it('revoga apenas a sessão do dispositivo actual — não todas as sessões', async () => {
-      const targetSession  = makeSession({ id: 'session-A' });
-      const otherSession   = makeSession({ id: 'session-B' });
+      const targetSession = makeSession({ id: 'session-A' });
+      const otherSession = makeSession({ id: 'session-B' });
 
-      prisma.authSession.findMany.mockResolvedValue([targetSession, otherSession]);
+      prisma.authSession.findMany.mockResolvedValue([
+        targetSession,
+        otherSession,
+      ]);
       prisma.authSession.update.mockResolvedValue(targetSession);
 
       // bcrypt.compare retorna true apenas para a primeira sessão
@@ -502,13 +534,17 @@ describe('AuthService', () => {
     it('lança UnauthorizedException se o utilizador não existe', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.getMe(USER_ID)).rejects.toThrow(UnauthorizedException);
+      await expect(service.getMe(USER_ID)).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('lança UnauthorizedException se a conta está desactivada', async () => {
       prisma.user.findUnique.mockResolvedValue(makeUser({ isActive: false }));
 
-      await expect(service.getMe(USER_ID)).rejects.toThrow(UnauthorizedException);
+      await expect(service.getMe(USER_ID)).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
   });
 });

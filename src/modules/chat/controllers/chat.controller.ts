@@ -128,7 +128,8 @@ export class ChatController {
   @Get('unread-count')
   @ApiOperation({
     summary: 'Contar mensagens não lidas',
-    description: 'Usado pelo front para o badge de notificação no ícone do chat.',
+    description:
+      'Usado pelo front para o badge de notificação no ícone do chat.',
   })
   @ApiResponse({ status: 200, description: 'Contagem obtida com sucesso.' })
   countUnread(@CurrentUser() user: { id: string }) {

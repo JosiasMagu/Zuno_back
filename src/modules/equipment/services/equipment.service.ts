@@ -90,7 +90,8 @@ export class EquipmentService {
     });
 
     return {
-      message: 'Equipamento criado com sucesso. Aguarda aprovação do administrador.',
+      message:
+        'Equipamento criado com sucesso. Aguarda aprovação do administrador.',
       data: EquipmentPresenter.toOwnerListingItem(equipment),
     };
   }
@@ -122,7 +123,9 @@ export class EquipmentService {
         { title: { contains: search, mode: 'insensitive' } },
         { description: { contains: search, mode: 'insensitive' } },
         { location: { contains: search, mode: 'insensitive' } },
-        { category: { is: { name: { contains: search, mode: 'insensitive' } } } },
+        {
+          category: { is: { name: { contains: search, mode: 'insensitive' } } },
+        },
       ];
     }
 
@@ -503,7 +506,6 @@ export class EquipmentService {
     };
   }
 
-
   async findPending(adminId: string) {
     await this.assertAdmin(adminId);
 
@@ -522,7 +524,6 @@ export class EquipmentService {
       data: items.map((item) => EquipmentPresenter.toOwnerListingItem(item)),
     };
   }
-
 
   private async assertAdmin(userId: string) {
     const user = await this.prisma.user.findUnique({

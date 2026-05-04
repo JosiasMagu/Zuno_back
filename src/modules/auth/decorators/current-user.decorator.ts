@@ -1,4 +1,5 @@
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
+import type { Request } from 'express';
 import { UserRole } from '@prisma/client';
 
 export type CurrentAuthUser = {
@@ -15,9 +16,13 @@ export type CurrentAuthUser = {
   updatedAt?: Date;
 };
 
+interface AuthenticatedRequest extends Request {
+  user: CurrentAuthUser;
+}
+
 export const CurrentUser = createParamDecorator(
   (_data: unknown, ctx: ExecutionContext): CurrentAuthUser => {
-    const request = ctx.switchToHttp().getRequest();
+    const request = ctx.switchToHttp().getRequest<AuthenticatedRequest>();
     return request.user;
   },
 );

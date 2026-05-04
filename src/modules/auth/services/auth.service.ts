@@ -85,7 +85,10 @@ export class AuthService {
       throw new UnauthorizedException('Conta desativada.');
     }
 
-    const passwordMatches = await bcrypt.compare(dto.password, user.passwordHash);
+    const passwordMatches = await bcrypt.compare(
+      dto.password,
+      user.passwordHash,
+    );
 
     if (!passwordMatches) {
       throw new UnauthorizedException('Credenciais inválidas.');
@@ -130,7 +133,10 @@ export class AuthService {
       },
     });
 
-    const matchedSession = await this.findMatchingSession(sessions, refreshToken);
+    const matchedSession = await this.findMatchingSession(
+      sessions,
+      refreshToken,
+    );
 
     if (!matchedSession) {
       throw new UnauthorizedException('Sessão inválida ou revogada.');
@@ -184,7 +190,10 @@ export class AuthService {
       },
     });
 
-    const matchedSession = await this.findMatchingSession(sessions, refreshToken);
+    const matchedSession = await this.findMatchingSession(
+      sessions,
+      refreshToken,
+    );
 
     if (!matchedSession) {
       throw new UnauthorizedException('Sessão inválida ou já revogada.');
@@ -218,11 +227,7 @@ export class AuthService {
     return this.toSafeUser(user);
   }
 
-  private async generateTokens(
-    userId: string,
-    phone: string,
-    role: UserRole,
-  ) {
+  private async generateTokens(userId: string, phone: string, role: UserRole) {
     // getOrThrow lança InternalServerErrorException se a variável não existir.
     // Nunca usar fallback com string hardcoded — seria uma vulnerabilidade crítica.
     const accessSecret =

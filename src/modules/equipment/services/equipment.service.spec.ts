@@ -4,7 +4,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { EquipmentCondition, EquipmentStatus, Prisma, UserRole } from '@prisma/client';
+import {
+  EquipmentCondition,
+  EquipmentStatus,
+  Prisma,
+  UserRole,
+} from '@prisma/client';
 
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { EquipmentSortBy } from '../dto/find-equipment-query.dto';
@@ -267,9 +272,11 @@ describe('EquipmentService', () => {
 
       await service.findAll({ page: 1, limit: 10 });
 
-      const whereArg = (prisma.equipment.findMany.mock.calls[0][0] as {
-        where: Record<string, unknown>;
-      }).where;
+      const whereArg = (
+        prisma.equipment.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
       expect(whereArg).toMatchObject({ status: EquipmentStatus.ACTIVE });
     });
 
@@ -290,9 +297,11 @@ describe('EquipmentService', () => {
 
       await service.findAll({ page: 1, limit: 10, search: 'betoneira' });
 
-      const whereArg = (prisma.equipment.findMany.mock.calls[0][0] as {
-        where: Record<string, unknown>;
-      }).where;
+      const whereArg = (
+        prisma.equipment.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
       expect(whereArg).toHaveProperty('OR');
       const orArray = whereArg.OR as Array<Record<string, unknown>>;
       expect(orArray.length).toBeGreaterThan(0);
@@ -304,9 +313,11 @@ describe('EquipmentService', () => {
 
       await service.findAll({ page: 1, limit: 10, search: '   ' });
 
-      const whereArg = (prisma.equipment.findMany.mock.calls[0][0] as {
-        where: Record<string, unknown>;
-      }).where;
+      const whereArg = (
+        prisma.equipment.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
       expect(whereArg).not.toHaveProperty('OR');
     });
 
@@ -316,9 +327,11 @@ describe('EquipmentService', () => {
 
       await service.findAll({ page: 1, limit: 10, categoryId: CATEGORY_ID });
 
-      const whereArg = (prisma.equipment.findMany.mock.calls[0][0] as {
-        where: Record<string, unknown>;
-      }).where;
+      const whereArg = (
+        prisma.equipment.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
       expect(whereArg).toMatchObject({ categoryId: CATEGORY_ID });
     });
 
@@ -328,9 +341,11 @@ describe('EquipmentService', () => {
 
       await service.findAll({ page: 1, limit: 10, location: 'Maputo' });
 
-      const whereArg = (prisma.equipment.findMany.mock.calls[0][0] as {
-        where: Record<string, unknown>;
-      }).where;
+      const whereArg = (
+        prisma.equipment.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
       expect(whereArg).toHaveProperty('location');
     });
 
@@ -340,9 +355,11 @@ describe('EquipmentService', () => {
 
       await service.findAll({ page: 1, limit: 10, deliveryAvailable: true });
 
-      const whereArg = (prisma.equipment.findMany.mock.calls[0][0] as {
-        where: Record<string, unknown>;
-      }).where;
+      const whereArg = (
+        prisma.equipment.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
       expect(whereArg).toMatchObject({ deliveryIncluded: true });
     });
 
@@ -356,9 +373,11 @@ describe('EquipmentService', () => {
         condition: EquipmentCondition.NEW,
       });
 
-      const whereArg = (prisma.equipment.findMany.mock.calls[0][0] as {
-        where: Record<string, unknown>;
-      }).where;
+      const whereArg = (
+        prisma.equipment.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
       expect(whereArg).toMatchObject({ condition: EquipmentCondition.NEW });
     });
 
@@ -366,11 +385,18 @@ describe('EquipmentService', () => {
       prisma.equipment.findMany.mockResolvedValue([]);
       prisma.equipment.count.mockResolvedValue(0);
 
-      await service.findAll({ page: 1, limit: 10, minPrice: 200, maxPrice: 800 });
+      await service.findAll({
+        page: 1,
+        limit: 10,
+        minPrice: 200,
+        maxPrice: 800,
+      });
 
-      const whereArg = (prisma.equipment.findMany.mock.calls[0][0] as {
-        where: Record<string, unknown>;
-      }).where;
+      const whereArg = (
+        prisma.equipment.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
       expect(whereArg).toHaveProperty('pricePerDay');
       const price = whereArg.pricePerDay as Record<string, number>;
       expect(price.gte).toBe(200);
@@ -397,11 +423,17 @@ describe('EquipmentService', () => {
       prisma.equipment.findMany.mockResolvedValue([]);
       prisma.equipment.count.mockResolvedValue(0);
 
-      await service.findAll({ page: 1, limit: 10, sortBy: EquipmentSortBy.LOWEST_PRICE });
+      await service.findAll({
+        page: 1,
+        limit: 10,
+        sortBy: EquipmentSortBy.LOWEST_PRICE,
+      });
 
-      const orderByArg = (prisma.equipment.findMany.mock.calls[0][0] as {
-        orderBy: unknown[];
-      }).orderBy;
+      const orderByArg = (
+        prisma.equipment.findMany.mock.calls[0][0] as {
+          orderBy: unknown[];
+        }
+      ).orderBy;
       expect(orderByArg[0]).toMatchObject({ pricePerDay: 'asc' });
     });
 
@@ -409,11 +441,17 @@ describe('EquipmentService', () => {
       prisma.equipment.findMany.mockResolvedValue([]);
       prisma.equipment.count.mockResolvedValue(0);
 
-      await service.findAll({ page: 1, limit: 10, sortBy: EquipmentSortBy.HIGHEST_PRICE });
+      await service.findAll({
+        page: 1,
+        limit: 10,
+        sortBy: EquipmentSortBy.HIGHEST_PRICE,
+      });
 
-      const orderByArg = (prisma.equipment.findMany.mock.calls[0][0] as {
-        orderBy: unknown[];
-      }).orderBy;
+      const orderByArg = (
+        prisma.equipment.findMany.mock.calls[0][0] as {
+          orderBy: unknown[];
+        }
+      ).orderBy;
       expect(orderByArg[0]).toMatchObject({ pricePerDay: 'desc' });
     });
 
@@ -423,9 +461,11 @@ describe('EquipmentService', () => {
 
       await service.findAll({ page: 1, limit: 10 });
 
-      const orderByArg = (prisma.equipment.findMany.mock.calls[0][0] as {
-        orderBy: unknown[];
-      }).orderBy;
+      const orderByArg = (
+        prisma.equipment.findMany.mock.calls[0][0] as {
+          orderBy: unknown[];
+        }
+      ).orderBy;
       expect(orderByArg[0]).toMatchObject({ createdAt: 'desc' });
     });
 
@@ -433,11 +473,17 @@ describe('EquipmentService', () => {
       prisma.equipment.findMany.mockResolvedValue([]);
       prisma.equipment.count.mockResolvedValue(0);
 
-      await service.findAll({ page: 1, limit: 10, sortBy: EquipmentSortBy.RELEVANT });
+      await service.findAll({
+        page: 1,
+        limit: 10,
+        sortBy: EquipmentSortBy.RELEVANT,
+      });
 
-      const orderByArg = (prisma.equipment.findMany.mock.calls[0][0] as {
-        orderBy: unknown[];
-      }).orderBy;
+      const orderByArg = (
+        prisma.equipment.findMany.mock.calls[0][0] as {
+          orderBy: unknown[];
+        }
+      ).orderBy;
       expect(orderByArg[0]).toMatchObject({ isPremium: 'desc' });
       expect(orderByArg[1]).toMatchObject({ totalBookings: 'desc' });
     });
@@ -469,9 +515,11 @@ describe('EquipmentService', () => {
 
       await service.findOne(EQUIPMENT_ID);
 
-      const whereArg = (prisma.equipment.findFirst.mock.calls[0][0] as {
-        where: Record<string, unknown>;
-      }).where;
+      const whereArg = (
+        prisma.equipment.findFirst.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
       expect(whereArg).toMatchObject({
         id: EQUIPMENT_ID,
         status: EquipmentStatus.ACTIVE,
@@ -493,31 +541,41 @@ describe('EquipmentService', () => {
     });
 
     it('OWNER vê apenas os seus equipamentos (filtra por ownerId)', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
       prisma.equipment.findMany.mockResolvedValue([makeEquipment()]);
 
       await service.findMyListings(OWNER_ID);
 
-      const whereArg = (prisma.equipment.findMany.mock.calls[0][0] as {
-        where: Record<string, unknown>;
-      }).where;
+      const whereArg = (
+        prisma.equipment.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
       expect(whereArg).toMatchObject({ ownerId: OWNER_ID });
     });
 
     it('ADMIN vê todos os equipamentos (sem filtro ownerId)', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.equipment.findMany.mockResolvedValue([makeEquipment()]);
 
       await service.findMyListings(ADMIN_ID);
 
-      const whereArg = (prisma.equipment.findMany.mock.calls[0][0] as {
-        where: Record<string, unknown>;
-      }).where;
+      const whereArg = (
+        prisma.equipment.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
       expect(whereArg).toEqual({});
     });
 
     it('devolve mensagem correcta', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
       prisma.equipment.findMany.mockResolvedValue([]);
 
       const result = await service.findMyListings(OWNER_ID);
@@ -531,7 +589,9 @@ describe('EquipmentService', () => {
 
   describe('approve()', () => {
     it('ADMIN aprova equipamento PENDING_REVIEW com sucesso', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.equipment.findUnique.mockResolvedValue({
         id: EQUIPMENT_ID,
         status: EquipmentStatus.PENDING_REVIEW,
@@ -545,7 +605,9 @@ describe('EquipmentService', () => {
     });
 
     it('define status ACTIVE e isAvailable=true na aprovação', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.equipment.findUnique.mockResolvedValue({
         id: EQUIPMENT_ID,
         status: EquipmentStatus.PENDING_REVIEW,
@@ -564,16 +626,22 @@ describe('EquipmentService', () => {
     });
 
     it('CLIENT recebe ForbiddenException — não pode aprovar', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(STRANGER_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(STRANGER_ID, UserRole.CLIENT),
+      );
 
       await expect(service.approve(STRANGER_ID, EQUIPMENT_ID)).rejects.toThrow(
-        new ForbiddenException('Não tens permissão para executar esta operação.'),
+        new ForbiddenException(
+          'Não tens permissão para executar esta operação.',
+        ),
       );
       expect(prisma.equipment.findUnique).not.toHaveBeenCalled();
     });
 
     it('OWNER recebe ForbiddenException', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
 
       await expect(service.approve(OWNER_ID, EQUIPMENT_ID)).rejects.toThrow(
         ForbiddenException,
@@ -589,7 +657,9 @@ describe('EquipmentService', () => {
     });
 
     it('lança NotFoundException se equipamento não existe', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.equipment.findUnique.mockResolvedValue(null);
 
       await expect(service.approve(ADMIN_ID, EQUIPMENT_ID)).rejects.toThrow(
@@ -598,7 +668,9 @@ describe('EquipmentService', () => {
     });
 
     it('lança BadRequestException se equipamento já está ACTIVE', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.equipment.findUnique.mockResolvedValue({
         id: EQUIPMENT_ID,
         status: EquipmentStatus.ACTIVE,
@@ -610,19 +682,25 @@ describe('EquipmentService', () => {
     });
 
     it('lança BadRequestException se equipamento está DELETED', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.equipment.findUnique.mockResolvedValue({
         id: EQUIPMENT_ID,
         status: EquipmentStatus.DELETED,
       });
 
       await expect(service.approve(ADMIN_ID, EQUIPMENT_ID)).rejects.toThrow(
-        new BadRequestException('Não é possível aprovar um equipamento removido.'),
+        new BadRequestException(
+          'Não é possível aprovar um equipamento removido.',
+        ),
       );
     });
 
     it('pode aprovar equipamento REJECTED (reactivação)', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.equipment.findUnique.mockResolvedValue({
         id: EQUIPMENT_ID,
         status: EquipmentStatus.REJECTED,
@@ -642,7 +720,9 @@ describe('EquipmentService', () => {
 
   describe('reject()', () => {
     it('ADMIN rejeita equipamento com sucesso', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.equipment.findUnique.mockResolvedValue({
         id: EQUIPMENT_ID,
         status: EquipmentStatus.PENDING_REVIEW,
@@ -656,7 +736,9 @@ describe('EquipmentService', () => {
     });
 
     it('inclui motivo na mensagem quando reason é fornecido', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.equipment.findUnique.mockResolvedValue({
         id: EQUIPMENT_ID,
         status: EquipmentStatus.PENDING_REVIEW,
@@ -665,12 +747,20 @@ describe('EquipmentService', () => {
         makeEquipment({ status: EquipmentStatus.REJECTED }),
       );
 
-      const result = await service.reject(ADMIN_ID, EQUIPMENT_ID, 'Fotos insuficientes.');
-      expect(result.message).toBe('Equipamento rejeitado. Motivo: Fotos insuficientes.');
+      const result = await service.reject(
+        ADMIN_ID,
+        EQUIPMENT_ID,
+        'Fotos insuficientes.',
+      );
+      expect(result.message).toBe(
+        'Equipamento rejeitado. Motivo: Fotos insuficientes.',
+      );
     });
 
     it('define status REJECTED e isAvailable=false na rejeição', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.equipment.findUnique.mockResolvedValue({
         id: EQUIPMENT_ID,
         status: EquipmentStatus.PENDING_REVIEW,
@@ -689,7 +779,9 @@ describe('EquipmentService', () => {
     });
 
     it('CLIENT recebe ForbiddenException', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(STRANGER_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(STRANGER_ID, UserRole.CLIENT),
+      );
 
       await expect(service.reject(STRANGER_ID, EQUIPMENT_ID)).rejects.toThrow(
         ForbiddenException,
@@ -697,7 +789,9 @@ describe('EquipmentService', () => {
     });
 
     it('lança NotFoundException se equipamento não existe', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.equipment.findUnique.mockResolvedValue(null);
 
       await expect(service.reject(ADMIN_ID, EQUIPMENT_ID)).rejects.toThrow(
@@ -706,7 +800,9 @@ describe('EquipmentService', () => {
     });
 
     it('lança BadRequestException se equipamento já está REJECTED', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.equipment.findUnique.mockResolvedValue({
         id: EQUIPMENT_ID,
         status: EquipmentStatus.REJECTED,
@@ -718,14 +814,18 @@ describe('EquipmentService', () => {
     });
 
     it('lança BadRequestException se equipamento está DELETED', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.equipment.findUnique.mockResolvedValue({
         id: EQUIPMENT_ID,
         status: EquipmentStatus.DELETED,
       });
 
       await expect(service.reject(ADMIN_ID, EQUIPMENT_ID)).rejects.toThrow(
-        new BadRequestException('Não é possível rejeitar um equipamento removido.'),
+        new BadRequestException(
+          'Não é possível rejeitar um equipamento removido.',
+        ),
       );
     });
   });
@@ -742,7 +842,9 @@ describe('EquipmentService', () => {
         status: EquipmentStatus.ACTIVE,
         isAvailable: true,
       });
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
       prisma.equipment.update.mockResolvedValue(
         makeEquipment({ isAvailable: false }),
       );
@@ -758,7 +860,9 @@ describe('EquipmentService', () => {
         status: EquipmentStatus.ACTIVE,
         isAvailable: false,
       });
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
       prisma.equipment.update.mockResolvedValue(
         makeEquipment({ isAvailable: true }),
       );
@@ -774,8 +878,12 @@ describe('EquipmentService', () => {
         status: EquipmentStatus.ACTIVE,
         isAvailable: true,
       });
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
-      prisma.equipment.update.mockResolvedValue(makeEquipment({ isAvailable: false }));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
+      prisma.equipment.update.mockResolvedValue(
+        makeEquipment({ isAvailable: false }),
+      );
 
       const result = await service.toggleAvailability(ADMIN_ID, EQUIPMENT_ID);
       expect(result.message).toBe('Equipamento marcado como indisponível.');
@@ -788,12 +896,16 @@ describe('EquipmentService', () => {
         status: EquipmentStatus.ACTIVE,
         isAvailable: true,
       });
-      prisma.user.findUnique.mockResolvedValue(makeUser(STRANGER_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(STRANGER_ID, UserRole.CLIENT),
+      );
 
       await expect(
         service.toggleAvailability(STRANGER_ID, EQUIPMENT_ID),
       ).rejects.toThrow(
-        new ForbiddenException('Não tens permissão para alterar este equipamento.'),
+        new ForbiddenException(
+          'Não tens permissão para alterar este equipamento.',
+        ),
       );
     });
 
@@ -826,7 +938,9 @@ describe('EquipmentService', () => {
         status: EquipmentStatus.PAUSED,
         isAvailable: false,
       });
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
 
       await expect(
         service.toggleAvailability(OWNER_ID, EQUIPMENT_ID),
@@ -844,8 +958,12 @@ describe('EquipmentService', () => {
         status: EquipmentStatus.ACTIVE,
         isAvailable: true,
       });
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
-      prisma.equipment.update.mockResolvedValue(makeEquipment({ isAvailable: false }));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
+      prisma.equipment.update.mockResolvedValue(
+        makeEquipment({ isAvailable: false }),
+      );
 
       await service.toggleAvailability(OWNER_ID, EQUIPMENT_ID);
 
@@ -869,7 +987,9 @@ describe('EquipmentService', () => {
         id: EQUIPMENT_ID,
         ownerId: OWNER_ID,
       });
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
       prisma.equipment.update.mockResolvedValue(makeEquipment());
 
       const result = await service.update(OWNER_ID, EQUIPMENT_ID, validDto);
@@ -881,7 +1001,9 @@ describe('EquipmentService', () => {
         id: EQUIPMENT_ID,
         ownerId: OWNER_ID,
       });
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.equipment.update.mockResolvedValue(makeEquipment());
 
       const result = await service.update(ADMIN_ID, EQUIPMENT_ID, validDto);
@@ -893,12 +1015,16 @@ describe('EquipmentService', () => {
         id: EQUIPMENT_ID,
         ownerId: OWNER_ID,
       });
-      prisma.user.findUnique.mockResolvedValue(makeUser(STRANGER_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(STRANGER_ID, UserRole.CLIENT),
+      );
 
       await expect(
         service.update(STRANGER_ID, EQUIPMENT_ID, validDto),
       ).rejects.toThrow(
-        new ForbiddenException('Não tens permissão para editar este equipamento.'),
+        new ForbiddenException(
+          'Não tens permissão para editar este equipamento.',
+        ),
       );
     });
 
@@ -927,7 +1053,9 @@ describe('EquipmentService', () => {
         id: EQUIPMENT_ID,
         ownerId: OWNER_ID,
       });
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
       prisma.category.findFirst.mockResolvedValue(null);
 
       await expect(
@@ -946,7 +1074,9 @@ describe('EquipmentService', () => {
         id: EQUIPMENT_ID,
         ownerId: OWNER_ID,
       });
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
       prisma.equipment.update.mockResolvedValue(makeEquipment());
 
       await service.update(OWNER_ID, EQUIPMENT_ID, { title: 'Novo título' });
@@ -959,7 +1089,9 @@ describe('EquipmentService', () => {
         id: EQUIPMENT_ID,
         ownerId: OWNER_ID,
       });
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
       prisma.equipment.update.mockResolvedValue(makeEquipment());
 
       await service.update(OWNER_ID, EQUIPMENT_ID, {
@@ -987,7 +1119,9 @@ describe('EquipmentService', () => {
         id: EQUIPMENT_ID,
         ownerId: OWNER_ID,
       });
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
       prisma.equipment.update.mockResolvedValue({});
 
       const result = await service.remove(OWNER_ID, EQUIPMENT_ID);
@@ -999,7 +1133,9 @@ describe('EquipmentService', () => {
         id: EQUIPMENT_ID,
         ownerId: OWNER_ID,
       });
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
       prisma.equipment.update.mockResolvedValue({});
 
       await service.remove(OWNER_ID, EQUIPMENT_ID);
@@ -1018,7 +1154,9 @@ describe('EquipmentService', () => {
         id: EQUIPMENT_ID,
         ownerId: OWNER_ID,
       });
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
       prisma.equipment.update.mockResolvedValue({});
 
       await service.remove(OWNER_ID, EQUIPMENT_ID);
@@ -1033,7 +1171,9 @@ describe('EquipmentService', () => {
         id: EQUIPMENT_ID,
         ownerId: OWNER_ID,
       });
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.equipment.update.mockResolvedValue({});
 
       const result = await service.remove(ADMIN_ID, EQUIPMENT_ID);
@@ -1045,10 +1185,14 @@ describe('EquipmentService', () => {
         id: EQUIPMENT_ID,
         ownerId: OWNER_ID,
       });
-      prisma.user.findUnique.mockResolvedValue(makeUser(STRANGER_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(STRANGER_ID, UserRole.CLIENT),
+      );
 
       await expect(service.remove(STRANGER_ID, EQUIPMENT_ID)).rejects.toThrow(
-        new ForbiddenException('Não tens permissão para remover este equipamento.'),
+        new ForbiddenException(
+          'Não tens permissão para remover este equipamento.',
+        ),
       );
     });
 
@@ -1079,7 +1223,9 @@ describe('EquipmentService', () => {
 
   describe('findPending()', () => {
     it('ADMIN obtém equipamentos PENDING_REVIEW', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.equipment.findMany.mockResolvedValue([
         makeEquipment({ status: EquipmentStatus.PENDING_REVIEW }),
       ]);
@@ -1092,19 +1238,27 @@ describe('EquipmentService', () => {
     });
 
     it('filtra apenas PENDING_REVIEW na query', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.equipment.findMany.mockResolvedValue([]);
 
       await service.findPending(ADMIN_ID);
 
-      const whereArg = (prisma.equipment.findMany.mock.calls[0][0] as {
-        where: Record<string, unknown>;
-      }).where;
-      expect(whereArg).toMatchObject({ status: EquipmentStatus.PENDING_REVIEW });
+      const whereArg = (
+        prisma.equipment.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
+      expect(whereArg).toMatchObject({
+        status: EquipmentStatus.PENDING_REVIEW,
+      });
     });
 
     it('CLIENT recebe ForbiddenException', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(STRANGER_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(STRANGER_ID, UserRole.CLIENT),
+      );
 
       await expect(service.findPending(STRANGER_ID)).rejects.toThrow(
         ForbiddenException,
@@ -1119,4 +1273,4 @@ describe('EquipmentService', () => {
       );
     });
   });
-}); 
+});
