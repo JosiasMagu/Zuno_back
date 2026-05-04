@@ -38,7 +38,8 @@ function toOptionalBoolean(value: unknown): unknown {
 export class FindEquipmentQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     example: 'gerador',
-    description: 'Termo de busca textual (título, descrição, localização ou categoria)',
+    description:
+      'Termo de busca textual (título, descrição, localização ou categoria)',
   })
   @IsOptional()
   @Transform(({ value }) => toOptionalTrimmedString(value))

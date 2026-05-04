@@ -16,15 +16,13 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { PaymentsService } from './payments.service';
 
-
-const CLIENT_ID  = 'client-uuid-001';
-const OWNER_ID   = 'owner-uuid-001';
-const ADMIN_ID   = 'admin-uuid-001';
-const THIRD_ID   = 'third-uuid-001';
+const CLIENT_ID = 'client-uuid-001';
+const OWNER_ID = 'owner-uuid-001';
+const ADMIN_ID = 'admin-uuid-001';
+const THIRD_ID = 'third-uuid-001';
 const BOOKING_ID = 'booking-uuid-001';
 const PAYMENT_ID = 'payment-uuid-001';
 const DISPUTE_ID = 'dispute-uuid-001';
-
 
 const makeUser = (id: string, role: UserRole) => ({
   id,
@@ -63,11 +61,17 @@ const makeBooking = (overrides: Record<string, unknown> = {}) => ({
   cancellationReason: null,
   createdAt: new Date(),
   updatedAt: new Date(),
-  equipment: { id: 'equip-uuid-001', title: 'Betoneira', location: 'Maputo', status: 'ACTIVE', isAvailable: true },
-  client:    { id: CLIENT_ID, name: 'Cliente', avatarUrl: null },
-  owner:     { id: OWNER_ID,  name: 'Proprietário', avatarUrl: null },
-  payment:   null,
-  dispute:   null,
+  equipment: {
+    id: 'equip-uuid-001',
+    title: 'Betoneira',
+    location: 'Maputo',
+    status: 'ACTIVE',
+    isAvailable: true,
+  },
+  client: { id: CLIENT_ID, name: 'Cliente', avatarUrl: null },
+  owner: { id: OWNER_ID, name: 'Proprietário', avatarUrl: null },
+  payment: null,
+  dispute: null,
   ...overrides,
 });
 
@@ -102,11 +106,10 @@ const makePayment = (overrides: Record<string, unknown> = {}) => ({
     ownerId: OWNER_ID,
   },
   client: { id: CLIENT_ID, name: 'Cliente', avatarUrl: null },
-  owner:  { id: OWNER_ID,  name: 'Proprietário', avatarUrl: null },
+  owner: { id: OWNER_ID, name: 'Proprietário', avatarUrl: null },
   dispute: null,
   ...overrides,
 });
-
 
 const makePrisma = () => ({
   user: {
@@ -125,7 +128,6 @@ const makePrisma = () => ({
   },
   $transaction: jest.fn(),
 });
-
 
 describe('PaymentsService', () => {
   let service: PaymentsService;
@@ -158,8 +160,7 @@ describe('PaymentsService', () => {
       const payment = makePayment();
 
       prisma.booking.findUnique.mockResolvedValue(booking);
-      prisma.payment.findUnique
-        .mockResolvedValueOnce(null) // receiptNumber único — tentativa 1
+      prisma.payment.findUnique.mockResolvedValueOnce(null); // receiptNumber único — tentativa 1
       prisma.payment.create.mockResolvedValue(payment);
 
       const result = await service.initiate(CLIENT_ID, BOOKING_ID, dto);
@@ -188,15 +189,17 @@ describe('PaymentsService', () => {
     it('lança NotFoundException se a reserva não existe', async () => {
       prisma.booking.findUnique.mockResolvedValue(null);
 
-      await expect(service.initiate(CLIENT_ID, BOOKING_ID, dto))
-        .rejects.toThrow(NotFoundException);
+      await expect(
+        service.initiate(CLIENT_ID, BOOKING_ID, dto),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('lança ForbiddenException se quem chama não é o cliente da reserva', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBooking());
 
-      await expect(service.initiate(OWNER_ID, BOOKING_ID, dto))
-        .rejects.toThrow(ForbiddenException);
+      await expect(service.initiate(OWNER_ID, BOOKING_ID, dto)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('lança BadRequestException se a reserva não está CONFIRMED', async () => {
@@ -204,17 +207,21 @@ describe('PaymentsService', () => {
         makeBooking({ status: BookingStatus.PENDING }),
       );
 
-      await expect(service.initiate(CLIENT_ID, BOOKING_ID, dto))
-        .rejects.toThrow(BadRequestException);
+      await expect(
+        service.initiate(CLIENT_ID, BOOKING_ID, dto),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('lança BadRequestException se a reserva tem disputa associada', async () => {
       prisma.booking.findUnique.mockResolvedValue(
-        makeBooking({ dispute: { id: DISPUTE_ID, status: DisputeStatus.OPEN } }),
+        makeBooking({
+          dispute: { id: DISPUTE_ID, status: DisputeStatus.OPEN },
+        }),
       );
 
-      await expect(service.initiate(CLIENT_ID, BOOKING_ID, dto))
-        .rejects.toThrow(BadRequestException);
+      await expect(
+        service.initiate(CLIENT_ID, BOOKING_ID, dto),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('lança BadRequestException se já existe pagamento para esta reserva', async () => {
@@ -223,16 +230,18 @@ describe('PaymentsService', () => {
         makeBooking({ payment: existingPayment }),
       );
 
-      await expect(service.initiate(CLIENT_ID, BOOKING_ID, dto))
-        .rejects.toThrow(BadRequestException);
+      await expect(
+        service.initiate(CLIENT_ID, BOOKING_ID, dto),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('tenta gerar receiptNumber único até 5 vezes antes de lançar erro', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBooking());
       prisma.payment.findUnique.mockResolvedValue(makePayment());
 
-      await expect(service.initiate(CLIENT_ID, BOOKING_ID, dto))
-        .rejects.toThrow(BadRequestException);
+      await expect(
+        service.initiate(CLIENT_ID, BOOKING_ID, dto),
+      ).rejects.toThrow(BadRequestException);
 
       expect(prisma.payment.findUnique).toHaveBeenCalledTimes(5);
     });
@@ -243,7 +252,7 @@ describe('PaymentsService', () => {
 
       prisma.payment.findUnique
         .mockResolvedValueOnce(makePayment()) // primeira tentativa: colide
-        .mockResolvedValueOnce(null);         // segunda tentativa: livre
+        .mockResolvedValueOnce(null); // segunda tentativa: livre
       prisma.payment.create.mockResolvedValue(payment);
 
       const result = await service.initiate(CLIENT_ID, BOOKING_ID, dto);
@@ -263,12 +272,15 @@ describe('PaymentsService', () => {
     it('lança NotFoundException se o utilizador não existe', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.findMyPayments(CLIENT_ID, query))
-        .rejects.toThrow(NotFoundException);
+      await expect(service.findMyPayments(CLIENT_ID, query)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('CLIENT vê apenas os seus próprios pagamentos (filtra por clientId ou ownerId)', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
       prisma.payment.findMany.mockResolvedValue([makePayment()]);
       prisma.payment.count.mockResolvedValue(1);
 
@@ -281,7 +293,9 @@ describe('PaymentsService', () => {
     });
 
     it('ADMIN vê todos os pagamentos (sem filtro OR)', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.payment.findMany.mockResolvedValue([makePayment()]);
       prisma.payment.count.mockResolvedValue(1);
 
@@ -292,11 +306,16 @@ describe('PaymentsService', () => {
     });
 
     it('devolve meta de paginação correcta', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
       prisma.payment.findMany.mockResolvedValue([makePayment()]);
       prisma.payment.count.mockResolvedValue(25);
 
-      const result = await service.findMyPayments(CLIENT_ID, { page: 2, limit: 10 });
+      const result = await service.findMyPayments(CLIENT_ID, {
+        page: 2,
+        limit: 10,
+      });
 
       expect(result.meta.page).toBe(2);
       expect(result.meta.total).toBe(25);
@@ -306,11 +325,17 @@ describe('PaymentsService', () => {
     });
 
     it('filtra por status quando fornecido na query', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
       prisma.payment.findMany.mockResolvedValue([]);
       prisma.payment.count.mockResolvedValue(0);
 
-      await service.findMyPayments(CLIENT_ID, { page: 1, limit: 10, status: PaymentStatus.HELD });
+      await service.findMyPayments(CLIENT_ID, {
+        page: 1,
+        limit: 10,
+        status: PaymentStatus.HELD,
+      });
 
       const whereArg = prisma.payment.findMany.mock.calls[0][0].where;
       expect(whereArg).toMatchObject({ status: PaymentStatus.HELD });
@@ -324,23 +349,29 @@ describe('PaymentsService', () => {
   describe('findOne()', () => {
     it('lança NotFoundException se o pagamento não existe', async () => {
       prisma.payment.findUnique.mockResolvedValue(null);
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
 
-      await expect(service.findOne(CLIENT_ID, PAYMENT_ID))
-        .rejects.toThrow(NotFoundException);
+      await expect(service.findOne(CLIENT_ID, PAYMENT_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('lança NotFoundException se o utilizador não existe', async () => {
       prisma.payment.findUnique.mockResolvedValue(makePayment());
       prisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.findOne(CLIENT_ID, PAYMENT_ID))
-        .rejects.toThrow(NotFoundException);
+      await expect(service.findOne(CLIENT_ID, PAYMENT_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('CLIENT pode ver o seu próprio pagamento', async () => {
       prisma.payment.findUnique.mockResolvedValue(makePayment());
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
 
       const result = await service.findOne(CLIENT_ID, PAYMENT_ID);
       expect(result.message).toBe('Pagamento obtido com sucesso.');
@@ -348,7 +379,9 @@ describe('PaymentsService', () => {
 
     it('OWNER pode ver o pagamento do seu equipamento', async () => {
       prisma.payment.findUnique.mockResolvedValue(makePayment());
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
 
       const result = await service.findOne(OWNER_ID, PAYMENT_ID);
       expect(result.message).toBe('Pagamento obtido com sucesso.');
@@ -356,7 +389,9 @@ describe('PaymentsService', () => {
 
     it('ADMIN pode ver qualquer pagamento', async () => {
       prisma.payment.findUnique.mockResolvedValue(makePayment());
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
 
       const result = await service.findOne(ADMIN_ID, PAYMENT_ID);
       expect(result.message).toBe('Pagamento obtido com sucesso.');
@@ -364,10 +399,13 @@ describe('PaymentsService', () => {
 
     it('terceiro sem relação com o pagamento recebe ForbiddenException', async () => {
       prisma.payment.findUnique.mockResolvedValue(makePayment());
-      prisma.user.findUnique.mockResolvedValue(makeUser(THIRD_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(THIRD_ID, UserRole.CLIENT),
+      );
 
-      await expect(service.findOne(THIRD_ID, PAYMENT_ID))
-        .rejects.toThrow(ForbiddenException);
+      await expect(service.findOne(THIRD_ID, PAYMENT_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
   });
 
@@ -377,9 +415,14 @@ describe('PaymentsService', () => {
 
   describe('markHeld()', () => {
     it('ADMIN marca pagamento PENDING como HELD com sucesso', async () => {
-      const heldPayment = makePayment({ status: PaymentStatus.HELD, heldAt: new Date() });
+      const heldPayment = makePayment({
+        status: PaymentStatus.HELD,
+        heldAt: new Date(),
+      });
 
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.payment.findUnique.mockResolvedValue(makePayment());
       prisma.payment.update.mockResolvedValue(heldPayment);
 
@@ -394,9 +437,14 @@ describe('PaymentsService', () => {
     });
 
     it('grava heldAt na actualização', async () => {
-      const heldPayment = makePayment({ status: PaymentStatus.HELD, heldAt: new Date() });
+      const heldPayment = makePayment({
+        status: PaymentStatus.HELD,
+        heldAt: new Date(),
+      });
 
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.payment.findUnique.mockResolvedValue(makePayment());
       prisma.payment.update.mockResolvedValue(heldPayment);
 
@@ -407,46 +455,61 @@ describe('PaymentsService', () => {
     });
 
     it('CLIENT não pode marcar como retido — recebe ForbiddenException', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
 
-      await expect(service.markHeld(CLIENT_ID, PAYMENT_ID))
-        .rejects.toThrow(ForbiddenException);
+      await expect(service.markHeld(CLIENT_ID, PAYMENT_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('OWNER não pode marcar como retido — recebe ForbiddenException', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
 
-      await expect(service.markHeld(OWNER_ID, PAYMENT_ID))
-        .rejects.toThrow(ForbiddenException);
+      await expect(service.markHeld(OWNER_ID, PAYMENT_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('utilizador inexistente recebe ForbiddenException', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.markHeld(CLIENT_ID, PAYMENT_ID))
-        .rejects.toThrow(ForbiddenException);
+      await expect(service.markHeld(CLIENT_ID, PAYMENT_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('lança NotFoundException se o pagamento não existe', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.payment.findUnique.mockResolvedValue(null);
 
-      await expect(service.markHeld(ADMIN_ID, PAYMENT_ID))
-        .rejects.toThrow(NotFoundException);
+      await expect(service.markHeld(ADMIN_ID, PAYMENT_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('lança BadRequestException se o pagamento já não está PENDING', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.payment.findUnique.mockResolvedValue(
         makePayment({ status: PaymentStatus.HELD }),
       );
 
-      await expect(service.markHeld(ADMIN_ID, PAYMENT_ID))
-        .rejects.toThrow(BadRequestException);
+      await expect(service.markHeld(ADMIN_ID, PAYMENT_ID)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('lança BadRequestException se a reserva está CANCELLED', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.payment.findUnique.mockResolvedValue(
         makePayment({
           booking: {
@@ -456,20 +519,24 @@ describe('PaymentsService', () => {
         }),
       );
 
-      await expect(service.markHeld(ADMIN_ID, PAYMENT_ID))
-        .rejects.toThrow(BadRequestException);
+      await expect(service.markHeld(ADMIN_ID, PAYMENT_ID)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('lança BadRequestException se há disputa associada', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.payment.findUnique.mockResolvedValue(
         makePayment({
           dispute: { id: DISPUTE_ID, status: DisputeStatus.OPEN },
         }),
       );
 
-      await expect(service.markHeld(ADMIN_ID, PAYMENT_ID))
-        .rejects.toThrow(BadRequestException);
+      await expect(service.markHeld(ADMIN_ID, PAYMENT_ID)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -492,12 +559,19 @@ describe('PaymentsService', () => {
       status: PaymentStatus.RELEASED,
       releasedAt: new Date(),
       depositReleasedAt: new Date(),
-      booking: { id: BOOKING_ID, startDate: new Date(), endDate: new Date(), status: BookingStatus.COMPLETED },
+      booking: {
+        id: BOOKING_ID,
+        startDate: new Date(),
+        endDate: new Date(),
+        status: BookingStatus.COMPLETED,
+      },
     });
 
     it('CLIENT libera o pagamento HELD com sucesso — usa $transaction', async () => {
       prisma.payment.findUnique.mockResolvedValue(heldPayment());
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
       // booking.update e payment.update são chamados para construir o array
       // que é passado ao $transaction (array-style Prisma transaction)
       prisma.booking.update.mockResolvedValue({});
@@ -512,7 +586,9 @@ describe('PaymentsService', () => {
 
     it('ADMIN pode liberar o pagamento HELD', async () => {
       prisma.payment.findUnique.mockResolvedValue(heldPayment());
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.booking.update.mockResolvedValue({});
       prisma.payment.update.mockResolvedValue(releasedPayment);
       prisma.$transaction.mockResolvedValue([{}, releasedPayment]);
@@ -524,7 +600,9 @@ describe('PaymentsService', () => {
 
     it('a transacção actualiza booking para COMPLETED e payment para RELEASED', async () => {
       prisma.payment.findUnique.mockResolvedValue(heldPayment());
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
       prisma.booking.update.mockResolvedValue({});
       prisma.payment.update.mockResolvedValue(releasedPayment);
       prisma.$transaction.mockResolvedValue([{}, releasedPayment]);
@@ -549,74 +627,105 @@ describe('PaymentsService', () => {
 
     it('OWNER NÃO pode liberar o seu próprio pagamento — ForbiddenException', async () => {
       prisma.payment.findUnique.mockResolvedValue(heldPayment());
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
 
-      await expect(service.release(OWNER_ID, PAYMENT_ID))
-        .rejects.toThrow(ForbiddenException);
+      await expect(service.release(OWNER_ID, PAYMENT_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
 
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('terceiro sem relação com o pagamento recebe ForbiddenException', async () => {
       prisma.payment.findUnique.mockResolvedValue(heldPayment());
-      prisma.user.findUnique.mockResolvedValue(makeUser(THIRD_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(THIRD_ID, UserRole.CLIENT),
+      );
 
-      await expect(service.release(THIRD_ID, PAYMENT_ID))
-        .rejects.toThrow(ForbiddenException);
+      await expect(service.release(THIRD_ID, PAYMENT_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('lança NotFoundException se o pagamento não existe', async () => {
       prisma.payment.findUnique.mockResolvedValue(null);
 
-      await expect(service.release(CLIENT_ID, PAYMENT_ID))
-        .rejects.toThrow(NotFoundException);
+      await expect(service.release(CLIENT_ID, PAYMENT_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('lança NotFoundException se o utilizador não existe', async () => {
       prisma.payment.findUnique.mockResolvedValue(heldPayment());
       prisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.release(CLIENT_ID, PAYMENT_ID))
-        .rejects.toThrow(NotFoundException);
+      await expect(service.release(CLIENT_ID, PAYMENT_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('lança BadRequestException se o pagamento não está HELD', async () => {
-      prisma.payment.findUnique.mockResolvedValue(makePayment({ status: PaymentStatus.PENDING }));
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.payment.findUnique.mockResolvedValue(
+        makePayment({ status: PaymentStatus.PENDING }),
+      );
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
 
-      await expect(service.release(CLIENT_ID, PAYMENT_ID))
-        .rejects.toThrow(BadRequestException);
+      await expect(service.release(CLIENT_ID, PAYMENT_ID)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('lança BadRequestException se o pagamento já foi RELEASED', async () => {
-      prisma.payment.findUnique.mockResolvedValue(makePayment({ status: PaymentStatus.RELEASED }));
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.payment.findUnique.mockResolvedValue(
+        makePayment({ status: PaymentStatus.RELEASED }),
+      );
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
 
-      await expect(service.release(CLIENT_ID, PAYMENT_ID))
-        .rejects.toThrow(BadRequestException);
+      await expect(service.release(CLIENT_ID, PAYMENT_ID)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('lança BadRequestException se a reserva não está CONFIRMED nem ACTIVE', async () => {
       prisma.payment.findUnique.mockResolvedValue(
         makePayment({
           status: PaymentStatus.HELD,
-          booking: { id: BOOKING_ID, status: BookingStatus.PENDING, ownerId: OWNER_ID },
+          booking: {
+            id: BOOKING_ID,
+            status: BookingStatus.PENDING,
+            ownerId: OWNER_ID,
+          },
         }),
       );
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
 
-      await expect(service.release(CLIENT_ID, PAYMENT_ID))
-        .rejects.toThrow(BadRequestException);
+      await expect(service.release(CLIENT_ID, PAYMENT_ID)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('aceita liberação quando reserva está ACTIVE', async () => {
       prisma.payment.findUnique.mockResolvedValue(
         makePayment({
           status: PaymentStatus.HELD,
-          booking: { id: BOOKING_ID, status: BookingStatus.ACTIVE, ownerId: OWNER_ID },
+          booking: {
+            id: BOOKING_ID,
+            status: BookingStatus.ACTIVE,
+            ownerId: OWNER_ID,
+          },
         }),
       );
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
       prisma.booking.update.mockResolvedValue({});
       prisma.payment.update.mockResolvedValue(releasedPayment);
       prisma.$transaction.mockResolvedValue([{}, releasedPayment]);
@@ -629,14 +738,21 @@ describe('PaymentsService', () => {
       prisma.payment.findUnique.mockResolvedValue(
         makePayment({
           status: PaymentStatus.HELD,
-          booking: { id: BOOKING_ID, status: BookingStatus.CONFIRMED, ownerId: OWNER_ID },
+          booking: {
+            id: BOOKING_ID,
+            status: BookingStatus.CONFIRMED,
+            ownerId: OWNER_ID,
+          },
           dispute: { id: DISPUTE_ID, status: DisputeStatus.OPEN },
         }),
       );
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
 
-      await expect(service.release(CLIENT_ID, PAYMENT_ID))
-        .rejects.toThrow(BadRequestException);
+      await expect(service.release(CLIENT_ID, PAYMENT_ID)).rejects.toThrow(
+        BadRequestException,
+      );
 
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
@@ -657,11 +773,18 @@ describe('PaymentsService', () => {
     const refundedPayment = makePayment({
       status: PaymentStatus.REFUNDED,
       refundedAt: new Date(),
-      booking: { id: BOOKING_ID, startDate: new Date(), endDate: new Date(), status: BookingStatus.CANCELLED },
+      booking: {
+        id: BOOKING_ID,
+        startDate: new Date(),
+        endDate: new Date(),
+        status: BookingStatus.CANCELLED,
+      },
     });
 
     it('ADMIN reembolsa pagamento HELD com sucesso', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.payment.findUnique.mockResolvedValue(heldPayment());
       prisma.booking.update.mockResolvedValue({});
       prisma.payment.update.mockResolvedValue(refundedPayment);
@@ -674,8 +797,16 @@ describe('PaymentsService', () => {
     });
 
     it('ADMIN reembolsa pagamento PENDING com sucesso', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
-      prisma.payment.findUnique.mockResolvedValue(makePayment({ status: PaymentStatus.PENDING, booking: { id: BOOKING_ID, status: BookingStatus.CONFIRMED }, dispute: null }));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
+      prisma.payment.findUnique.mockResolvedValue(
+        makePayment({
+          status: PaymentStatus.PENDING,
+          booking: { id: BOOKING_ID, status: BookingStatus.CONFIRMED },
+          dispute: null,
+        }),
+      );
       prisma.booking.update.mockResolvedValue({});
       prisma.payment.update.mockResolvedValue(refundedPayment);
       prisma.$transaction.mockResolvedValue([{}, refundedPayment]);
@@ -685,56 +816,82 @@ describe('PaymentsService', () => {
     });
 
     it('CLIENT não pode reembolsar — ForbiddenException', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
 
-      await expect(service.refund(CLIENT_ID, PAYMENT_ID))
-        .rejects.toThrow(ForbiddenException);
+      await expect(service.refund(CLIENT_ID, PAYMENT_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('OWNER não pode reembolsar — ForbiddenException', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
 
-      await expect(service.refund(OWNER_ID, PAYMENT_ID))
-        .rejects.toThrow(ForbiddenException);
+      await expect(service.refund(OWNER_ID, PAYMENT_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('utilizador inexistente recebe ForbiddenException', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.refund(CLIENT_ID, PAYMENT_ID))
-        .rejects.toThrow(ForbiddenException);
+      await expect(service.refund(CLIENT_ID, PAYMENT_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('lança NotFoundException se o pagamento não existe', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.payment.findUnique.mockResolvedValue(null);
 
-      await expect(service.refund(ADMIN_ID, PAYMENT_ID))
-        .rejects.toThrow(NotFoundException);
+      await expect(service.refund(ADMIN_ID, PAYMENT_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('lança BadRequestException se o pagamento já está RELEASED', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.payment.findUnique.mockResolvedValue(
-        makePayment({ status: PaymentStatus.RELEASED, booking: { id: BOOKING_ID, status: BookingStatus.COMPLETED }, dispute: null }),
+        makePayment({
+          status: PaymentStatus.RELEASED,
+          booking: { id: BOOKING_ID, status: BookingStatus.COMPLETED },
+          dispute: null,
+        }),
       );
 
-      await expect(service.refund(ADMIN_ID, PAYMENT_ID))
-        .rejects.toThrow(BadRequestException);
+      await expect(service.refund(ADMIN_ID, PAYMENT_ID)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('lança BadRequestException se o pagamento já está REFUNDED', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.payment.findUnique.mockResolvedValue(
-        makePayment({ status: PaymentStatus.REFUNDED, booking: { id: BOOKING_ID, status: BookingStatus.CANCELLED }, dispute: null }),
+        makePayment({
+          status: PaymentStatus.REFUNDED,
+          booking: { id: BOOKING_ID, status: BookingStatus.CANCELLED },
+          dispute: null,
+        }),
       );
 
-      await expect(service.refund(ADMIN_ID, PAYMENT_ID))
-        .rejects.toThrow(BadRequestException);
+      await expect(service.refund(ADMIN_ID, PAYMENT_ID)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('lança BadRequestException se há disputa não resolvida a favor do cliente', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.payment.findUnique.mockResolvedValue(
         makePayment({
           status: PaymentStatus.HELD,
@@ -743,12 +900,15 @@ describe('PaymentsService', () => {
         }),
       );
 
-      await expect(service.refund(ADMIN_ID, PAYMENT_ID))
-        .rejects.toThrow(BadRequestException);
+      await expect(service.refund(ADMIN_ID, PAYMENT_ID)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('permite reembolso quando a disputa foi RESOLVED_CLIENT', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.payment.findUnique.mockResolvedValue(
         makePayment({
           status: PaymentStatus.HELD,
@@ -766,7 +926,9 @@ describe('PaymentsService', () => {
 
     it('a transacção cancela a reserva e regista refundAmount = totalCharged', async () => {
       const payment = heldPayment();
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.payment.findUnique.mockResolvedValue(payment);
       prisma.booking.update.mockResolvedValue({});
       prisma.payment.update.mockResolvedValue(refundedPayment);

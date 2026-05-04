@@ -26,7 +26,7 @@ import { DatabaseModule } from './shared/db/database.module';
       {
         name: 'global',
         ttl: 60_000, // janela de 60 segundos
-        limit: 100,  // máximo 100 requests por IP por janela
+        limit: 100, // máximo 100 requests por IP por janela
       },
     ]),
     DatabaseModule,

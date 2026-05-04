@@ -29,12 +29,12 @@ type EquipmentListEntity = {
 type EquipmentDetailsEntity = EquipmentListEntity & {
   createdAt: Date;
   updatedAt: Date;
-  pricePerWeek?: unknown | null;
-  pricePerMonth?: unknown | null;
-  depositAmount?: unknown | null;
-  latitude?: unknown | null;
-  longitude?: unknown | null;
-  totalRating?: unknown | null;
+  pricePerWeek?: unknown;
+  pricePerMonth?: unknown;
+  depositAmount?: unknown;
+  latitude?: unknown;
+  longitude?: unknown;
+  totalRating?: unknown;
   totalReviews?: number;
   totalBookings?: number;
   owner: {
@@ -42,7 +42,7 @@ type EquipmentDetailsEntity = EquipmentListEntity & {
     name: string;
     avatarUrl: string | null;
     bio?: string | null;
-    totalRating?: unknown | null;
+    totalRating?: unknown;
     totalReviews?: number;
   };
 };
@@ -129,11 +129,11 @@ export class EquipmentPresenter {
   static toOwnerListingItem(
     equipment: EquipmentListEntity & {
       status: string;
-      pricePerWeek?: unknown | null;
-      pricePerMonth?: unknown | null;
-      depositAmount?: unknown | null;
+      pricePerWeek?: unknown;
+      pricePerMonth?: unknown;
+      depositAmount?: unknown;
       isPremium?: boolean;
-      totalRating?: unknown | null;
+      totalRating?: unknown;
       totalReviews?: number;
       totalBookings?: number;
     },

@@ -269,9 +269,7 @@ export class DisputesService {
       dispute.booking.ownerId === userId;
 
     if (!canAccess) {
-      throw new ForbiddenException(
-        'Não tens permissão para ver esta disputa.',
-      );
+      throw new ForbiddenException('Não tens permissão para ver esta disputa.');
     }
 
     return {

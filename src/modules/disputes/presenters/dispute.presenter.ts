@@ -26,7 +26,7 @@ type DisputeListEntity = {
     status: string;
     totalCharged: unknown;
     receiptNumber: string;
-    refundAmount?: unknown | null;
+    refundAmount?: unknown;
   };
   opener: {
     id: string;
@@ -80,7 +80,8 @@ export class DisputePresenter {
         avatarUrl: dispute.opener.avatarUrl,
       },
     };
-  }833915119
+  }
+  833915119;
 
   static toDetails(dispute: DisputeDetailsEntity) {
     return this.toListItem(dispute);
