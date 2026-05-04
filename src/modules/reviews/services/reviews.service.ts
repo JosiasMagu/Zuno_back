@@ -91,17 +91,12 @@ export class ReviewsService {
       );
     }
 
-    // 5. Determinar o targetId:
-    //    CLIENT avalia equipment (targetId = equipmentId)
-    //    OWNER avalia cliente (targetId = clientId)
     const targetId =
       dto.authorRole === ReviewAuthorRole.CLIENT
         ? booking.equipmentId
         : booking.clientId;
 
-    // 6. Criar a review e actualizar os ratings numa transacção atómica
     const review = await this.prisma.$transaction(async (tx) => {
-      // Criar a review
       const created = await tx.review.create({
         data: {
           bookingId: dto.bookingId,
@@ -114,14 +109,10 @@ export class ReviewsService {
         include: { author: { select: AUTHOR_SELECT } },
       });
 
-      // Recalcular rating do target
       if (dto.authorRole === ReviewAuthorRole.CLIENT) {
-        // Cliente avaliou o equipment — recalcular rating do equipment
         await this.recalculateEquipmentRating(tx, booking.equipmentId);
-        // Cliente avaliou também o owner indirectamente — recalcular rating do owner
         await this.recalculateUserRating(tx, booking.ownerId);
       } else {
-        // Owner avaliou o cliente — recalcular rating do cliente
         await this.recalculateUserRating(tx, booking.clientId);
       }
 
@@ -133,8 +124,6 @@ export class ReviewsService {
       data: ReviewPresenter.toItem(review),
     };
   }
-
-  // ─── Listar avaliações de um equipment ───────────────────────────────────
 
   async findByEquipment(equipmentId: string, query: FindReviewsQueryDto) {
     const equipment = await this.prisma.equipment.findUnique({
@@ -168,7 +157,7 @@ export class ReviewsService {
 
     return {
       message: 'Avaliações obtidas com sucesso.',
-      data: items.map(ReviewPresenter.toItem),
+      data: items.map((item) => ReviewPresenter.toItem(item)),
       meta: {
         page,
         limit,
@@ -179,8 +168,6 @@ export class ReviewsService {
       },
     };
   }
-
-  // ─── Listar avaliações de um utilizador (como target) ────────────────────
 
   async findByUser(targetUserId: string, query: FindReviewsQueryDto) {
     const user = await this.prisma.user.findUnique({
@@ -214,7 +201,7 @@ export class ReviewsService {
 
     return {
       message: 'Avaliações obtidas com sucesso.',
-      data: items.map(ReviewPresenter.toItem),
+      data: items.map((item) => ReviewPresenter.toItem(item)),
       meta: {
         page,
         limit,
@@ -225,8 +212,6 @@ export class ReviewsService {
       },
     };
   }
-
-  // ─── As minhas avaliações submetidas ─────────────────────────────────────
 
   async findMyReviews(userId: string, query: FindReviewsQueryDto) {
     const page = query.page ?? 1;
@@ -251,7 +236,7 @@ export class ReviewsService {
 
     return {
       message: 'As tuas avaliações obtidas com sucesso.',
-      data: items.map(ReviewPresenter.toItem),
+      data: items.map((item) => ReviewPresenter.toItem(item)),
       meta: {
         page,
         limit,
@@ -262,8 +247,6 @@ export class ReviewsService {
       },
     };
   }
-
-  // ─── Verificar se pode avaliar uma booking ────────────────────────────────
 
   async canReview(userId: string, bookingId: string) {
     const booking = await this.prisma.booking.findUnique({
@@ -286,7 +269,10 @@ export class ReviewsService {
     if (!isParticipant) {
       return {
         message: 'Verificação concluída.',
-        data: { canReview: false, reason: 'Não és participante desta reserva.' },
+        data: {
+          canReview: false,
+          reason: 'Não és participante desta reserva.',
+        },
       };
     }
 
@@ -325,8 +311,6 @@ export class ReviewsService {
       data: { canReview: true, role },
     };
   }
-
-  // ─── Helpers privados — recálculo de ratings ──────────────────────────────
 
   private async recalculateEquipmentRating(
     tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],

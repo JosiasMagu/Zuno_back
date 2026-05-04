@@ -42,13 +42,13 @@ export class ReviewsController {
   })
   @ApiBody({ type: CreateReviewDto })
   @ApiResponse({ status: 201, description: 'Avaliação submetida com sucesso.' })
-  @ApiResponse({ status: 400, description: 'Booking já avaliada ou status inválido.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Booking já avaliada ou status inválido.',
+  })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Booking não encontrada.' })
-  create(
-    @CurrentUser() user: { id: string },
-    @Body() dto: CreateReviewDto,
-  ) {
+  create(@CurrentUser() user: { id: string }, @Body() dto: CreateReviewDto) {
     return this.reviewsService.create(user.id, dto);
   }
 
@@ -78,7 +78,8 @@ export class ReviewsController {
   @Get('equipment/:equipmentId/reviews')
   @ApiOperation({
     summary: 'Listar avaliações de um equipamento',
-    description: 'Público. Mostra avaliações submetidas por CLIENTs sobre o equipment.',
+    description:
+      'Público. Mostra avaliações submetidas por CLIENTs sobre o equipment.',
   })
   @ApiParam({ name: 'equipmentId', description: 'ID do equipamento' })
   @ApiQuery({ name: 'page', required: false, example: 1 })

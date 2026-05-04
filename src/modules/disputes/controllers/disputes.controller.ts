@@ -45,10 +45,7 @@ export class DisputesController {
   @ApiResponse({ status: 400, description: 'Operação inválida.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Reserva não encontrada.' })
-  create(
-    @CurrentUser() user: { id: string },
-    @Body() dto: CreateDisputeDto,
-  ) {
+  create(@CurrentUser() user: { id: string }, @Body() dto: CreateDisputeDto) {
     return this.disputesService.create(user.id, dto);
   }
 
@@ -116,10 +113,7 @@ export class DisputesController {
   @ApiResponse({ status: 400, description: 'Operação inválida.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Disputa não encontrada.' })
-  resolveClient(
-    @CurrentUser() user: { id: string },
-    @Param('id') id: string,
-  ) {
+  resolveClient(@CurrentUser() user: { id: string }, @Param('id') id: string) {
     return this.disputesService.resolveClient(user.id, id);
   }
 
@@ -136,10 +130,7 @@ export class DisputesController {
   @ApiResponse({ status: 400, description: 'Operação inválida.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Disputa não encontrada.' })
-  resolveOwner(
-    @CurrentUser() user: { id: string },
-    @Param('id') id: string,
-  ) {
+  resolveOwner(@CurrentUser() user: { id: string }, @Param('id') id: string) {
     return this.disputesService.resolveOwner(user.id, id);
   }
 

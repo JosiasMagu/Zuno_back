@@ -46,16 +46,14 @@ export class EquipmentController {
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Criar equipamento',
-    description: 'Cria um novo equipamento. Fica em PENDING_REVIEW até o ADMIN aprovar.',
+    description:
+      'Cria um novo equipamento. Fica em PENDING_REVIEW até o ADMIN aprovar.',
   })
   @ApiBody({ type: CreateEquipmentDto })
   @ApiResponse({ status: 201, description: 'Equipamento criado com sucesso.' })
   @ApiResponse({ status: 400, description: 'Dados inválidos.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
-  create(
-    @CurrentUser() user: { id: string },
-    @Body() dto: CreateEquipmentDto,
-  ) {
+  create(@CurrentUser() user: { id: string }, @Body() dto: CreateEquipmentDto) {
     return this.equipmentService.create(user.id, dto);
   }
 
@@ -84,7 +82,10 @@ export class EquipmentController {
     enum: EquipmentSortBy,
     example: EquipmentSortBy.NEWEST,
   })
-  @ApiResponse({ status: 200, description: 'Equipamentos obtidos com sucesso.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Equipamentos obtidos com sucesso.',
+  })
   findAll(@Query() query: FindEquipmentQueryDto) {
     return this.equipmentService.findAll(query);
   }
@@ -97,9 +98,13 @@ export class EquipmentController {
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Listar os meus equipamentos',
-    description: 'OWNER vê os seus equipamentos em todos os estados. ADMIN vê todos.',
+    description:
+      'OWNER vê os seus equipamentos em todos os estados. ADMIN vê todos.',
   })
-  @ApiResponse({ status: 200, description: 'Equipamentos obtidos com sucesso.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Equipamentos obtidos com sucesso.',
+  })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   findMyListings(@CurrentUser() user: { id: string }) {
     return this.equipmentService.findMyListings(user.id);
@@ -113,9 +118,13 @@ export class EquipmentController {
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: '[ADMIN] Listar equipamentos pendentes de aprovação',
-    description: 'Devolve todos os equipamentos em PENDING_REVIEW, por ordem de criação (FIFO).',
+    description:
+      'Devolve todos os equipamentos em PENDING_REVIEW, por ordem de criação (FIFO).',
   })
-  @ApiResponse({ status: 200, description: 'Equipamentos pendentes obtidos com sucesso.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Equipamentos pendentes obtidos com sucesso.',
+  })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   findPending(@CurrentUser() user: { id: string }) {
     return this.equipmentService.findPending(user.id);
@@ -143,10 +152,14 @@ export class EquipmentController {
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: '[ADMIN] Aprovar equipamento',
-    description: 'Muda o status para ACTIVE e torna o equipamento visível no catálogo.',
+    description:
+      'Muda o status para ACTIVE e torna o equipamento visível no catálogo.',
   })
   @ApiParam({ name: 'id', description: 'ID do equipamento' })
-  @ApiResponse({ status: 200, description: 'Equipamento aprovado com sucesso.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Equipamento aprovado com sucesso.',
+  })
   @ApiResponse({ status: 400, description: 'Operação inválida.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Equipamento não encontrado.' })
@@ -191,7 +204,10 @@ export class EquipmentController {
       'Útil para o owner pausar temporariamente um equipamento.',
   })
   @ApiParam({ name: 'id', description: 'ID do equipamento' })
-  @ApiResponse({ status: 200, description: 'Disponibilidade alterada com sucesso.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Disponibilidade alterada com sucesso.',
+  })
   @ApiResponse({ status: 400, description: 'Operação inválida.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Equipamento não encontrado.' })
@@ -211,7 +227,10 @@ export class EquipmentController {
   @ApiOperation({ summary: 'Actualizar equipamento' })
   @ApiParam({ name: 'id', description: 'ID do equipamento' })
   @ApiBody({ type: UpdateEquipmentDto })
-  @ApiResponse({ status: 200, description: 'Equipamento atualizado com sucesso.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Equipamento atualizado com sucesso.',
+  })
   @ApiResponse({ status: 400, description: 'Dados inválidos.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Equipamento não encontrado.' })
@@ -231,13 +250,13 @@ export class EquipmentController {
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Remover equipamento (soft delete)' })
   @ApiParam({ name: 'id', description: 'ID do equipamento' })
-  @ApiResponse({ status: 200, description: 'Equipamento removido com sucesso.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Equipamento removido com sucesso.',
+  })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Equipamento não encontrado.' })
-  remove(
-    @CurrentUser() user: { id: string },
-    @Param('id') id: string,
-  ) {
+  remove(@CurrentUser() user: { id: string }, @Param('id') id: string) {
     return this.equipmentService.remove(user.id, id);
   }
 }

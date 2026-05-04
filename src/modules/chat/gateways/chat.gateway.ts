@@ -16,23 +16,41 @@ import { ConfigService } from '@nestjs/config';
 import { ChatService } from '../services/chat.service';
 import { ChatPresenter } from '../presenters/chat.presenter';
 
+// Tipo do payload JWT que esperamos receber no handshake
+interface JwtPayload {
+  sub: string;
+  phone?: string;
+  role?: string;
+  iat?: number;
+  exp?: number;
+}
+
+// Socket com data tipada — evita os 'any' em client.data.userId
+interface AuthenticatedSocket extends Socket {
+  data: {
+    userId?: string;
+  };
+}
+
 const userSockets = new Map<string, Set<string>>();
 
 @WebSocketGateway({
   cors: {
-    origin: (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000,http://localhost:8081')
+    origin: (
+      process.env.ALLOWED_ORIGINS ??
+      'http://localhost:3000,http://localhost:8081'
+    )
       .split(',')
-      .map((o) => o.trim())
-      .filter(Boolean),
+      .map((o: string) => o.trim())
+      .filter((o: string) => o.length > 0),
     credentials: true,
   },
   namespace: '/chat',
 })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
-  // Logger com contexto fixo — todas as linhas saem como [ChatGateway]
   private readonly logger = new Logger(ChatGateway.name);
 
   constructor(
@@ -43,9 +61,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   // ─── Ciclo de vida da conexão ─────────────────────────────────────────────
 
-  async handleConnection(client: Socket) {
+  async handleConnection(client: AuthenticatedSocket) {
     try {
-      const userId = await this.extractUserIdFromSocket(client);
+      const userId = this.extractUserIdFromSocket(client);
       client.data.userId = userId;
 
       if (!userSockets.has(userId)) {
@@ -54,12 +72,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       userSockets.get(userId)!.add(client.id);
 
       this.logger.log(`User ${userId} connected (socket: ${client.id})`);
+      await Promise.resolve();
     } catch (error) {
-      // Distinguimos dois cenários:
-      // 1. Token inválido/expirado/em falta — caso esperado, log em nível debug.
-      //    Não polui produção mas fica disponível em desenvolvimento.
-      // 2. Qualquer outro erro — bug interno, configuração errada, BD off.
-      //    Tem de ser logado em ERROR com stack trace, senão depuras às cegas.
       if (error instanceof UnauthorizedException) {
         this.logger.debug(
           `Connection rejected — ${error.message} (socket: ${client.id})`,
@@ -76,8 +90,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  handleDisconnect(client: Socket) {
-    const userId = client.data.userId as string | undefined;
+  handleDisconnect(client: AuthenticatedSocket) {
+    const userId = client.data.userId;
     if (userId) {
       userSockets.get(userId)?.delete(client.id);
       if (userSockets.get(userId)?.size === 0) {
@@ -91,10 +105,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('join_conversation')
   async handleJoinConversation(
-    @ConnectedSocket() client: Socket,
+    @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { conversationId: string },
   ) {
-    const userId = client.data.userId as string;
+    const userId = client.data.userId;
+
+    if (!userId) {
+      throw new WsException('Não autenticado.');
+    }
 
     if (!data?.conversationId) {
       throw new WsException('conversationId é obrigatório.');
@@ -106,7 +124,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         limit: 1,
       });
     } catch (error) {
-      // Log a tentativa de acesso indevido — útil para detectar abuso.
       this.logger.warn(
         `User ${userId} denied access to conversation ${data.conversationId}: ${
           error instanceof Error ? error.message : 'unknown error'
@@ -121,7 +138,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('leave_conversation')
   async handleLeaveConversation(
-    @ConnectedSocket() client: Socket,
+    @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { conversationId: string },
   ) {
     await client.leave(data.conversationId);
@@ -132,10 +149,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('send_message')
   async handleSendMessage(
-    @ConnectedSocket() client: Socket,
+    @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { conversationId: string; content: string },
   ) {
-    const userId = client.data.userId as string;
+    const userId = client.data.userId;
+
+    if (!userId) {
+      throw new WsException('Não autenticado.');
+    }
 
     if (!data?.conversationId || !data?.content) {
       throw new WsException('conversationId e content são obrigatórios.');
@@ -158,8 +179,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       return { event: 'message_sent', data: formatted };
     } catch (error) {
-      // Erros de negócio (ex: utilizador não pertence à conversa) são esperados —
-      // log em warn. Erros desconhecidos vão em error com stack trace completo.
       const message =
         error instanceof Error ? error.message : 'Erro ao enviar mensagem.';
 
@@ -182,25 +201,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('typing')
   handleTyping(
-    @ConnectedSocket() client: Socket,
+    @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { conversationId: string },
   ) {
-    const userId = client.data.userId as string;
-
-    if (!data?.conversationId) return;
-
+    const userId = client.data.userId;
+    if (!userId || !data?.conversationId) return;
     client.to(data.conversationId).emit('user_typing', { userId });
   }
 
   @SubscribeMessage('stop_typing')
   handleStopTyping(
-    @ConnectedSocket() client: Socket,
+    @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { conversationId: string },
   ) {
-    const userId = client.data.userId as string;
-
-    if (!data?.conversationId) return;
-
+    const userId = client.data.userId;
+    if (!userId || !data?.conversationId) return;
     client.to(data.conversationId).emit('user_stop_typing', { userId });
   }
 
@@ -219,10 +234,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
-  private async extractUserIdFromSocket(client: Socket): Promise<string> {
-    const authHeader =
-      client.handshake.auth?.token ||
-      client.handshake.headers?.authorization;
+  private extractUserIdFromSocket(client: Socket): string {
+    const auth = client.handshake.auth as { token?: unknown } | undefined;
+    const headers = client.handshake.headers as
+      | { authorization?: unknown }
+      | undefined;
+
+    const tokenFromAuth =
+      typeof auth?.token === 'string' ? auth.token : undefined;
+    const tokenFromHeader =
+      typeof headers?.authorization === 'string'
+        ? headers.authorization
+        : undefined;
+
+    const authHeader = tokenFromAuth ?? tokenFromHeader;
 
     if (!authHeader) {
       throw new UnauthorizedException('Token não fornecido.');
@@ -231,7 +256,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const token = authHeader.replace('Bearer ', '').trim();
 
     try {
-      const payload = this.jwtService.verify(token, {
+      const payload = this.jwtService.verify<JwtPayload>(token, {
         secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
       });
 
@@ -239,7 +264,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         throw new UnauthorizedException('Token inválido — sem subject.');
       }
 
-      return payload.sub as string;
+      return payload.sub;
     } catch (error) {
       if (error instanceof UnauthorizedException) {
         throw error;

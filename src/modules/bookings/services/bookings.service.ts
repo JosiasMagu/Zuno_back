@@ -4,7 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BookingStatus, EquipmentStatus, Prisma, UserRole } from '@prisma/client';
+import {
+  BookingStatus,
+  EquipmentStatus,
+  Prisma,
+  UserRole,
+} from '@prisma/client';
 
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { CreateBookingDto } from '../dto/create-booking.dto';
@@ -72,7 +77,10 @@ export class BookingsService {
       );
     }
 
-    const totalDays = this.calculateTotalDays(normalizedStartDate, normalizedEndDate);
+    const totalDays = this.calculateTotalDays(
+      normalizedStartDate,
+      normalizedEndDate,
+    );
 
     if (totalDays < 1) {
       throw new BadRequestException('A reserva deve ter pelo menos 1 dia.');
@@ -98,7 +106,11 @@ export class BookingsService {
     const conflictWhere: Prisma.BookingWhereInput = {
       equipmentId: equipment.id,
       status: {
-        in: [BookingStatus.PENDING, BookingStatus.CONFIRMED, BookingStatus.ACTIVE],
+        in: [
+          BookingStatus.PENDING,
+          BookingStatus.CONFIRMED,
+          BookingStatus.ACTIVE,
+        ],
       },
       AND: [
         { startDate: { lt: normalizedEndDate } },
@@ -194,7 +206,10 @@ export class BookingsService {
     const where: Prisma.BookingWhereInput =
       user.role === UserRole.ADMIN
         ? { ...(query.status ? { status: query.status } : {}) }
-        : { clientId: userId, ...(query.status ? { status: query.status } : {}) };
+        : {
+            clientId: userId,
+            ...(query.status ? { status: query.status } : {}),
+          };
 
     const [items, total] = await Promise.all([
       this.prisma.booking.findMany({
@@ -203,7 +218,9 @@ export class BookingsService {
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          equipment: { select: { id: true, title: true, location: true, status: true } },
+          equipment: {
+            select: { id: true, title: true, location: true, status: true },
+          },
           owner: { select: { id: true, name: true, avatarUrl: true } },
         },
       }),
@@ -241,7 +258,10 @@ export class BookingsService {
     const where: Prisma.BookingWhereInput =
       user.role === UserRole.ADMIN
         ? { ...(query.status ? { status: query.status } : {}) }
-        : { ownerId: userId, ...(query.status ? { status: query.status } : {}) };
+        : {
+            ownerId: userId,
+            ...(query.status ? { status: query.status } : {}),
+          };
 
     const [items, total] = await Promise.all([
       this.prisma.booking.findMany({
@@ -250,7 +270,9 @@ export class BookingsService {
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          equipment: { select: { id: true, title: true, location: true, status: true } },
+          equipment: {
+            select: { id: true, title: true, location: true, status: true },
+          },
           client: { select: { id: true, name: true, avatarUrl: true } },
         },
       }),
@@ -340,7 +362,8 @@ export class BookingsService {
       throw new NotFoundException('Utilizador não encontrado.');
     }
 
-    const canConfirm = user.role === UserRole.ADMIN || booking.ownerId === userId;
+    const canConfirm =
+      user.role === UserRole.ADMIN || booking.ownerId === userId;
 
     if (!canConfirm) {
       throw new ForbiddenException(
@@ -390,7 +413,9 @@ export class BookingsService {
       include: {
         client: { select: { id: true, name: true, avatarUrl: true } },
         owner: { select: { id: true, name: true, avatarUrl: true } },
-        equipment: { select: { id: true, title: true, location: true, status: true } },
+        equipment: {
+          select: { id: true, title: true, location: true, status: true },
+        },
       },
     });
 
@@ -404,7 +429,9 @@ export class BookingsService {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
       include: {
-        equipment: { select: { id: true, title: true, location: true, status: true } },
+        equipment: {
+          select: { id: true, title: true, location: true, status: true },
+        },
         client: { select: { id: true, name: true, avatarUrl: true } },
         owner: { select: { id: true, name: true, avatarUrl: true } },
       },
@@ -455,7 +482,9 @@ export class BookingsService {
       include: {
         client: { select: { id: true, name: true, avatarUrl: true } },
         owner: { select: { id: true, name: true, avatarUrl: true } },
-        equipment: { select: { id: true, title: true, location: true, status: true } },
+        equipment: {
+          select: { id: true, title: true, location: true, status: true },
+        },
       },
     });
 

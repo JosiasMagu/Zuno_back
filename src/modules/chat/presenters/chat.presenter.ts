@@ -25,8 +25,7 @@ type MessageEntity = {
 export class ChatPresenter {
   static toConversation(conv: ConversationEntity, currentUserId: string) {
     // Do ponto de vista do utilizador actual, o "outro" é o interlocutor
-    const other =
-      conv.clientId === currentUserId ? conv.owner : conv.client;
+    const other = conv.clientId === currentUserId ? conv.owner : conv.client;
 
     return {
       id: conv.id,
