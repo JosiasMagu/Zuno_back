@@ -49,7 +49,7 @@ export class EquipmentPhotosController {
 
   @Post('upload')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
   @UseInterceptors(
     FileInterceptor('photo', {
       // Guarda em memória (buffer) — o Cloudinary recebe o stream
@@ -98,7 +98,7 @@ export class EquipmentPhotosController {
 
   @Post('upload-multiple')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
   @UseInterceptors(
     FilesInterceptor('photos', 5, {
       storage: undefined,
@@ -145,7 +145,7 @@ export class EquipmentPhotosController {
 
   @Patch(':photoId/set-primary')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Definir foto como principal',
@@ -175,7 +175,7 @@ export class EquipmentPhotosController {
 
   @Delete(':photoId')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Apagar foto',

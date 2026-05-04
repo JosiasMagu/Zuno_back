@@ -37,7 +37,7 @@ export class DisputesController {
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles(UserRole.CLIENT, UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Criar disputa' })
   @ApiBody({ type: CreateDisputeDto })
@@ -51,7 +51,7 @@ export class DisputesController {
 
   @Get('me')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.CLIENT, UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Listar disputas do utilizador autenticado' })
   @ApiQuery({ name: 'page', required: false, example: 1 })
@@ -67,7 +67,7 @@ export class DisputesController {
 
   @Get(':id')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.CLIENT, UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Obter disputa por ID' })
   @ApiParam({ name: 'id', description: 'ID da disputa' })
@@ -80,7 +80,7 @@ export class DisputesController {
 
   @Patch(':id/respond')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Responder disputa como owner' })
   @ApiParam({ name: 'id', description: 'ID da disputa' })
