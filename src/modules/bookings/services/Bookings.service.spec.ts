@@ -68,7 +68,7 @@ const makeUser = (id: string, role: UserRole) => ({
   name:
     role === UserRole.ADMIN
       ? 'Admin'
-      : role === UserRole.OWNER
+      : role === UserRole.PROVIDER
         ? 'Proprietário'
         : 'Cliente',
   phone: `+258${id.slice(0, 9)}`,
@@ -573,7 +573,7 @@ describe('BookingsService', () => {
 
     it('OWNER vê apenas as suas reservas (filtra por ownerId)', async () => {
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.booking.findMany.mockResolvedValue([makeBooking()]);
       prisma.booking.count.mockResolvedValue(1);
@@ -607,7 +607,7 @@ describe('BookingsService', () => {
 
     it('devolve mensagem correcta', async () => {
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.booking.findMany.mockResolvedValue([]);
       prisma.booking.count.mockResolvedValue(0);
@@ -694,7 +694,7 @@ describe('BookingsService', () => {
         }),
       );
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
 
       const result = await service.findOne(OWNER_ID, BOOKING_ID);
@@ -811,7 +811,7 @@ describe('BookingsService', () => {
         makeBookingWithEquipment(BookingStatus.CONFIRMED),
       );
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
 
       await expect(service.confirm(OWNER_ID, BOOKING_ID)).rejects.toThrow(
@@ -833,7 +833,7 @@ describe('BookingsService', () => {
         }),
       );
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
 
       await expect(service.confirm(OWNER_ID, BOOKING_ID)).rejects.toThrow(
@@ -855,7 +855,7 @@ describe('BookingsService', () => {
         }),
       );
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
 
       await expect(service.confirm(OWNER_ID, BOOKING_ID)).rejects.toThrow(
@@ -868,7 +868,7 @@ describe('BookingsService', () => {
     it('lança BadRequestException se já existe reserva confirmada no mesmo período', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBookingWithEquipment());
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.booking.findFirst.mockResolvedValue({ id: 'existing-confirmed' });
 
@@ -882,7 +882,7 @@ describe('BookingsService', () => {
     it('OWNER confirma com sucesso', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBookingWithEquipment());
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.booking.findFirst.mockResolvedValue(null);
       prisma.booking.update.mockResolvedValue(confirmedBooking);
@@ -912,7 +912,7 @@ describe('BookingsService', () => {
     it('grava confirmedAt na actualização', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBookingWithEquipment());
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.booking.findFirst.mockResolvedValue(null);
       prisma.booking.update.mockResolvedValue(confirmedBooking);
@@ -1021,7 +1021,7 @@ describe('BookingsService', () => {
         makeBooking({ status: BookingStatus.CONFIRMED }),
       );
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.booking.update.mockResolvedValue(cancelledBooking);
 

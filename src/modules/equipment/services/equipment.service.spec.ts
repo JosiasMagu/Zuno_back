@@ -542,7 +542,7 @@ describe('EquipmentService', () => {
 
     it('OWNER vê apenas os seus equipamentos (filtra por ownerId)', async () => {
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.equipment.findMany.mockResolvedValue([makeEquipment()]);
 
@@ -574,7 +574,7 @@ describe('EquipmentService', () => {
 
     it('devolve mensagem correcta', async () => {
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.equipment.findMany.mockResolvedValue([]);
 
@@ -640,7 +640,7 @@ describe('EquipmentService', () => {
 
     it('OWNER recebe ForbiddenException', async () => {
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
 
       await expect(service.approve(OWNER_ID, EQUIPMENT_ID)).rejects.toThrow(
@@ -843,7 +843,7 @@ describe('EquipmentService', () => {
         isAvailable: true,
       });
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.equipment.update.mockResolvedValue(
         makeEquipment({ isAvailable: false }),
@@ -861,7 +861,7 @@ describe('EquipmentService', () => {
         isAvailable: false,
       });
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.equipment.update.mockResolvedValue(
         makeEquipment({ isAvailable: true }),
@@ -939,7 +939,7 @@ describe('EquipmentService', () => {
         isAvailable: false,
       });
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
 
       await expect(
@@ -959,7 +959,7 @@ describe('EquipmentService', () => {
         isAvailable: true,
       });
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.equipment.update.mockResolvedValue(
         makeEquipment({ isAvailable: false }),
@@ -988,7 +988,7 @@ describe('EquipmentService', () => {
         ownerId: OWNER_ID,
       });
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.equipment.update.mockResolvedValue(makeEquipment());
 
@@ -1054,7 +1054,7 @@ describe('EquipmentService', () => {
         ownerId: OWNER_ID,
       });
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.category.findFirst.mockResolvedValue(null);
 
@@ -1075,7 +1075,7 @@ describe('EquipmentService', () => {
         ownerId: OWNER_ID,
       });
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.equipment.update.mockResolvedValue(makeEquipment());
 
@@ -1090,7 +1090,7 @@ describe('EquipmentService', () => {
         ownerId: OWNER_ID,
       });
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.equipment.update.mockResolvedValue(makeEquipment());
 
@@ -1120,7 +1120,7 @@ describe('EquipmentService', () => {
         ownerId: OWNER_ID,
       });
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.equipment.update.mockResolvedValue({});
 
@@ -1134,7 +1134,7 @@ describe('EquipmentService', () => {
         ownerId: OWNER_ID,
       });
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.equipment.update.mockResolvedValue({});
 
@@ -1155,7 +1155,7 @@ describe('EquipmentService', () => {
         ownerId: OWNER_ID,
       });
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.equipment.update.mockResolvedValue({});
 
