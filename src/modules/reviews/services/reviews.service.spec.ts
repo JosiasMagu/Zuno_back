@@ -103,7 +103,7 @@ describe('ReviewsService', () => {
 
     const ownerDto = {
       bookingId: BOOKING_ID,
-      authorRole: ReviewAuthorRole.OWNER,
+      authorRole: ReviewAuthorRole.PROVIDER,
       rating: 4,
       comment: 'Cliente pontual.',
     };
@@ -143,7 +143,7 @@ describe('ReviewsService', () => {
         makeReview({
           authorId: OWNER_ID,
           targetId: CLIENT_ID,
-          authorRole: ReviewAuthorRole.OWNER,
+          authorRole: ReviewAuthorRole.PROVIDER,
           rating: 4,
         }),
       );
@@ -315,7 +315,7 @@ describe('ReviewsService', () => {
             makeReview({
               authorId: OWNER_ID,
               targetId: CLIENT_ID,
-              authorRole: ReviewAuthorRole.OWNER,
+              authorRole: ReviewAuthorRole.PROVIDER,
             }),
           );
           prisma.review.aggregate = aggregateMock;
@@ -656,7 +656,7 @@ describe('ReviewsService', () => {
       const result = await service.canReview(OWNER_ID, BOOKING_ID);
 
       expect(result.data.canReview).toBe(true);
-      expect(result.data.role).toBe(ReviewAuthorRole.OWNER);
+      expect(result.data.role).toBe(ReviewAuthorRole.PROVIDER);
     });
 
     it('booking CANCELLED também permite avaliar', async () => {

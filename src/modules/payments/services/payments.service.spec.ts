@@ -380,7 +380,7 @@ describe('PaymentsService', () => {
     it('OWNER pode ver o pagamento do seu equipamento', async () => {
       prisma.payment.findUnique.mockResolvedValue(makePayment());
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
 
       const result = await service.findOne(OWNER_ID, PAYMENT_ID);
@@ -466,7 +466,7 @@ describe('PaymentsService', () => {
 
     it('OWNER não pode marcar como retido — recebe ForbiddenException', async () => {
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
 
       await expect(service.markHeld(OWNER_ID, PAYMENT_ID)).rejects.toThrow(
@@ -628,7 +628,7 @@ describe('PaymentsService', () => {
     it('OWNER NÃO pode liberar o seu próprio pagamento — ForbiddenException', async () => {
       prisma.payment.findUnique.mockResolvedValue(heldPayment());
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
 
       await expect(service.release(OWNER_ID, PAYMENT_ID)).rejects.toThrow(
@@ -827,7 +827,7 @@ describe('PaymentsService', () => {
 
     it('OWNER não pode reembolsar — ForbiddenException', async () => {
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
 
       await expect(service.refund(OWNER_ID, PAYMENT_ID)).rejects.toThrow(

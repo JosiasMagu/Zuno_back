@@ -475,7 +475,7 @@ describe('DisputesService', () => {
     it('OWNER da booking pode ver a disputa', async () => {
       prisma.dispute.findUnique.mockResolvedValue(makeDispute());
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
 
       const result = await service.findOne(OWNER_ID, DISPUTE_ID);
@@ -559,7 +559,7 @@ describe('DisputesService', () => {
         makeDispute({ status: DisputeStatus.UNDER_REVIEW }),
       );
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
 
       await expect(service.respond(OWNER_ID, DISPUTE_ID, dto)).rejects.toThrow(
@@ -574,7 +574,7 @@ describe('DisputesService', () => {
         makeDispute({ status: DisputeStatus.RESOLVED_CLIENT }),
       );
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
 
       await expect(service.respond(OWNER_ID, DISPUTE_ID, dto)).rejects.toThrow(
@@ -585,7 +585,7 @@ describe('DisputesService', () => {
     it('OWNER responde com sucesso — status muda para UNDER_REVIEW', async () => {
       prisma.dispute.findUnique.mockResolvedValue(disputeWithOwner);
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.dispute.update.mockResolvedValue(
         makeDispute({
@@ -627,7 +627,7 @@ describe('DisputesService', () => {
     it('faz trim na ownerResponse', async () => {
       prisma.dispute.findUnique.mockResolvedValue(disputeWithOwner);
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
       prisma.dispute.update.mockResolvedValue(
         makeDispute({ status: DisputeStatus.UNDER_REVIEW }),
@@ -790,7 +790,7 @@ describe('DisputesService', () => {
 
     it('lança ForbiddenException se não é ADMIN', async () => {
       prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.OWNER),
+        makeUser(OWNER_ID, UserRole.PROVIDER),
       );
 
       await expect(service.resolveOwner(OWNER_ID, DISPUTE_ID)).rejects.toThrow(
