@@ -1,6 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { BookingStatus, EquipmentStatus, Prisma, UserRole } from '@prisma/client';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  BookingStatus,
+  EquipmentStatus,
+  Prisma,
+  UserRole,
+} from '@prisma/client';
 
 import { BookingsService } from './bookings.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
@@ -56,7 +65,12 @@ const makeEquipment = (overrides: Partial<Record<string, unknown>> = {}) => ({
 
 const makeUser = (id: string, role: UserRole) => ({
   id,
-  name: role === UserRole.ADMIN ? 'Admin' : role === UserRole.OWNER ? 'Proprietário' : 'Cliente',
+  name:
+    role === UserRole.ADMIN
+      ? 'Admin'
+      : role === UserRole.OWNER
+        ? 'Proprietário'
+        : 'Cliente',
   phone: `+258${id.slice(0, 9)}`,
   email: null,
   passwordHash: 'hash',
@@ -233,7 +247,9 @@ describe('BookingsService', () => {
       );
 
       await expect(service.create(CLIENT_ID, validDto)).rejects.toThrow(
-        new BadRequestException('Este equipamento não está disponível para reserva.'),
+        new BadRequestException(
+          'Este equipamento não está disponível para reserva.',
+        ),
       );
     });
 
@@ -253,7 +269,9 @@ describe('BookingsService', () => {
       );
 
       await expect(service.create(CLIENT_ID, validDto)).rejects.toThrow(
-        new BadRequestException('Não podes reservar o teu próprio equipamento.'),
+        new BadRequestException(
+          'Não podes reservar o teu próprio equipamento.',
+        ),
       );
     });
 
@@ -278,9 +296,15 @@ describe('BookingsService', () => {
       const sameDay = future(3).toISOString().split('T')[0];
 
       await expect(
-        service.create(CLIENT_ID, { ...validDto, startDate: sameDay, endDate: sameDay }),
+        service.create(CLIENT_ID, {
+          ...validDto,
+          startDate: sameDay,
+          endDate: sameDay,
+        }),
       ).rejects.toThrow(
-        new BadRequestException('A data final deve ser maior que a data inicial.'),
+        new BadRequestException(
+          'A data final deve ser maior que a data inicial.',
+        ),
       );
     });
 
@@ -294,7 +318,9 @@ describe('BookingsService', () => {
           endDate: future(3).toISOString().split('T')[0],
         }),
       ).rejects.toThrow(
-        new BadRequestException('A data final deve ser maior que a data inicial.'),
+        new BadRequestException(
+          'A data final deve ser maior que a data inicial.',
+        ),
       );
     });
 
@@ -306,7 +332,9 @@ describe('BookingsService', () => {
         async (callback: (tx: TxClient) => Promise<unknown>) => {
           const tx: TxClient = {
             booking: {
-              findFirst: jest.fn().mockResolvedValue({ id: 'conflicting-booking' }),
+              findFirst: jest
+                .fn()
+                .mockResolvedValue({ id: 'conflicting-booking' }),
               create: jest.fn(),
             },
           };
@@ -410,7 +438,9 @@ describe('BookingsService', () => {
       const unexpected = new Error('Falha inesperada de rede');
       prisma.$transaction.mockRejectedValue(unexpected);
 
-      await expect(service.create(CLIENT_ID, validDto)).rejects.toThrow(unexpected);
+      await expect(service.create(CLIENT_ID, validDto)).rejects.toThrow(
+        unexpected,
+      );
     });
   });
 
@@ -428,31 +458,51 @@ describe('BookingsService', () => {
     });
 
     it('CLIENT vê apenas as suas reservas (filtra por clientId)', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
       prisma.booking.findMany.mockResolvedValue([makeBooking()]);
       prisma.booking.count.mockResolvedValue(1);
 
-      const result = await service.findMyBookings(CLIENT_ID, { page: 1, limit: 10 });
+      const result = await service.findMyBookings(CLIENT_ID, {
+        page: 1,
+        limit: 10,
+      });
 
-      const whereArg = (prisma.booking.findMany.mock.calls[0][0] as { where: Prisma.BookingWhereInput }).where;
+      const whereArg = (
+        prisma.booking.findMany.mock.calls[0][0] as {
+          where: Prisma.BookingWhereInput;
+        }
+      ).where;
       expect(whereArg).toMatchObject({ clientId: CLIENT_ID });
       expect(result.data).toHaveLength(1);
     });
 
     it('ADMIN vê todas as reservas (sem filtro de clientId)', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.booking.findMany.mockResolvedValue([makeBooking(), makeBooking()]);
       prisma.booking.count.mockResolvedValue(2);
 
-      const result = await service.findMyBookings(ADMIN_ID, { page: 1, limit: 10 });
+      const result = await service.findMyBookings(ADMIN_ID, {
+        page: 1,
+        limit: 10,
+      });
 
-      const whereArg = (prisma.booking.findMany.mock.calls[0][0] as { where: Prisma.BookingWhereInput }).where;
+      const whereArg = (
+        prisma.booking.findMany.mock.calls[0][0] as {
+          where: Prisma.BookingWhereInput;
+        }
+      ).where;
       expect(whereArg).not.toHaveProperty('clientId');
       expect(result.data).toHaveLength(2);
     });
 
     it('filtra por status quando fornecido', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
       prisma.booking.findMany.mockResolvedValue([]);
       prisma.booking.count.mockResolvedValue(0);
 
@@ -462,16 +512,25 @@ describe('BookingsService', () => {
         status: BookingStatus.CONFIRMED,
       });
 
-      const whereArg = (prisma.booking.findMany.mock.calls[0][0] as { where: Prisma.BookingWhereInput }).where;
+      const whereArg = (
+        prisma.booking.findMany.mock.calls[0][0] as {
+          where: Prisma.BookingWhereInput;
+        }
+      ).where;
       expect(whereArg).toMatchObject({ status: BookingStatus.CONFIRMED });
     });
 
     it('devolve meta de paginação correcta', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
       prisma.booking.findMany.mockResolvedValue([makeBooking()]);
       prisma.booking.count.mockResolvedValue(25);
 
-      const result = await service.findMyBookings(CLIENT_ID, { page: 2, limit: 10 });
+      const result = await service.findMyBookings(CLIENT_ID, {
+        page: 2,
+        limit: 10,
+      });
 
       expect(result.meta).toMatchObject({
         page: 2,
@@ -484,11 +543,16 @@ describe('BookingsService', () => {
     });
 
     it('hasPreviousPage = false na primeira página', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
       prisma.booking.findMany.mockResolvedValue([]);
       prisma.booking.count.mockResolvedValue(0);
 
-      const result = await service.findMyBookings(CLIENT_ID, { page: 1, limit: 10 });
+      const result = await service.findMyBookings(CLIENT_ID, {
+        page: 1,
+        limit: 10,
+      });
 
       expect(result.meta.hasPreviousPage).toBe(false);
     });
@@ -508,35 +572,54 @@ describe('BookingsService', () => {
     });
 
     it('OWNER vê apenas as suas reservas (filtra por ownerId)', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
       prisma.booking.findMany.mockResolvedValue([makeBooking()]);
       prisma.booking.count.mockResolvedValue(1);
 
       await service.findOwnerBookings(OWNER_ID, { page: 1, limit: 10 });
 
-      const whereArg = (prisma.booking.findMany.mock.calls[0][0] as { where: Prisma.BookingWhereInput }).where;
+      const whereArg = (
+        prisma.booking.findMany.mock.calls[0][0] as {
+          where: Prisma.BookingWhereInput;
+        }
+      ).where;
       expect(whereArg).toMatchObject({ ownerId: OWNER_ID });
     });
 
     it('ADMIN vê todas (sem filtro de ownerId)', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.booking.findMany.mockResolvedValue([]);
       prisma.booking.count.mockResolvedValue(0);
 
       await service.findOwnerBookings(ADMIN_ID, { page: 1, limit: 10 });
 
-      const whereArg = (prisma.booking.findMany.mock.calls[0][0] as { where: Prisma.BookingWhereInput }).where;
+      const whereArg = (
+        prisma.booking.findMany.mock.calls[0][0] as {
+          where: Prisma.BookingWhereInput;
+        }
+      ).where;
       expect(whereArg).not.toHaveProperty('ownerId');
     });
 
     it('devolve mensagem correcta', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
       prisma.booking.findMany.mockResolvedValue([]);
       prisma.booking.count.mockResolvedValue(0);
 
-      const result = await service.findOwnerBookings(OWNER_ID, { page: 1, limit: 10 });
+      const result = await service.findOwnerBookings(OWNER_ID, {
+        page: 1,
+        limit: 10,
+      });
 
-      expect(result.message).toBe('Reservas do proprietário obtidas com sucesso.');
+      expect(result.message).toBe(
+        'Reservas do proprietário obtidas com sucesso.',
+      );
     });
   });
 
@@ -555,7 +638,17 @@ describe('BookingsService', () => {
 
     it('lança NotFoundException se utilizador não existe', async () => {
       prisma.booking.findUnique.mockResolvedValue(
-        makeBooking({ equipment: { id: EQUIPMENT_ID, title: 'X', description: null, location: 'Maputo', status: 'ACTIVE', pricePerDay: 500, depositAmount: 1000 } }),
+        makeBooking({
+          equipment: {
+            id: EQUIPMENT_ID,
+            title: 'X',
+            description: null,
+            location: 'Maputo',
+            status: 'ACTIVE',
+            pricePerDay: 500,
+            depositAmount: 1000,
+          },
+        }),
       );
       prisma.user.findUnique.mockResolvedValue(null);
 
@@ -566,9 +659,21 @@ describe('BookingsService', () => {
 
     it('CLIENT pode ver a sua própria reserva', async () => {
       prisma.booking.findUnique.mockResolvedValue(
-        makeBooking({ equipment: { id: EQUIPMENT_ID, title: 'X', description: null, location: 'Maputo', status: 'ACTIVE', pricePerDay: 500, depositAmount: 1000 } }),
+        makeBooking({
+          equipment: {
+            id: EQUIPMENT_ID,
+            title: 'X',
+            description: null,
+            location: 'Maputo',
+            status: 'ACTIVE',
+            pricePerDay: 500,
+            depositAmount: 1000,
+          },
+        }),
       );
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
 
       const result = await service.findOne(CLIENT_ID, BOOKING_ID);
       expect(result.data.id).toBe(BOOKING_ID);
@@ -576,9 +681,21 @@ describe('BookingsService', () => {
 
     it('OWNER pode ver a reserva do seu equipamento', async () => {
       prisma.booking.findUnique.mockResolvedValue(
-        makeBooking({ equipment: { id: EQUIPMENT_ID, title: 'X', description: null, location: 'Maputo', status: 'ACTIVE', pricePerDay: 500, depositAmount: 1000 } }),
+        makeBooking({
+          equipment: {
+            id: EQUIPMENT_ID,
+            title: 'X',
+            description: null,
+            location: 'Maputo',
+            status: 'ACTIVE',
+            pricePerDay: 500,
+            depositAmount: 1000,
+          },
+        }),
       );
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
 
       const result = await service.findOne(OWNER_ID, BOOKING_ID);
       expect(result.data.id).toBe(BOOKING_ID);
@@ -586,9 +703,21 @@ describe('BookingsService', () => {
 
     it('ADMIN pode ver qualquer reserva', async () => {
       prisma.booking.findUnique.mockResolvedValue(
-        makeBooking({ equipment: { id: EQUIPMENT_ID, title: 'X', description: null, location: 'Maputo', status: 'ACTIVE', pricePerDay: 500, depositAmount: 1000 } }),
+        makeBooking({
+          equipment: {
+            id: EQUIPMENT_ID,
+            title: 'X',
+            description: null,
+            location: 'Maputo',
+            status: 'ACTIVE',
+            pricePerDay: 500,
+            depositAmount: 1000,
+          },
+        }),
       );
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
 
       const result = await service.findOne(ADMIN_ID, BOOKING_ID);
       expect(result.data.id).toBe(BOOKING_ID);
@@ -598,10 +727,20 @@ describe('BookingsService', () => {
       const strangerBooking = makeBooking({
         clientId: 'outro-client',
         ownerId: 'outro-owner',
-        equipment: { id: EQUIPMENT_ID, title: 'X', description: null, location: 'Maputo', status: 'ACTIVE', pricePerDay: 500, depositAmount: 1000 },
+        equipment: {
+          id: EQUIPMENT_ID,
+          title: 'X',
+          description: null,
+          location: 'Maputo',
+          status: 'ACTIVE',
+          pricePerDay: 500,
+          depositAmount: 1000,
+        },
       });
       prisma.booking.findUnique.mockResolvedValue(strangerBooking);
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
 
       await expect(service.findOne(CLIENT_ID, BOOKING_ID)).rejects.toThrow(
         new ForbiddenException('Não tens permissão para ver esta reserva.'),
@@ -614,7 +753,9 @@ describe('BookingsService', () => {
   // ───────────────────────────────────────────────────────────────────────────
 
   describe('confirm()', () => {
-    const makeBookingWithEquipment = (statusOverride: BookingStatus = BookingStatus.PENDING) =>
+    const makeBookingWithEquipment = (
+      statusOverride: BookingStatus = BookingStatus.PENDING,
+    ) =>
       makeBooking({
         status: statusOverride,
         equipment: {
@@ -627,7 +768,12 @@ describe('BookingsService', () => {
     const confirmedBooking = makeBooking({
       status: BookingStatus.CONFIRMED,
       confirmedAt: new Date(),
-      equipment: { id: EQUIPMENT_ID, title: 'Betoneira', location: 'Maputo', status: 'ACTIVE' },
+      equipment: {
+        id: EQUIPMENT_ID,
+        title: 'Betoneira',
+        location: 'Maputo',
+        status: 'ACTIVE',
+      },
     });
 
     it('lança NotFoundException se reserva não existe', async () => {
@@ -649,10 +795,14 @@ describe('BookingsService', () => {
 
     it('CLIENT não pode confirmar — recebe ForbiddenException', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBookingWithEquipment());
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
 
       await expect(service.confirm(CLIENT_ID, BOOKING_ID)).rejects.toThrow(
-        new ForbiddenException('Não tens permissão para confirmar esta reserva.'),
+        new ForbiddenException(
+          'Não tens permissão para confirmar esta reserva.',
+        ),
       );
     });
 
@@ -660,10 +810,14 @@ describe('BookingsService', () => {
       prisma.booking.findUnique.mockResolvedValue(
         makeBookingWithEquipment(BookingStatus.CONFIRMED),
       );
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
 
       await expect(service.confirm(OWNER_ID, BOOKING_ID)).rejects.toThrow(
-        new BadRequestException('Apenas reservas pendentes podem ser confirmadas.'),
+        new BadRequestException(
+          'Apenas reservas pendentes podem ser confirmadas.',
+        ),
       );
     });
 
@@ -671,13 +825,21 @@ describe('BookingsService', () => {
       prisma.booking.findUnique.mockResolvedValue(
         makeBooking({
           status: BookingStatus.PENDING,
-          equipment: { id: EQUIPMENT_ID, status: EquipmentStatus.PAUSED, isAvailable: true },
+          equipment: {
+            id: EQUIPMENT_ID,
+            status: EquipmentStatus.PAUSED,
+            isAvailable: true,
+          },
         }),
       );
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
 
       await expect(service.confirm(OWNER_ID, BOOKING_ID)).rejects.toThrow(
-        new BadRequestException('Não é possível confirmar uma reserva de equipamento inativo.'),
+        new BadRequestException(
+          'Não é possível confirmar uma reserva de equipamento inativo.',
+        ),
       );
     });
 
@@ -685,19 +847,29 @@ describe('BookingsService', () => {
       prisma.booking.findUnique.mockResolvedValue(
         makeBooking({
           status: BookingStatus.PENDING,
-          equipment: { id: EQUIPMENT_ID, status: EquipmentStatus.ACTIVE, isAvailable: false },
+          equipment: {
+            id: EQUIPMENT_ID,
+            status: EquipmentStatus.ACTIVE,
+            isAvailable: false,
+          },
         }),
       );
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
 
       await expect(service.confirm(OWNER_ID, BOOKING_ID)).rejects.toThrow(
-        new BadRequestException('Não é possível confirmar reserva de equipamento indisponível.'),
+        new BadRequestException(
+          'Não é possível confirmar reserva de equipamento indisponível.',
+        ),
       );
     });
 
     it('lança BadRequestException se já existe reserva confirmada no mesmo período', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBookingWithEquipment());
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
       prisma.booking.findFirst.mockResolvedValue({ id: 'existing-confirmed' });
 
       await expect(service.confirm(OWNER_ID, BOOKING_ID)).rejects.toThrow(
@@ -709,7 +881,9 @@ describe('BookingsService', () => {
 
     it('OWNER confirma com sucesso', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBookingWithEquipment());
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
       prisma.booking.findFirst.mockResolvedValue(null);
       prisma.booking.update.mockResolvedValue(confirmedBooking);
 
@@ -725,7 +899,9 @@ describe('BookingsService', () => {
 
     it('ADMIN confirma com sucesso', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBookingWithEquipment());
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.booking.findFirst.mockResolvedValue(null);
       prisma.booking.update.mockResolvedValue(confirmedBooking);
 
@@ -735,13 +911,17 @@ describe('BookingsService', () => {
 
     it('grava confirmedAt na actualização', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBookingWithEquipment());
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
       prisma.booking.findFirst.mockResolvedValue(null);
       prisma.booking.update.mockResolvedValue(confirmedBooking);
 
       await service.confirm(OWNER_ID, BOOKING_ID);
 
-      const updateCall = prisma.booking.update.mock.calls[0][0] as { data: Record<string, unknown> };
+      const updateCall = prisma.booking.update.mock.calls[0][0] as {
+        data: Record<string, unknown>;
+      };
       expect(updateCall.data.confirmedAt).toBeInstanceOf(Date);
     });
   });
@@ -760,39 +940,46 @@ describe('BookingsService', () => {
     it('lança NotFoundException se reserva não existe', async () => {
       prisma.booking.findUnique.mockResolvedValue(null);
 
-      await expect(
-        service.cancel(CLIENT_ID, BOOKING_ID, {}),
-      ).rejects.toThrow(new NotFoundException('Reserva não encontrada.'));
+      await expect(service.cancel(CLIENT_ID, BOOKING_ID, {})).rejects.toThrow(
+        new NotFoundException('Reserva não encontrada.'),
+      );
     });
 
     it('lança NotFoundException se utilizador não existe', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBooking());
       prisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(
-        service.cancel(CLIENT_ID, BOOKING_ID, {}),
-      ).rejects.toThrow(new NotFoundException('Utilizador não encontrado.'));
+      await expect(service.cancel(CLIENT_ID, BOOKING_ID, {})).rejects.toThrow(
+        new NotFoundException('Utilizador não encontrado.'),
+      );
     });
 
     it('terceiro sem relação com a reserva recebe ForbiddenException', async () => {
-      const booking = makeBooking({ clientId: 'outro-client', ownerId: 'outro-owner' });
+      const booking = makeBooking({
+        clientId: 'outro-client',
+        ownerId: 'outro-owner',
+      });
       prisma.booking.findUnique.mockResolvedValue(booking);
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
 
-      await expect(
-        service.cancel(CLIENT_ID, BOOKING_ID, {}),
-      ).rejects.toThrow(new ForbiddenException('Não tens permissão para cancelar esta reserva.'));
+      await expect(service.cancel(CLIENT_ID, BOOKING_ID, {})).rejects.toThrow(
+        new ForbiddenException(
+          'Não tens permissão para cancelar esta reserva.',
+        ),
+      );
     });
 
     it('lança BadRequestException para reserva COMPLETED', async () => {
       prisma.booking.findUnique.mockResolvedValue(
         makeBooking({ status: BookingStatus.COMPLETED }),
       );
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
 
-      await expect(
-        service.cancel(CLIENT_ID, BOOKING_ID, {}),
-      ).rejects.toThrow(
+      await expect(service.cancel(CLIENT_ID, BOOKING_ID, {})).rejects.toThrow(
         new BadRequestException(
           'Apenas reservas pendentes ou confirmadas podem ser canceladas.',
         ),
@@ -803,16 +990,22 @@ describe('BookingsService', () => {
       prisma.booking.findUnique.mockResolvedValue(
         makeBooking({ status: BookingStatus.ACTIVE }),
       );
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
 
-      await expect(
-        service.cancel(CLIENT_ID, BOOKING_ID, {}),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.cancel(CLIENT_ID, BOOKING_ID, {})).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('CLIENT cancela reserva PENDING com sucesso', async () => {
-      prisma.booking.findUnique.mockResolvedValue(makeBooking({ status: BookingStatus.PENDING }));
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.booking.findUnique.mockResolvedValue(
+        makeBooking({ status: BookingStatus.PENDING }),
+      );
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
       prisma.booking.update.mockResolvedValue(cancelledBooking);
 
       const result = await service.cancel(CLIENT_ID, BOOKING_ID, {
@@ -824,8 +1017,12 @@ describe('BookingsService', () => {
     });
 
     it('OWNER cancela reserva CONFIRMED com sucesso', async () => {
-      prisma.booking.findUnique.mockResolvedValue(makeBooking({ status: BookingStatus.CONFIRMED }));
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.booking.findUnique.mockResolvedValue(
+        makeBooking({ status: BookingStatus.CONFIRMED }),
+      );
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
       prisma.booking.update.mockResolvedValue(cancelledBooking);
 
       const result = await service.cancel(OWNER_ID, BOOKING_ID, {});
@@ -834,9 +1031,14 @@ describe('BookingsService', () => {
 
     it('ADMIN cancela qualquer reserva PENDING', async () => {
       prisma.booking.findUnique.mockResolvedValue(
-        makeBooking({ clientId: 'qualquer-client', status: BookingStatus.PENDING }),
+        makeBooking({
+          clientId: 'qualquer-client',
+          status: BookingStatus.PENDING,
+        }),
       );
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.booking.update.mockResolvedValue(cancelledBooking);
 
       const result = await service.cancel(ADMIN_ID, BOOKING_ID, {});
@@ -844,35 +1046,55 @@ describe('BookingsService', () => {
     });
 
     it('grava cancellationReason trimada', async () => {
-      prisma.booking.findUnique.mockResolvedValue(makeBooking({ status: BookingStatus.PENDING }));
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.booking.findUnique.mockResolvedValue(
+        makeBooking({ status: BookingStatus.PENDING }),
+      );
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
       prisma.booking.update.mockResolvedValue(cancelledBooking);
 
-      await service.cancel(CLIENT_ID, BOOKING_ID, { reason: '  Motivo com espaços  ' });
+      await service.cancel(CLIENT_ID, BOOKING_ID, {
+        reason: '  Motivo com espaços  ',
+      });
 
-      const updateCall = prisma.booking.update.mock.calls[0][0] as { data: Record<string, unknown> };
+      const updateCall = prisma.booking.update.mock.calls[0][0] as {
+        data: Record<string, unknown>;
+      };
       expect(updateCall.data.cancellationReason).toBe('Motivo com espaços');
     });
 
     it('guarda null quando reason não é fornecido', async () => {
-      prisma.booking.findUnique.mockResolvedValue(makeBooking({ status: BookingStatus.PENDING }));
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.booking.findUnique.mockResolvedValue(
+        makeBooking({ status: BookingStatus.PENDING }),
+      );
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
       prisma.booking.update.mockResolvedValue(cancelledBooking);
 
       await service.cancel(CLIENT_ID, BOOKING_ID, {});
 
-      const updateCall = prisma.booking.update.mock.calls[0][0] as { data: Record<string, unknown> };
+      const updateCall = prisma.booking.update.mock.calls[0][0] as {
+        data: Record<string, unknown>;
+      };
       expect(updateCall.data.cancellationReason).toBeNull();
     });
 
     it('grava cancelledAt na actualização', async () => {
-      prisma.booking.findUnique.mockResolvedValue(makeBooking({ status: BookingStatus.PENDING }));
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.booking.findUnique.mockResolvedValue(
+        makeBooking({ status: BookingStatus.PENDING }),
+      );
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
       prisma.booking.update.mockResolvedValue(cancelledBooking);
 
       await service.cancel(CLIENT_ID, BOOKING_ID, {});
 
-      const updateCall = prisma.booking.update.mock.calls[0][0] as { data: Record<string, unknown> };
+      const updateCall = prisma.booking.update.mock.calls[0][0] as {
+        data: Record<string, unknown>;
+      };
       expect(updateCall.data.cancelledAt).toBeInstanceOf(Date);
     });
   });

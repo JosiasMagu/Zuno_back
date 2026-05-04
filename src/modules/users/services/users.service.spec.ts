@@ -9,12 +9,10 @@ import { UserRole } from '@prisma/client';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { UsersService } from './users.service';
 
-
-const USER_ID       = 'user-uuid-001';
+const USER_ID = 'user-uuid-001';
 const OTHER_USER_ID = 'user-uuid-002';
-const PHONE         = '+258840000001';
-const EMAIL         = 'zuno@zuno.co.mz';
-
+const PHONE = '+258840000001';
+const EMAIL = 'zuno@zuno.co.mz';
 
 const makeUser = (overrides: Record<string, unknown> = {}) => ({
   id: USER_ID,
@@ -54,7 +52,6 @@ const makePrisma = () => ({
   },
 });
 
-
 describe('UsersService', () => {
   let service: UsersService;
   let prisma: ReturnType<typeof makePrisma>;
@@ -63,17 +60,13 @@ describe('UsersService', () => {
     prisma = makePrisma();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        UsersService,
-        { provide: PrismaService, useValue: prisma },
-      ],
+      providers: [UsersService, { provide: PrismaService, useValue: prisma }],
     }).compile();
 
     service = module.get<UsersService>(UsersService);
   });
 
   afterEach(() => jest.clearAllMocks());
-
 
   describe('getMe()', () => {
     it('devolve o perfil do utilizador com mensagem de sucesso', async () => {
@@ -121,7 +114,9 @@ describe('UsersService', () => {
     it('lança UnauthorizedException se o utilizador não existe', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.getMe(USER_ID)).rejects.toThrow(UnauthorizedException);
+      await expect(service.getMe(USER_ID)).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('a mensagem da excepção indica que o utilizador não foi encontrado', async () => {
@@ -134,7 +129,9 @@ describe('UsersService', () => {
     it('lança UnauthorizedException se a conta está desactivada', async () => {
       prisma.user.findUnique.mockResolvedValue(makeUser({ isActive: false }));
 
-      await expect(service.getMe(USER_ID)).rejects.toThrow(UnauthorizedException);
+      await expect(service.getMe(USER_ID)).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('a mensagem da excepção indica que a conta está desactivada', async () => {
@@ -155,14 +152,15 @@ describe('UsersService', () => {
     });
   });
 
-
   describe('updateMe()', () => {
     it('actualiza o nome com sucesso e devolve o perfil actualizado', async () => {
       const updated = makeUser({ name: 'Daniel Actualizado' });
       prisma.user.findUnique.mockResolvedValue(makeUser());
       prisma.user.update.mockResolvedValue(updated);
 
-      const result = await service.updateMe(USER_ID, { name: 'Daniel Actualizado' });
+      const result = await service.updateMe(USER_ID, {
+        name: 'Daniel Actualizado',
+      });
 
       expect(result.message).toBe('Perfil atualizado com sucesso.');
       expect(result.data.name).toBe('Daniel Actualizado');
@@ -183,7 +181,7 @@ describe('UsersService', () => {
       prisma.user.findUnique.mockResolvedValue(makeUser());
       prisma.user.update.mockResolvedValue(makeUser({ bio }));
 
-      const result = await service.updateMe(USER_ID, { bio });
+      await service.updateMe(USER_ID, { bio });
 
       const updateCall = prisma.user.update.mock.calls[0][0];
       expect(updateCall.data.bio).toBe(bio);
@@ -223,9 +221,11 @@ describe('UsersService', () => {
     it('actualiza o email para lowercase com trim()', async () => {
       const normalizedEmail = 'novo@zuno.co.mz';
       prisma.user.findUnique
-        .mockResolvedValueOnce(makeUser())   // utilizador actual
-        .mockResolvedValueOnce(null);        // verificação de email duplicado
-      prisma.user.update.mockResolvedValue(makeUser({ email: normalizedEmail }));
+        .mockResolvedValueOnce(makeUser()) // utilizador actual
+        .mockResolvedValueOnce(null); // verificação de email duplicado
+      prisma.user.update.mockResolvedValue(
+        makeUser({ email: normalizedEmail }),
+      );
 
       await service.updateMe(USER_ID, { email: '  Novo@Zuno.CO.MZ  ' });
 
@@ -254,11 +254,14 @@ describe('UsersService', () => {
     });
 
     it('lança BadRequestException se o novo email já pertence a outro utilizador', async () => {
-      const outroUtilizador = makeUser({ id: OTHER_USER_ID, email: 'novo@zuno.co.mz' });
+      const outroUtilizador = makeUser({
+        id: OTHER_USER_ID,
+        email: 'novo@zuno.co.mz',
+      });
 
       prisma.user.findUnique
-        .mockResolvedValueOnce(makeUser())           // utilizador actual
-        .mockResolvedValueOnce(outroUtilizador);     // email ocupado por outro
+        .mockResolvedValueOnce(makeUser()) // utilizador actual
+        .mockResolvedValueOnce(outroUtilizador); // email ocupado por outro
 
       await expect(
         service.updateMe(USER_ID, { email: 'novo@zuno.co.mz' }),
@@ -268,13 +271,18 @@ describe('UsersService', () => {
     });
 
     it('a mensagem da excepção de email duplicado é clara', async () => {
-      const outroUtilizador = makeUser({ id: OTHER_USER_ID, email: 'novo@zuno.co.mz' });
+      const outroUtilizador = makeUser({
+        id: OTHER_USER_ID,
+        email: 'novo@zuno.co.mz',
+      });
 
       prisma.user.findUnique
         .mockResolvedValueOnce(makeUser())
         .mockResolvedValueOnce(outroUtilizador);
 
-      const error = await service.updateMe(USER_ID, { email: 'novo@zuno.co.mz' }).catch((e) => e);
+      const error = await service
+        .updateMe(USER_ID, { email: 'novo@zuno.co.mz' })
+        .catch((e) => e);
       expect(error.message).toBe('Este email já está em uso.');
     });
 
@@ -283,12 +291,16 @@ describe('UsersService', () => {
       const proprio = makeUser({ email: 'novo@zuno.co.mz' });
 
       prisma.user.findUnique
-        .mockResolvedValueOnce(makeUser())  // utilizador actual
-        .mockResolvedValueOnce(proprio);    // verificação: é o próprio
+        .mockResolvedValueOnce(makeUser()) // utilizador actual
+        .mockResolvedValueOnce(proprio); // verificação: é o próprio
 
-      prisma.user.update.mockResolvedValue(makeUser({ email: 'novo@zuno.co.mz' }));
+      prisma.user.update.mockResolvedValue(
+        makeUser({ email: 'novo@zuno.co.mz' }),
+      );
 
-      const result = await service.updateMe(USER_ID, { email: 'novo@zuno.co.mz' });
+      const result = await service.updateMe(USER_ID, {
+        email: 'novo@zuno.co.mz',
+      });
 
       expect(result.message).toBe('Perfil atualizado com sucesso.');
       expect(prisma.user.update).toHaveBeenCalledTimes(1);
@@ -337,7 +349,6 @@ describe('UsersService', () => {
     });
   });
 
-
   describe('getPublicProfile()', () => {
     it('devolve o perfil público com mensagem de sucesso', async () => {
       prisma.user.findUnique.mockResolvedValue(makePublicUser());
@@ -377,7 +388,9 @@ describe('UsersService', () => {
     });
 
     it('expõe totalRating como número quando existe', async () => {
-      prisma.user.findUnique.mockResolvedValue(makePublicUser({ totalRating: 4.8 }));
+      prisma.user.findUnique.mockResolvedValue(
+        makePublicUser({ totalRating: 4.8 }),
+      );
 
       const result = await service.getPublicProfile(USER_ID);
 
@@ -385,7 +398,9 @@ describe('UsersService', () => {
     });
 
     it('expõe totalRating como null quando não há avaliações', async () => {
-      prisma.user.findUnique.mockResolvedValue(makePublicUser({ totalRating: null }));
+      prisma.user.findUnique.mockResolvedValue(
+        makePublicUser({ totalRating: null }),
+      );
 
       const result = await service.getPublicProfile(USER_ID);
 
@@ -393,7 +408,9 @@ describe('UsersService', () => {
     });
 
     it('expõe totalReviews como 0 quando não há avaliações', async () => {
-      prisma.user.findUnique.mockResolvedValue(makePublicUser({ totalReviews: 0 }));
+      prisma.user.findUnique.mockResolvedValue(
+        makePublicUser({ totalReviews: 0 }),
+      );
 
       const result = await service.getPublicProfile(USER_ID);
 
@@ -403,21 +420,33 @@ describe('UsersService', () => {
     it('lança NotFoundException se o utilizador não existe (findUnique devolve null)', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.getPublicProfile(USER_ID)).rejects.toThrow(NotFoundException);
+      await expect(service.getPublicProfile(USER_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('lança NotFoundException se a conta está desactivada — mesmo que o utilizador exista', async () => {
-      prisma.user.findUnique.mockResolvedValue(makePublicUser({ isActive: false }));
+      prisma.user.findUnique.mockResolvedValue(
+        makePublicUser({ isActive: false }),
+      );
 
-      await expect(service.getPublicProfile(USER_ID)).rejects.toThrow(NotFoundException);
+      await expect(service.getPublicProfile(USER_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('a mensagem de erro é a mesma para utilizador inexistente e inactivo — não revela estado', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
-      const errorInexistente = await service.getPublicProfile(USER_ID).catch((e) => e);
+      const errorInexistente = await service
+        .getPublicProfile(USER_ID)
+        .catch((e) => e);
 
-      prisma.user.findUnique.mockResolvedValue(makePublicUser({ isActive: false }));
-      const errorInactivo = await service.getPublicProfile(USER_ID).catch((e) => e);
+      prisma.user.findUnique.mockResolvedValue(
+        makePublicUser({ isActive: false }),
+      );
+      const errorInactivo = await service
+        .getPublicProfile(USER_ID)
+        .catch((e) => e);
 
       expect(errorInexistente.message).toBe('Utilizador não encontrado.');
       expect(errorInactivo.message).toBe(errorInexistente.message);
@@ -434,7 +463,9 @@ describe('UsersService', () => {
 
     it('expõe avatarUrl quando preenchido', async () => {
       const url = 'https://cdn.zuno.co.mz/avatar.jpg';
-      prisma.user.findUnique.mockResolvedValue(makePublicUser({ avatarUrl: url }));
+      prisma.user.findUnique.mockResolvedValue(
+        makePublicUser({ avatarUrl: url }),
+      );
 
       const result = await service.getPublicProfile(USER_ID);
 
@@ -442,7 +473,9 @@ describe('UsersService', () => {
     });
 
     it('expõe avatarUrl como null quando não preenchido', async () => {
-      prisma.user.findUnique.mockResolvedValue(makePublicUser({ avatarUrl: null }));
+      prisma.user.findUnique.mockResolvedValue(
+        makePublicUser({ avatarUrl: null }),
+      );
 
       const result = await service.getPublicProfile(USER_ID);
 

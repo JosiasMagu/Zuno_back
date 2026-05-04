@@ -7,7 +7,7 @@ type PaymentListEntity = {
   depositAmount: unknown;
   platformFee: unknown;
   totalCharged: unknown;
-  ownerPayout: unknown | null;
+  ownerPayout: unknown;
   currency: string;
   method: string;
   mpesaReference: string | null;
@@ -15,9 +15,9 @@ type PaymentListEntity = {
   heldAt: Date | null;
   releasedAt: Date | null;
   refundedAt: Date | null;
-  refundAmount: unknown | null;
+  refundAmount: unknown;
   depositReleasedAt: Date | null;
-  depositHeldAmount: unknown | null;
+  depositHeldAmount: unknown;
   receiptNumber: string;
   createdAt: Date;
   updatedAt: Date;

@@ -44,10 +44,7 @@ export class BookingsController {
   @ApiResponse({ status: 400, description: 'Dados inválidos.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Equipamento não encontrado.' })
-  create(
-    @CurrentUser() user: { id: string },
-    @Body() dto: CreateBookingDto,
-  ) {
+  create(@CurrentUser() user: { id: string }, @Body() dto: CreateBookingDto) {
     return this.bookingsService.create(user.id, dto);
   }
 
@@ -55,7 +52,9 @@ export class BookingsController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.CLIENT, UserRole.OWNER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Listar reservas do utilizador autenticado como cliente' })
+  @ApiOperation({
+    summary: 'Listar reservas do utilizador autenticado como cliente',
+  })
   @ApiQuery({ name: 'page', required: false, example: 1 })
   @ApiQuery({ name: 'limit', required: false, example: 10 })
   @ApiQuery({ name: 'status', required: false, example: 'PENDING' })

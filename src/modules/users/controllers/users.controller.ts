@@ -1,11 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  Patch,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -43,10 +36,7 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'Perfil atualizado com sucesso.' })
   @ApiResponse({ status: 400, description: 'Dados inválidos.' })
   @ApiResponse({ status: 401, description: 'Não autenticado.' })
-  updateMe(
-    @CurrentUser() user: { id: string },
-    @Body() dto: UpdateUserDto,
-  ) {
+  updateMe(@CurrentUser() user: { id: string }, @Body() dto: UpdateUserDto) {
     return this.usersService.updateMe(user.id, dto);
   }
 

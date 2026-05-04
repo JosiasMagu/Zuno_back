@@ -24,7 +24,10 @@ export class AuthController {
   @Throttle({ global: { ttl: 60_000, limit: 5 } })
   @ApiOperation({ summary: 'Registrar novo utilizador' })
   @ApiBody({ type: RegisterDto })
-  @ApiResponse({ status: 201, description: 'Utilizador registrado com sucesso.' })
+  @ApiResponse({
+    status: 201,
+    description: 'Utilizador registrado com sucesso.',
+  })
   @ApiResponse({ status: 400, description: 'Dados inválidos.' })
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
@@ -67,7 +70,10 @@ export class AuthController {
   @Get('me')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Obter dados do utilizador autenticado' })
-  @ApiResponse({ status: 200, description: 'Dados do utilizador retornados com sucesso.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Dados do utilizador retornados com sucesso.',
+  })
   @ApiResponse({ status: 401, description: 'Não autenticado.' })
   me(@CurrentUser() user: { id: string }) {
     return this.authService.getMe(user.id);

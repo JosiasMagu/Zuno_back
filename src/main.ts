@@ -43,10 +43,6 @@ async function bootstrap() {
     }),
   );
 
-  // ── Swagger apenas fora de produção ─────────────────────────────────────────
-  // Em produção, expor /docs revela toda a estrutura da API publicamente —
-  // endpoints, parâmetros, modelos de dados e exemplos de payloads.
-  // Num sistema de pagamentos isso é um risco desnecessário.
   if (process.env.NODE_ENV !== 'production') {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Zuno API')
@@ -66,7 +62,9 @@ async function bootstrap() {
     const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
     SwaggerModule.setup('docs', app, swaggerDocument);
 
-    logger.log(`Swagger disponível em http://localhost:${process.env.PORT || 3000}/docs`);
+    logger.log(
+      `Swagger disponível em http://localhost:${process.env.PORT ?? 3000}/docs`,
+    );
   }
 
   const port = Number(process.env.PORT) || 3000;
@@ -76,4 +74,4 @@ async function bootstrap() {
   logger.log(`Ambiente: ${process.env.NODE_ENV ?? 'development'}`);
 }
 
-bootstrap();
+void bootstrap();

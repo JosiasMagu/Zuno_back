@@ -20,9 +20,9 @@ import { PrismaService } from '../../../shared/db/prisma.service';
 // CONSTANTES DE TESTE
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CLIENT_ID  = 'client-uuid-001';
-const OWNER_ID   = 'owner-uuid-001';
-const ADMIN_ID   = 'admin-uuid-001';
+const CLIENT_ID = 'client-uuid-001';
+const OWNER_ID = 'owner-uuid-001';
+const ADMIN_ID = 'admin-uuid-001';
 const BOOKING_ID = 'booking-uuid-001';
 const PAYMENT_ID = 'payment-uuid-001';
 const DISPUTE_ID = 'dispute-uuid-001';
@@ -143,15 +143,15 @@ const makeDispute = (overrides: Record<string, unknown> = {}) => ({
 // ─────────────────────────────────────────────────────────────────────────────
 
 const makePrismaMock = () => ({
-  user:    { findUnique: jest.fn() },
+  user: { findUnique: jest.fn() },
   booking: { findUnique: jest.fn(), update: jest.fn() },
   payment: { update: jest.fn() },
   dispute: {
     findUnique: jest.fn(),
-    findMany:   jest.fn(),
-    count:      jest.fn(),
-    create:     jest.fn(),
-    update:     jest.fn(),
+    findMany: jest.fn(),
+    count: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
   },
   $transaction: jest.fn(),
 });
@@ -192,8 +192,9 @@ describe('DisputesService', () => {
     };
 
     const setupHappyTx = (disputeResult = makeDispute()) => {
-      prisma.$transaction.mockImplementation(async (callback: (tx: typeof prisma) => Promise<unknown>) =>
-        callback(prisma),
+      prisma.$transaction.mockImplementation(
+        async (callback: (tx: typeof prisma) => Promise<unknown>) =>
+          callback(prisma),
       );
       prisma.booking.update.mockResolvedValue({});
       prisma.dispute.create.mockResolvedValue(disputeResult);
@@ -226,10 +227,14 @@ describe('DisputesService', () => {
     });
 
     it('lança BadRequestException se reserva não tem pagamento', async () => {
-      prisma.booking.findUnique.mockResolvedValue(makeBooking({ payment: null }));
+      prisma.booking.findUnique.mockResolvedValue(
+        makeBooking({ payment: null }),
+      );
 
       await expect(service.create(CLIENT_ID, validDto)).rejects.toThrow(
-        new BadRequestException('Esta reserva ainda não possui pagamento associado.'),
+        new BadRequestException(
+          'Esta reserva ainda não possui pagamento associado.',
+        ),
       );
     });
 
@@ -239,7 +244,9 @@ describe('DisputesService', () => {
       );
 
       await expect(service.create(CLIENT_ID, validDto)).rejects.toThrow(
-        new BadRequestException('O pagamento informado não corresponde à reserva.'),
+        new BadRequestException(
+          'O pagamento informado não corresponde à reserva.',
+        ),
       );
     });
 
@@ -247,7 +254,9 @@ describe('DisputesService', () => {
       prisma.booking.findUnique.mockResolvedValue(makeBooking());
 
       await expect(service.create(STRANGER_ID, validDto)).rejects.toThrow(
-        new ForbiddenException('Não tens permissão para abrir disputa nesta reserva.'),
+        new ForbiddenException(
+          'Não tens permissão para abrir disputa nesta reserva.',
+        ),
       );
     });
 
@@ -257,31 +266,43 @@ describe('DisputesService', () => {
       );
 
       await expect(service.create(CLIENT_ID, validDto)).rejects.toThrow(
-        new BadRequestException('Já existe uma disputa associada a esta reserva.'),
+        new BadRequestException(
+          'Já existe uma disputa associada a esta reserva.',
+        ),
       );
     });
 
     it('lança BadRequestException se pagamento está PENDING — não pode abrir disputa', async () => {
       prisma.booking.findUnique.mockResolvedValue(
-        makeBooking({ payment: makePayment({ status: PaymentStatus.PENDING }) }),
+        makeBooking({
+          payment: makePayment({ status: PaymentStatus.PENDING }),
+        }),
       );
 
       await expect(service.create(CLIENT_ID, validDto)).rejects.toThrow(
-        new BadRequestException('O estado atual do pagamento não permite abrir disputa.'),
+        new BadRequestException(
+          'O estado atual do pagamento não permite abrir disputa.',
+        ),
       );
     });
 
     it('lança BadRequestException se pagamento está REFUNDED', async () => {
       prisma.booking.findUnique.mockResolvedValue(
-        makeBooking({ payment: makePayment({ status: PaymentStatus.REFUNDED }) }),
+        makeBooking({
+          payment: makePayment({ status: PaymentStatus.REFUNDED }),
+        }),
       );
 
-      await expect(service.create(CLIENT_ID, validDto)).rejects.toThrow(BadRequestException);
+      await expect(service.create(CLIENT_ID, validDto)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('permite abrir disputa com pagamento RELEASED', async () => {
       prisma.booking.findUnique.mockResolvedValue(
-        makeBooking({ payment: makePayment({ status: PaymentStatus.RELEASED }) }),
+        makeBooking({
+          payment: makePayment({ status: PaymentStatus.RELEASED }),
+        }),
       );
       setupHappyTx();
 
@@ -310,7 +331,9 @@ describe('DisputesService', () => {
 
       expect(prisma.dispute.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ status: DisputeStatus.AWAITING_OWNER }),
+          data: expect.objectContaining({
+            status: DisputeStatus.AWAITING_OWNER,
+          }),
         }),
       );
     });
@@ -319,7 +342,10 @@ describe('DisputesService', () => {
       prisma.booking.findUnique.mockResolvedValue(makeBooking());
       setupHappyTx();
 
-      await service.create(CLIENT_ID, { ...validDto, description: '  com espaços  ' });
+      await service.create(CLIENT_ID, {
+        ...validDto,
+        description: '  com espaços  ',
+      });
 
       expect(prisma.dispute.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -343,50 +369,73 @@ describe('DisputesService', () => {
     });
 
     it('CLIENT vê apenas as suas disputas (OR com openedBy, clientId, ownerId)', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
       prisma.dispute.findMany.mockResolvedValue([makeDispute()]);
       prisma.dispute.count.mockResolvedValue(1);
 
       await service.findMyDisputes(CLIENT_ID, { page: 1, limit: 10 });
 
-      const where = (prisma.dispute.findMany.mock.calls[0][0] as { where: unknown }).where as Record<string, unknown>;
+      const where = (
+        prisma.dispute.findMany.mock.calls[0][0] as { where: unknown }
+      ).where as Record<string, unknown>;
       expect(where).toHaveProperty('OR');
     });
 
     it('ADMIN vê todas as disputas (sem filtro OR)', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.dispute.findMany.mockResolvedValue([]);
       prisma.dispute.count.mockResolvedValue(0);
 
       await service.findMyDisputes(ADMIN_ID, { page: 1, limit: 10 });
 
-      const where = (prisma.dispute.findMany.mock.calls[0][0] as { where: unknown }).where as Record<string, unknown>;
+      const where = (
+        prisma.dispute.findMany.mock.calls[0][0] as { where: unknown }
+      ).where as Record<string, unknown>;
       expect(where).not.toHaveProperty('OR');
     });
 
     it('filtra por status quando fornecido', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
       prisma.dispute.findMany.mockResolvedValue([]);
       prisma.dispute.count.mockResolvedValue(0);
 
       await service.findMyDisputes(CLIENT_ID, {
-        page: 1, limit: 10, status: DisputeStatus.UNDER_REVIEW,
+        page: 1,
+        limit: 10,
+        status: DisputeStatus.UNDER_REVIEW,
       });
 
-      const where = (prisma.dispute.findMany.mock.calls[0][0] as { where: unknown }).where as Record<string, unknown>;
+      const where = (
+        prisma.dispute.findMany.mock.calls[0][0] as { where: unknown }
+      ).where as Record<string, unknown>;
       expect(where).toMatchObject({ status: DisputeStatus.UNDER_REVIEW });
     });
 
     it('devolve meta de paginação correcta', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
       prisma.dispute.findMany.mockResolvedValue([makeDispute()]);
       prisma.dispute.count.mockResolvedValue(15);
 
-      const result = await service.findMyDisputes(CLIENT_ID, { page: 2, limit: 5 });
+      const result = await service.findMyDisputes(CLIENT_ID, {
+        page: 2,
+        limit: 5,
+      });
 
       expect(result.meta).toMatchObject({
-        page: 2, limit: 5, total: 15, totalPages: 3,
-        hasNextPage: true, hasPreviousPage: true,
+        page: 2,
+        limit: 5,
+        total: 15,
+        totalPages: 3,
+        hasNextPage: true,
+        hasPreviousPage: true,
       });
     });
   });
@@ -415,7 +464,9 @@ describe('DisputesService', () => {
 
     it('CLIENT (opener) pode ver a disputa', async () => {
       prisma.dispute.findUnique.mockResolvedValue(makeDispute());
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
 
       const result = await service.findOne(CLIENT_ID, DISPUTE_ID);
       expect(result.data.id).toBe(DISPUTE_ID);
@@ -423,7 +474,9 @@ describe('DisputesService', () => {
 
     it('OWNER da booking pode ver a disputa', async () => {
       prisma.dispute.findUnique.mockResolvedValue(makeDispute());
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
 
       const result = await service.findOne(OWNER_ID, DISPUTE_ID);
       expect(result.data.id).toBe(DISPUTE_ID);
@@ -431,7 +484,9 @@ describe('DisputesService', () => {
 
     it('ADMIN pode ver qualquer disputa', async () => {
       prisma.dispute.findUnique.mockResolvedValue(makeDispute());
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
 
       const result = await service.findOne(ADMIN_ID, DISPUTE_ID);
       expect(result.data.id).toBe(DISPUTE_ID);
@@ -439,7 +494,9 @@ describe('DisputesService', () => {
 
     it('terceiro sem relação recebe ForbiddenException', async () => {
       prisma.dispute.findUnique.mockResolvedValue(makeDispute());
-      prisma.user.findUnique.mockResolvedValue(makeUser(STRANGER_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(STRANGER_ID, UserRole.CLIENT),
+      );
 
       await expect(service.findOne(STRANGER_ID, DISPUTE_ID)).rejects.toThrow(
         new ForbiddenException('Não tens permissão para ver esta disputa.'),
@@ -452,7 +509,9 @@ describe('DisputesService', () => {
   // ───────────────────────────────────────────────────────────────────────────
 
   describe('respond()', () => {
-    const dto = { ownerResponse: 'O equipamento foi entregue conforme acordado.' };
+    const dto = {
+      ownerResponse: 'O equipamento foi entregue conforme acordado.',
+    };
 
     const disputeWithOwner = makeDispute({
       booking: {
@@ -484,10 +543,14 @@ describe('DisputesService', () => {
 
     it('CLIENT não pode responder — só OWNER ou ADMIN', async () => {
       prisma.dispute.findUnique.mockResolvedValue(disputeWithOwner);
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
 
       await expect(service.respond(CLIENT_ID, DISPUTE_ID, dto)).rejects.toThrow(
-        new ForbiddenException('Não tens permissão para responder a esta disputa.'),
+        new ForbiddenException(
+          'Não tens permissão para responder a esta disputa.',
+        ),
       );
     });
 
@@ -495,10 +558,14 @@ describe('DisputesService', () => {
       prisma.dispute.findUnique.mockResolvedValue(
         makeDispute({ status: DisputeStatus.UNDER_REVIEW }),
       );
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
 
       await expect(service.respond(OWNER_ID, DISPUTE_ID, dto)).rejects.toThrow(
-        new BadRequestException('Esta disputa não pode mais receber resposta do owner.'),
+        new BadRequestException(
+          'Esta disputa não pode mais receber resposta do owner.',
+        ),
       );
     });
 
@@ -506,21 +573,32 @@ describe('DisputesService', () => {
       prisma.dispute.findUnique.mockResolvedValue(
         makeDispute({ status: DisputeStatus.RESOLVED_CLIENT }),
       );
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
 
-      await expect(service.respond(OWNER_ID, DISPUTE_ID, dto)).rejects.toThrow(BadRequestException);
+      await expect(service.respond(OWNER_ID, DISPUTE_ID, dto)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('OWNER responde com sucesso — status muda para UNDER_REVIEW', async () => {
       prisma.dispute.findUnique.mockResolvedValue(disputeWithOwner);
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
       prisma.dispute.update.mockResolvedValue(
-        makeDispute({ status: DisputeStatus.UNDER_REVIEW, ownerResponse: dto.ownerResponse }),
+        makeDispute({
+          status: DisputeStatus.UNDER_REVIEW,
+          ownerResponse: dto.ownerResponse,
+        }),
       );
 
       const result = await service.respond(OWNER_ID, DISPUTE_ID, dto);
 
-      expect(result.message).toBe('Resposta da disputa registrada com sucesso.');
+      expect(result.message).toBe(
+        'Resposta da disputa registrada com sucesso.',
+      );
       expect(prisma.dispute.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
@@ -533,25 +611,37 @@ describe('DisputesService', () => {
 
     it('ADMIN também pode responder', async () => {
       prisma.dispute.findUnique.mockResolvedValue(disputeWithOwner);
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.dispute.update.mockResolvedValue(
         makeDispute({ status: DisputeStatus.UNDER_REVIEW }),
       );
 
       const result = await service.respond(ADMIN_ID, DISPUTE_ID, dto);
-      expect(result.message).toBe('Resposta da disputa registrada com sucesso.');
+      expect(result.message).toBe(
+        'Resposta da disputa registrada com sucesso.',
+      );
     });
 
     it('faz trim na ownerResponse', async () => {
       prisma.dispute.findUnique.mockResolvedValue(disputeWithOwner);
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
-      prisma.dispute.update.mockResolvedValue(makeDispute({ status: DisputeStatus.UNDER_REVIEW }));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
+      prisma.dispute.update.mockResolvedValue(
+        makeDispute({ status: DisputeStatus.UNDER_REVIEW }),
+      );
 
-      await service.respond(OWNER_ID, DISPUTE_ID, { ownerResponse: '  resposta com espaços  ' });
+      await service.respond(OWNER_ID, DISPUTE_ID, {
+        ownerResponse: '  resposta com espaços  ',
+      });
 
       expect(prisma.dispute.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ ownerResponse: 'resposta com espaços' }),
+          data: expect.objectContaining({
+            ownerResponse: 'resposta com espaços',
+          }),
         }),
       );
     });
@@ -562,25 +652,41 @@ describe('DisputesService', () => {
   // ───────────────────────────────────────────────────────────────────────────
 
   describe('resolveClient()', () => {
-    const setupAdminAndDispute = (disputeOverrides: Record<string, unknown> = {}) => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
-      prisma.dispute.findUnique.mockResolvedValue(makeDispute(disputeOverrides));
+    const setupAdminAndDispute = (
+      disputeOverrides: Record<string, unknown> = {},
+    ) => {
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
+      prisma.dispute.findUnique.mockResolvedValue(
+        makeDispute(disputeOverrides),
+      );
     };
 
-    const setupHappyTx = (disputeResult = makeDispute({ status: DisputeStatus.RESOLVED_CLIENT })) => {
+    const setupHappyTx = (
+      disputeResult = makeDispute({ status: DisputeStatus.RESOLVED_CLIENT }),
+    ) => {
       prisma.$transaction.mockResolvedValue([{}, {}, disputeResult]);
     };
 
     it('lança ForbiddenException se não é ADMIN', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
 
-      await expect(service.resolveClient(CLIENT_ID, DISPUTE_ID)).rejects.toThrow(
-        new ForbiddenException('Não tens permissão para executar esta operação.'),
+      await expect(
+        service.resolveClient(CLIENT_ID, DISPUTE_ID),
+      ).rejects.toThrow(
+        new ForbiddenException(
+          'Não tens permissão para executar esta operação.',
+        ),
       );
     });
 
     it('lança NotFoundException se disputa não existe', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.dispute.findUnique.mockResolvedValue(null);
 
       await expect(service.resolveClient(ADMIN_ID, DISPUTE_ID)).rejects.toThrow(
@@ -599,9 +705,11 @@ describe('DisputesService', () => {
     it('lança BadRequestException se pagamento está PENDING', async () => {
       setupAdminAndDispute({
         payment: {
-          id: PAYMENT_ID, status: PaymentStatus.PENDING,
+          id: PAYMENT_ID,
+          status: PaymentStatus.PENDING,
           totalCharged: new Prisma.Decimal(2650),
-          receiptNumber: 'REC-001', refundAmount: null,
+          receiptNumber: 'REC-001',
+          refundAmount: null,
         },
       });
 
@@ -615,13 +723,17 @@ describe('DisputesService', () => {
     it('lança BadRequestException se pagamento já está REFUNDED', async () => {
       setupAdminAndDispute({
         payment: {
-          id: PAYMENT_ID, status: PaymentStatus.REFUNDED,
+          id: PAYMENT_ID,
+          status: PaymentStatus.REFUNDED,
           totalCharged: new Prisma.Decimal(2650),
-          receiptNumber: 'REC-001', refundAmount: null,
+          receiptNumber: 'REC-001',
+          refundAmount: null,
         },
       });
 
-      await expect(service.resolveClient(ADMIN_ID, DISPUTE_ID)).rejects.toThrow(BadRequestException);
+      await expect(service.resolveClient(ADMIN_ID, DISPUTE_ID)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('resolve a favor do cliente com sucesso — transacção com 3 operações', async () => {
@@ -640,9 +752,11 @@ describe('DisputesService', () => {
     it('também funciona com pagamento RELEASED', async () => {
       setupAdminAndDispute({
         payment: {
-          id: PAYMENT_ID, status: PaymentStatus.RELEASED,
+          id: PAYMENT_ID,
+          status: PaymentStatus.RELEASED,
           totalCharged: new Prisma.Decimal(2650),
-          receiptNumber: 'REC-001', refundAmount: null,
+          receiptNumber: 'REC-001',
+          refundAmount: null,
         },
       });
       setupHappyTx();
@@ -657,25 +771,39 @@ describe('DisputesService', () => {
   // ───────────────────────────────────────────────────────────────────────────
 
   describe('resolveOwner()', () => {
-    const setupAdminAndDispute = (disputeOverrides: Record<string, unknown> = {}) => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
-      prisma.dispute.findUnique.mockResolvedValue(makeDispute(disputeOverrides));
+    const setupAdminAndDispute = (
+      disputeOverrides: Record<string, unknown> = {},
+    ) => {
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
+      prisma.dispute.findUnique.mockResolvedValue(
+        makeDispute(disputeOverrides),
+      );
     };
 
-    const setupHappyTx = (disputeResult = makeDispute({ status: DisputeStatus.RESOLVED_OWNER })) => {
+    const setupHappyTx = (
+      disputeResult = makeDispute({ status: DisputeStatus.RESOLVED_OWNER }),
+    ) => {
       prisma.$transaction.mockResolvedValue([{}, {}, disputeResult]);
     };
 
     it('lança ForbiddenException se não é ADMIN', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(OWNER_ID, UserRole.OWNER));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.OWNER),
+      );
 
       await expect(service.resolveOwner(OWNER_ID, DISPUTE_ID)).rejects.toThrow(
-        new ForbiddenException('Não tens permissão para executar esta operação.'),
+        new ForbiddenException(
+          'Não tens permissão para executar esta operação.',
+        ),
       );
     });
 
     it('lança NotFoundException se disputa não existe', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.dispute.findUnique.mockResolvedValue(null);
 
       await expect(service.resolveOwner(ADMIN_ID, DISPUTE_ID)).rejects.toThrow(
@@ -702,9 +830,11 @@ describe('DisputesService', () => {
     it('lança BadRequestException se pagamento está PENDING', async () => {
       setupAdminAndDispute({
         payment: {
-          id: PAYMENT_ID, status: PaymentStatus.PENDING,
+          id: PAYMENT_ID,
+          status: PaymentStatus.PENDING,
           totalCharged: new Prisma.Decimal(2650),
-          receiptNumber: 'REC-001', refundAmount: null,
+          receiptNumber: 'REC-001',
+          refundAmount: null,
         },
       });
 
@@ -730,9 +860,11 @@ describe('DisputesService', () => {
     it('resolve com sucesso mesmo com pagamento já RELEASED (update vazio — comportamento documentado)', async () => {
       setupAdminAndDispute({
         payment: {
-          id: PAYMENT_ID, status: PaymentStatus.RELEASED,
+          id: PAYMENT_ID,
+          status: PaymentStatus.RELEASED,
           totalCharged: new Prisma.Decimal(2650),
-          receiptNumber: 'REC-001', refundAmount: null,
+          receiptNumber: 'REC-001',
+          refundAmount: null,
         },
       });
       setupHappyTx();
@@ -749,36 +881,57 @@ describe('DisputesService', () => {
   describe('resolvePartial()', () => {
     const dto = { refundPercent: 50 };
 
-    const setupAdminAndDispute = (disputeOverrides: Record<string, unknown> = {}) => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
-      prisma.dispute.findUnique.mockResolvedValue(makeDispute(disputeOverrides));
+    const setupAdminAndDispute = (
+      disputeOverrides: Record<string, unknown> = {},
+    ) => {
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
+      prisma.dispute.findUnique.mockResolvedValue(
+        makeDispute(disputeOverrides),
+      );
     };
 
-    const setupHappyTx = (disputeResult = makeDispute({ status: DisputeStatus.RESOLVED_PARTIAL, refundPercent: 50 })) => {
+    const setupHappyTx = (
+      disputeResult = makeDispute({
+        status: DisputeStatus.RESOLVED_PARTIAL,
+        refundPercent: 50,
+      }),
+    ) => {
       prisma.$transaction.mockResolvedValue([{}, {}, disputeResult]);
     };
 
     it('lança ForbiddenException se não é ADMIN', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(CLIENT_ID, UserRole.CLIENT));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
 
-      await expect(service.resolvePartial(CLIENT_ID, DISPUTE_ID, dto)).rejects.toThrow(
-        new ForbiddenException('Não tens permissão para executar esta operação.'),
+      await expect(
+        service.resolvePartial(CLIENT_ID, DISPUTE_ID, dto),
+      ).rejects.toThrow(
+        new ForbiddenException(
+          'Não tens permissão para executar esta operação.',
+        ),
       );
     });
 
     it('lança NotFoundException se disputa não existe', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser(ADMIN_ID, UserRole.ADMIN));
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
       prisma.dispute.findUnique.mockResolvedValue(null);
 
-      await expect(service.resolvePartial(ADMIN_ID, DISPUTE_ID, dto)).rejects.toThrow(
-        new NotFoundException('Disputa não encontrada.'),
-      );
+      await expect(
+        service.resolvePartial(ADMIN_ID, DISPUTE_ID, dto),
+      ).rejects.toThrow(new NotFoundException('Disputa não encontrada.'));
     });
 
     it('lança BadRequestException se disputa já foi resolvida', async () => {
       setupAdminAndDispute({ status: DisputeStatus.RESOLVED_PARTIAL });
 
-      await expect(service.resolvePartial(ADMIN_ID, DISPUTE_ID, dto)).rejects.toThrow(
+      await expect(
+        service.resolvePartial(ADMIN_ID, DISPUTE_ID, dto),
+      ).rejects.toThrow(
         new BadRequestException('Esta disputa já foi resolvida.'),
       );
     });
@@ -786,13 +939,17 @@ describe('DisputesService', () => {
     it('lança BadRequestException se pagamento não está válido', async () => {
       setupAdminAndDispute({
         payment: {
-          id: PAYMENT_ID, status: PaymentStatus.FAILED,
+          id: PAYMENT_ID,
+          status: PaymentStatus.FAILED,
           totalCharged: new Prisma.Decimal(2650),
-          receiptNumber: 'REC-001', refundAmount: null,
+          receiptNumber: 'REC-001',
+          refundAmount: null,
         },
       });
 
-      await expect(service.resolvePartial(ADMIN_ID, DISPUTE_ID, dto)).rejects.toThrow(
+      await expect(
+        service.resolvePartial(ADMIN_ID, DISPUTE_ID, dto),
+      ).rejects.toThrow(
         new BadRequestException(
           'O pagamento desta disputa não está num estado válido para resolução parcial.',
         ),
@@ -812,10 +969,19 @@ describe('DisputesService', () => {
     it('calcula refundAmount correctamente — 30% de 2650 = 795', async () => {
       setupAdminAndDispute();
       // 2650 * 0.30 = 795
-      setupHappyTx(makeDispute({ status: DisputeStatus.RESOLVED_PARTIAL, refundPercent: 30 }));
+      setupHappyTx(
+        makeDispute({
+          status: DisputeStatus.RESOLVED_PARTIAL,
+          refundPercent: 30,
+        }),
+      );
 
-      const result = await service.resolvePartial(ADMIN_ID, DISPUTE_ID, { refundPercent: 30 });
-      expect(result.message).toBe('Disputa resolvida parcialmente com sucesso.');
+      const result = await service.resolvePartial(ADMIN_ID, DISPUTE_ID, {
+        refundPercent: 30,
+      });
+      expect(result.message).toBe(
+        'Disputa resolvida parcialmente com sucesso.',
+      );
     });
 
     it('resolve parcialmente com sucesso', async () => {
@@ -824,22 +990,28 @@ describe('DisputesService', () => {
 
       const result = await service.resolvePartial(ADMIN_ID, DISPUTE_ID, dto);
 
-      expect(result.message).toBe('Disputa resolvida parcialmente com sucesso.');
+      expect(result.message).toBe(
+        'Disputa resolvida parcialmente com sucesso.',
+      );
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     });
 
     it('resolve com pagamento RELEASED também', async () => {
       setupAdminAndDispute({
         payment: {
-          id: PAYMENT_ID, status: PaymentStatus.RELEASED,
+          id: PAYMENT_ID,
+          status: PaymentStatus.RELEASED,
           totalCharged: new Prisma.Decimal(2650),
-          receiptNumber: 'REC-001', refundAmount: null,
+          receiptNumber: 'REC-001',
+          refundAmount: null,
         },
       });
       setupHappyTx();
 
       const result = await service.resolvePartial(ADMIN_ID, DISPUTE_ID, dto);
-      expect(result.message).toBe('Disputa resolvida parcialmente com sucesso.');
+      expect(result.message).toBe(
+        'Disputa resolvida parcialmente com sucesso.',
+      );
     });
   });
 });

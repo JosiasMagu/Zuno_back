@@ -13,12 +13,12 @@ import { PrismaService } from '../../../shared/db/prisma.service';
 // CONSTANTES
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CLIENT_ID    = 'client-uuid-001';
-const OWNER_ID     = 'owner-uuid-001';
+const CLIENT_ID = 'client-uuid-001';
+const OWNER_ID = 'owner-uuid-001';
 const EQUIPMENT_ID = 'equipment-uuid-001';
-const BOOKING_ID   = 'booking-uuid-001';
-const REVIEW_ID    = 'review-uuid-001';
-const STRANGER_ID  = 'stranger-uuid-001';
+const BOOKING_ID = 'booking-uuid-001';
+const REVIEW_ID = 'review-uuid-001';
+const STRANGER_ID = 'stranger-uuid-001';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FACTORIES
@@ -54,15 +54,15 @@ const makeReview = (overrides: Record<string, unknown> = {}) => ({
 
 const makePrismaMock = () => {
   const mock = {
-    booking:   { findUnique: jest.fn() },
+    booking: { findUnique: jest.fn() },
     equipment: { findUnique: jest.fn(), update: jest.fn() },
-    user:      { findUnique: jest.fn(), update: jest.fn() },
+    user: { findUnique: jest.fn(), update: jest.fn() },
     review: {
       findUnique: jest.fn(),
-      findMany:   jest.fn(),
-      count:      jest.fn(),
-      create:     jest.fn(),
-      aggregate:  jest.fn(),
+      findMany: jest.fn(),
+      count: jest.fn(),
+      create: jest.fn(),
+      aggregate: jest.fn(),
     },
     $transaction: jest.fn(),
   };
@@ -81,10 +81,7 @@ describe('ReviewsService', () => {
     prisma = makePrismaMock();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        ReviewsService,
-        { provide: PrismaService, useValue: prisma },
-      ],
+      providers: [ReviewsService, { provide: PrismaService, useValue: prisma }],
     }).compile();
 
     service = module.get<ReviewsService>(ReviewsService);
@@ -142,12 +139,14 @@ describe('ReviewsService', () => {
     it('OWNER cria avaliação com sucesso — targetId é o clientId', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBooking());
       prisma.review.findUnique.mockResolvedValue(null);
-      setupHappyTx(makeReview({
-        authorId: OWNER_ID,
-        targetId: CLIENT_ID,
-        authorRole: ReviewAuthorRole.OWNER,
-        rating: 4,
-      }));
+      setupHappyTx(
+        makeReview({
+          authorId: OWNER_ID,
+          targetId: CLIENT_ID,
+          authorRole: ReviewAuthorRole.OWNER,
+          rating: 4,
+        }),
+      );
 
       const result = await service.create(OWNER_ID, ownerDto);
       expect(result.message).toBe('Avaliação submetida com sucesso.');
@@ -167,7 +166,9 @@ describe('ReviewsService', () => {
       );
 
       await expect(service.create(CLIENT_ID, clientDto)).rejects.toThrow(
-        new BadRequestException('Só é possível avaliar reservas concluídas ou canceladas.'),
+        new BadRequestException(
+          'Só é possível avaliar reservas concluídas ou canceladas.',
+        ),
       );
     });
 
@@ -176,7 +177,9 @@ describe('ReviewsService', () => {
         makeBooking({ status: BookingStatus.CONFIRMED }),
       );
 
-      await expect(service.create(CLIENT_ID, clientDto)).rejects.toThrow(BadRequestException);
+      await expect(service.create(CLIENT_ID, clientDto)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('lança BadRequestException se booking está DISPUTED', async () => {
@@ -184,7 +187,9 @@ describe('ReviewsService', () => {
         makeBooking({ status: BookingStatus.DISPUTED }),
       );
 
-      await expect(service.create(CLIENT_ID, clientDto)).rejects.toThrow(BadRequestException);
+      await expect(service.create(CLIENT_ID, clientDto)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('permite avaliação de booking CANCELLED', async () => {
@@ -211,7 +216,9 @@ describe('ReviewsService', () => {
 
       // OWNER a tentar usar papel CLIENT
       await expect(service.create(OWNER_ID, clientDto)).rejects.toThrow(
-        new ForbiddenException('Só o cliente pode submeter uma avaliação com o papel CLIENT.'),
+        new ForbiddenException(
+          'Só o cliente pode submeter uma avaliação com o papel CLIENT.',
+        ),
       );
     });
 
@@ -220,7 +227,9 @@ describe('ReviewsService', () => {
 
       // CLIENT a tentar usar papel OWNER
       await expect(service.create(CLIENT_ID, ownerDto)).rejects.toThrow(
-        new ForbiddenException('Só o proprietário pode submeter uma avaliação com o papel OWNER.'),
+        new ForbiddenException(
+          'Só o proprietário pode submeter uma avaliação com o papel OWNER.',
+        ),
       );
     });
 
@@ -229,7 +238,9 @@ describe('ReviewsService', () => {
       prisma.review.findUnique.mockResolvedValue(makeReview()); // já existe
 
       await expect(service.create(CLIENT_ID, clientDto)).rejects.toThrow(
-        new BadRequestException('Já submeteste uma avaliação para esta reserva.'),
+        new BadRequestException(
+          'Já submeteste uma avaliação para esta reserva.',
+        ),
       );
     });
 
@@ -301,7 +312,11 @@ describe('ReviewsService', () => {
       prisma.$transaction.mockImplementation(
         async (callback: (tx: typeof prisma) => Promise<unknown>) => {
           prisma.review.create.mockResolvedValue(
-            makeReview({ authorId: OWNER_ID, targetId: CLIENT_ID, authorRole: ReviewAuthorRole.OWNER }),
+            makeReview({
+              authorId: OWNER_ID,
+              targetId: CLIENT_ID,
+              authorRole: ReviewAuthorRole.OWNER,
+            }),
           );
           prisma.review.aggregate = aggregateMock;
           prisma.user.update.mockResolvedValue({});
@@ -349,7 +364,11 @@ describe('ReviewsService', () => {
 
       await service.findByEquipment(EQUIPMENT_ID, { page: 1, limit: 10 });
 
-      const where = (prisma.review.findMany.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+      const where = (
+        prisma.review.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
       expect(where).toMatchObject({
         targetId: EQUIPMENT_ID,
         authorRole: ReviewAuthorRole.CLIENT,
@@ -361,7 +380,10 @@ describe('ReviewsService', () => {
       prisma.review.findMany.mockResolvedValue([makeReview()]);
       prisma.review.count.mockResolvedValue(1);
 
-      const result = await service.findByEquipment(EQUIPMENT_ID, { page: 1, limit: 10 });
+      const result = await service.findByEquipment(EQUIPMENT_ID, {
+        page: 1,
+        limit: 10,
+      });
 
       expect(result.message).toBe('Avaliações obtidas com sucesso.');
       expect(result.data).toHaveLength(1);
@@ -373,11 +395,18 @@ describe('ReviewsService', () => {
       prisma.review.findMany.mockResolvedValue([makeReview()]);
       prisma.review.count.mockResolvedValue(20);
 
-      const result = await service.findByEquipment(EQUIPMENT_ID, { page: 2, limit: 5 });
+      const result = await service.findByEquipment(EQUIPMENT_ID, {
+        page: 2,
+        limit: 5,
+      });
 
       expect(result.meta).toMatchObject({
-        page: 2, limit: 5, total: 20, totalPages: 4,
-        hasNextPage: true, hasPreviousPage: true,
+        page: 2,
+        limit: 5,
+        total: 20,
+        totalPages: 4,
+        hasNextPage: true,
+        hasPreviousPage: true,
       });
     });
 
@@ -386,7 +415,10 @@ describe('ReviewsService', () => {
       prisma.review.findMany.mockResolvedValue([]);
       prisma.review.count.mockResolvedValue(0);
 
-      const result = await service.findByEquipment(EQUIPMENT_ID, { page: 1, limit: 10 });
+      const result = await service.findByEquipment(EQUIPMENT_ID, {
+        page: 1,
+        limit: 10,
+      });
       expect(result.meta.hasPreviousPage).toBe(false);
     });
   });
@@ -411,7 +443,11 @@ describe('ReviewsService', () => {
 
       await service.findByUser(OWNER_ID, { page: 1, limit: 10 });
 
-      const where = (prisma.review.findMany.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+      const where = (
+        prisma.review.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
       expect(where).toMatchObject({ targetId: OWNER_ID });
     });
 
@@ -421,10 +457,16 @@ describe('ReviewsService', () => {
       prisma.review.count.mockResolvedValue(0);
 
       await service.findByUser(OWNER_ID, {
-        page: 1, limit: 10, authorRole: ReviewAuthorRole.CLIENT,
+        page: 1,
+        limit: 10,
+        authorRole: ReviewAuthorRole.CLIENT,
       });
 
-      const where = (prisma.review.findMany.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+      const where = (
+        prisma.review.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
       expect(where).toMatchObject({ authorRole: ReviewAuthorRole.CLIENT });
     });
 
@@ -435,7 +477,11 @@ describe('ReviewsService', () => {
 
       await service.findByUser(OWNER_ID, { page: 1, limit: 10 });
 
-      const where = (prisma.review.findMany.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+      const where = (
+        prisma.review.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
       expect(where).not.toHaveProperty('authorRole');
     });
 
@@ -447,8 +493,12 @@ describe('ReviewsService', () => {
       const result = await service.findByUser(OWNER_ID, { page: 1, limit: 5 });
 
       expect(result.meta).toMatchObject({
-        page: 1, limit: 5, total: 10, totalPages: 2,
-        hasNextPage: true, hasPreviousPage: false,
+        page: 1,
+        limit: 5,
+        total: 10,
+        totalPages: 2,
+        hasNextPage: true,
+        hasPreviousPage: false,
       });
     });
   });
@@ -464,7 +514,11 @@ describe('ReviewsService', () => {
 
       await service.findMyReviews(CLIENT_ID, { page: 1, limit: 10 });
 
-      const where = (prisma.review.findMany.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+      const where = (
+        prisma.review.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
       expect(where).toMatchObject({ authorId: CLIENT_ID });
     });
 
@@ -472,9 +526,17 @@ describe('ReviewsService', () => {
       prisma.review.findMany.mockResolvedValue([]);
       prisma.review.count.mockResolvedValue(0);
 
-      await service.findMyReviews(CLIENT_ID, { page: 1, limit: 10, bookingId: BOOKING_ID });
+      await service.findMyReviews(CLIENT_ID, {
+        page: 1,
+        limit: 10,
+        bookingId: BOOKING_ID,
+      });
 
-      const where = (prisma.review.findMany.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+      const where = (
+        prisma.review.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
       expect(where).toMatchObject({ bookingId: BOOKING_ID });
     });
 
@@ -484,7 +546,11 @@ describe('ReviewsService', () => {
 
       await service.findMyReviews(CLIENT_ID, { page: 1, limit: 10 });
 
-      const where = (prisma.review.findMany.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+      const where = (
+        prisma.review.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
       expect(where).not.toHaveProperty('bookingId');
     });
 
@@ -492,7 +558,10 @@ describe('ReviewsService', () => {
       prisma.review.findMany.mockResolvedValue([]);
       prisma.review.count.mockResolvedValue(0);
 
-      const result = await service.findMyReviews(CLIENT_ID, { page: 1, limit: 10 });
+      const result = await service.findMyReviews(CLIENT_ID, {
+        page: 1,
+        limit: 10,
+      });
       expect(result.message).toBe('As tuas avaliações obtidas com sucesso.');
     });
 
@@ -500,11 +569,18 @@ describe('ReviewsService', () => {
       prisma.review.findMany.mockResolvedValue([makeReview()]);
       prisma.review.count.mockResolvedValue(7);
 
-      const result = await service.findMyReviews(CLIENT_ID, { page: 1, limit: 5 });
+      const result = await service.findMyReviews(CLIENT_ID, {
+        page: 1,
+        limit: 5,
+      });
 
       expect(result.meta).toMatchObject({
-        page: 1, limit: 5, total: 7, totalPages: 2,
-        hasNextPage: true, hasPreviousPage: false,
+        page: 1,
+        limit: 5,
+        total: 7,
+        totalPages: 2,
+        hasNextPage: true,
+        hasPreviousPage: false,
       });
     });
   });
@@ -539,7 +615,9 @@ describe('ReviewsService', () => {
       const result = await service.canReview(CLIENT_ID, BOOKING_ID);
 
       expect(result.data.canReview).toBe(false);
-      expect(result.data.reason).toBe('A reserva ainda não está concluída ou cancelada.');
+      expect(result.data.reason).toBe(
+        'A reserva ainda não está concluída ou cancelada.',
+      );
     });
 
     it('devolve canReview=false se booking está CONFIRMED', async () => {
