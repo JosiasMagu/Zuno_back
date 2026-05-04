@@ -69,7 +69,7 @@ export class ReviewsService {
       );
     }
 
-    if (dto.authorRole === ReviewAuthorRole.OWNER && !isOwner) {
+    if (dto.authorRole === ReviewAuthorRole.PROVIDER && !isOwner) {
       throw new ForbiddenException(
         'Só o proprietário pode submeter uma avaliação com o papel OWNER.',
       );
@@ -304,7 +304,7 @@ export class ReviewsService {
     const role =
       booking.clientId === userId
         ? ReviewAuthorRole.CLIENT
-        : ReviewAuthorRole.OWNER;
+        : ReviewAuthorRole.PROVIDER;
 
     return {
       message: 'Verificação concluída.',

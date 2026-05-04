@@ -314,13 +314,13 @@ model Message {
 
 enum UserRole {
   CLIENT
-  OWNER
+  PROVIDER
   ADMIN
 }
 
 enum ReviewAuthorRole {
   CLIENT
-  OWNER
+  PROVIDER
 }
 
 enum EquipmentStatus {

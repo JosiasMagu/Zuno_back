@@ -41,7 +41,7 @@ export class EquipmentController {
   // ─── Criar equipamento (OWNER / ADMIN) ────────────────────────────────────
 
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
   @Post()
   @ApiBearerAuth('access-token')
   @ApiOperation({
@@ -94,7 +94,7 @@ export class EquipmentController {
 
   @Get('me/listings')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Listar os meus equipamentos',
@@ -195,7 +195,7 @@ export class EquipmentController {
 
   @Patch(':id/toggle-availability')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Alternar disponibilidade do equipamento',
@@ -221,7 +221,7 @@ export class EquipmentController {
   // ─── Actualizar equipamento (OWNER / ADMIN) ───────────────────────────────
 
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
   @Patch(':id')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Actualizar equipamento' })
@@ -245,7 +245,7 @@ export class EquipmentController {
   // ─── Soft delete (OWNER / ADMIN) ──────────────────────────────────────────
 
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
   @Delete(':id')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Remover equipamento (soft delete)' })

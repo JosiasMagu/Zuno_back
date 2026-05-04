@@ -35,7 +35,7 @@ export class PaymentsController {
 
   @Post('booking/:bookingId/initiate')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.CLIENT, UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Iniciar pagamento de uma reserva' })
   @ApiParam({ name: 'bookingId', description: 'ID da reserva' })
@@ -54,7 +54,7 @@ export class PaymentsController {
 
   @Get('me')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.CLIENT, UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Listar pagamentos do utilizador autenticado' })
   @ApiQuery({ name: 'page', required: false, example: 1 })
@@ -70,7 +70,7 @@ export class PaymentsController {
 
   @Get(':id')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.CLIENT, UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Obter pagamento por ID' })
   @ApiParam({ name: 'id', description: 'ID do pagamento' })

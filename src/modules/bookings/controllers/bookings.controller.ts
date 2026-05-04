@@ -36,7 +36,7 @@ export class BookingsController {
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles(UserRole.CLIENT, UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Criar reserva' })
   @ApiBody({ type: CreateBookingDto })
@@ -50,7 +50,7 @@ export class BookingsController {
 
   @Get('me')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.CLIENT, UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Listar reservas do utilizador autenticado como cliente',
@@ -68,7 +68,7 @@ export class BookingsController {
 
   @Get('owner')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Listar reservas como proprietário' })
   @ApiQuery({ name: 'page', required: false, example: 1 })
@@ -87,7 +87,7 @@ export class BookingsController {
 
   @Get(':id')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.CLIENT, UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Obter reserva por ID' })
   @ApiParam({ name: 'id', description: 'ID da reserva' })
@@ -100,7 +100,7 @@ export class BookingsController {
 
   @Patch(':id/confirm')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Confirmar reserva' })
   @ApiParam({ name: 'id', description: 'ID da reserva' })
@@ -114,7 +114,7 @@ export class BookingsController {
 
   @Patch(':id/cancel')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.CLIENT, UserRole.OWNER, UserRole.ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Cancelar reserva' })
   @ApiParam({ name: 'id', description: 'ID da reserva' })
