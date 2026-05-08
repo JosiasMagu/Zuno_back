@@ -8,6 +8,8 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 
+import { captureUnhandled } from '../../shared/sentry/sentry';
+
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
@@ -32,7 +34,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
         exceptionResponse !== null
       ) {
         const resp = exceptionResponse as Record<string, unknown>;
-        // Mensagem de validação do class-validator vem como array
         if (Array.isArray(resp.message)) {
           message = (resp.message as string[]).join('; ');
         } else if (typeof resp.message === 'string') {
@@ -45,6 +46,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
         `Unhandled error on ${request.method} ${request.url}`,
         exception.stack,
       );
+    }
+
+    if (Number(status) >= 500) {
+      captureUnhandled(exception);
     }
 
     const isDev = process.env.NODE_ENV !== 'production';

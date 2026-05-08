@@ -4,8 +4,16 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BookingStatus, PaymentStatus, UserRole } from '@prisma/client';
+import {
+  AuditAction,
+  BookingStatus,
+  PaymentStatus,
+  Prisma,
+  UserRole,
+} from '@prisma/client';
+import * as crypto from 'crypto';
 
+import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { InitiatePaymentDto } from '../dto/initiate-payment.dto';
 import { FindPaymentsQueryDto } from '../dto/find-payments-query.dto';
@@ -13,7 +21,10 @@ import { PaymentPresenter } from '../presenters/payment.presenter';
 
 @Injectable()
 export class PaymentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   async initiate(userId: string, bookingId: string, dto: InitiatePaymentDto) {
     const booking = await this.prisma.booking.findUnique({
@@ -124,6 +135,19 @@ export class PaymentsService {
             avatarUrl: true,
           },
         },
+      },
+    });
+
+    await this.audit.record({
+      action: AuditAction.PAYMENT_INITIATED,
+      actorId: userId,
+      targetType: 'Payment',
+      targetId: payment.id,
+      amount: payment.totalCharged,
+      metadata: {
+        bookingId: booking.id,
+        method: dto.method,
+        receiptNumber: payment.receiptNumber,
       },
     });
 
@@ -368,6 +392,14 @@ export class PaymentsService {
       },
     });
 
+    await this.audit.record({
+      action: AuditAction.PAYMENT_MARKED_HELD,
+      actorId: userId,
+      targetType: 'Payment',
+      targetId: updatedPayment.id,
+      amount: updatedPayment.totalCharged,
+    });
+
     return {
       message: 'Pagamento marcado como retido com sucesso.',
       data: PaymentPresenter.toListItem(updatedPayment),
@@ -410,8 +442,8 @@ export class PaymentsService {
       throw new NotFoundException('Utilizador não encontrado.');
     }
 
-    // Só o CLIENT (confirma recepção do equipamento) ou ADMIN pode liberar.
-    // O OWNER NUNCA pode liberar o seu próprio pagamento —
+    // So o CLIENT (confirma recepcao do equipamento) ou ADMIN pode liberar.
+    // O OWNER NUNCA pode liberar o seu proprio pagamento
     // isso quebraria a garantia central do cofre digital.
     const canRelease =
       user.role === UserRole.ADMIN || payment.clientId === userId;
@@ -443,46 +475,70 @@ export class PaymentsService {
       );
     }
 
-    const [, updatedPayment] = await this.prisma.$transaction([
-      this.prisma.booking.update({
-        where: { id: payment.booking.id },
-        data: {
-          status: BookingStatus.COMPLETED,
-        },
-      }),
-      this.prisma.payment.update({
-        where: { id: paymentId },
-        data: {
-          status: PaymentStatus.RELEASED,
-          releasedAt: new Date(),
-          depositReleasedAt: new Date(),
-        },
-        include: {
-          booking: {
-            select: {
-              id: true,
-              startDate: true,
-              endDate: true,
-              status: true,
+    const updatedPayment = await this.prisma.$transaction(
+      async (tx) => {
+        const fresh = await tx.payment.findUnique({
+          where: { id: paymentId },
+          select: { status: true },
+        });
+
+        if (!fresh || fresh.status !== PaymentStatus.HELD) {
+          throw new BadRequestException(
+            'Apenas pagamentos retidos podem ser liberados.',
+          );
+        }
+
+        await tx.booking.update({
+          where: { id: payment.booking.id },
+          data: { status: BookingStatus.COMPLETED },
+        });
+
+        return tx.payment.update({
+          where: { id: paymentId },
+          data: {
+            status: PaymentStatus.RELEASED,
+            releasedAt: new Date(),
+            depositReleasedAt: new Date(),
+          },
+          include: {
+            booking: {
+              select: {
+                id: true,
+                startDate: true,
+                endDate: true,
+                status: true,
+              },
+            },
+            client: {
+              select: {
+                id: true,
+                name: true,
+                avatarUrl: true,
+              },
+            },
+            owner: {
+              select: {
+                id: true,
+                name: true,
+                avatarUrl: true,
+              },
             },
           },
-          client: {
-            select: {
-              id: true,
-              name: true,
-              avatarUrl: true,
-            },
-          },
-          owner: {
-            select: {
-              id: true,
-              name: true,
-              avatarUrl: true,
-            },
-          },
-        },
-      }),
-    ]);
+        });
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        timeout: 5000,
+      },
+    );
+
+    await this.audit.record({
+      action: AuditAction.PAYMENT_RELEASED,
+      actorId: userId,
+      targetType: 'Payment',
+      targetId: updatedPayment.id,
+      amount: updatedPayment.ownerPayout,
+    });
 
     return {
       message: 'Pagamento liberado com sucesso.',
@@ -585,6 +641,14 @@ export class PaymentsService {
       }),
     ]);
 
+    await this.audit.record({
+      action: AuditAction.PAYMENT_REFUNDED,
+      actorId: userId,
+      targetType: 'Payment',
+      targetId: updatedPayment.id,
+      amount: updatedPayment.refundAmount,
+    });
+
     return {
       message: 'Pagamento reembolsado com sucesso.',
       data: PaymentPresenter.toListItem(updatedPayment),
@@ -614,11 +678,11 @@ export class PaymentsService {
   }
 
   private buildReceiptNumber() {
-    const timestamp = Date.now();
-    const random = Math.floor(Math.random() * 100000)
-      .toString()
-      .padStart(5, '0');
-
-    return `ZUNO-${timestamp}-${random}`;
+    const token = crypto
+      .randomUUID()
+      .replace(/-/g, '')
+      .slice(0, 12)
+      .toUpperCase();
+    return `ZUNO-${token}`;
   }
 }

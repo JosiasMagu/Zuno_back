@@ -1,15 +1,22 @@
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
+import { Logger as PinoLogger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { flushSentry, initSentry } from './shared/sentry/sentry';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-  const logger = new Logger('Bootstrap');
+  initSentry();
+
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const logger = app.get(PinoLogger);
+  app.useLogger(logger);
+
+  app.enableShutdownHooks();
 
   app.setGlobalPrefix('api/v1');
 
@@ -25,10 +32,13 @@ async function bootstrap() {
     .filter(Boolean);
 
   app.enableCors({
-    origin: (origin, callback) => {
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
-      callback(new Error(`CORS: origem não permitida — ${origin}`));
+      callback(new Error(`CORS: origem não permitida (${origin})`));
     },
     credentials: true,
   });
@@ -73,5 +83,13 @@ async function bootstrap() {
   logger.log(`Zuno API a correr em http://localhost:${port}/api/v1`);
   logger.log(`Ambiente: ${process.env.NODE_ENV ?? 'development'}`);
 }
+
+async function shutdown(signal: string) {
+  await flushSentry();
+  process.exit(signal === 'uncaughtException' ? 1 : 0);
+}
+
+process.once('SIGINT', () => void shutdown('SIGINT'));
+process.once('SIGTERM', () => void shutdown('SIGTERM'));
 
 void bootstrap();

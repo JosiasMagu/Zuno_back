@@ -27,6 +27,7 @@ model User {
   updatedAt       DateTime       @updatedAt
 
   sessions             AuthSession[]
+  verificationCodes    VerificationCode[]
   equipment            Equipment[]
   clientBookings       Booking[]      @relation("ClientBookings")
   ownerBookings        Booking[]      @relation("OwnerBookings")
@@ -375,4 +376,54 @@ enum DisputeStatus {
   RESOLVED_CLIENT
   RESOLVED_OWNER
   RESOLVED_PARTIAL
+}
+
+enum AuditAction {
+  PAYMENT_INITIATED
+  PAYMENT_MARKED_HELD
+  PAYMENT_RELEASED
+  PAYMENT_REFUNDED
+  PAYMENT_PARTIALLY_REFUNDED
+  DISPUTE_OPENED
+  DISPUTE_RESPONDED
+  DISPUTE_RESOLVED_CLIENT
+  DISPUTE_RESOLVED_OWNER
+  DISPUTE_RESOLVED_PARTIAL
+}
+
+enum VerificationPurpose {
+  PHONE_VERIFICATION
+  PASSWORD_RESET
+}
+
+model VerificationCode {
+  id        String              @id @default(uuid())
+  userId    String
+  purpose   VerificationPurpose
+  codeHash  String
+  expiresAt DateTime
+  usedAt    DateTime?
+  attempts  Int                 @default(0)
+  createdAt DateTime            @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, usedAt])
+  @@index([expiresAt])
+}
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  action     AuditAction
+  actorId    String
+  targetType String
+  targetId   String
+  amount     Decimal?    @db.Decimal(12, 2)
+  metadata   Json?
+  createdAt  DateTime    @default(now())
+
+  @@index([actorId])
+  @@index([action])
+  @@index([targetType, targetId])
+  @@index([createdAt])
 }
