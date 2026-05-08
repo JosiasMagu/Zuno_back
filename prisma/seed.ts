@@ -289,19 +289,13 @@ async function printSummary() {
   ]);
 
   console.log('');
-  console.log(
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-  );
+  console.log('------------------------------------------------------------');
   console.log('  Estado da BD');
-  console.log(
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-  );
+  console.log('------------------------------------------------------------');
   console.log(`  Utilizadores:   ${users}`);
   console.log(`  Categorias:     ${categories}`);
   console.log(`  Equipamentos:   ${equipment}`);
-  console.log(
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-  );
+  console.log('------------------------------------------------------------');
   console.log('');
   console.log(`  Password de teste: ${SEED_PASSWORD}`);
   console.log('  admin:        +258840000000  (admin@zuno.co.mz)');
@@ -316,7 +310,7 @@ async function main() {
   abortIfProduction();
 
   console.log('');
-  console.log('Zuno — Seed da base de dados');
+  console.log('Zuno - Seed da base de dados');
   console.log('');
 
   const passwordHash = await hashPassword(SEED_PASSWORD);

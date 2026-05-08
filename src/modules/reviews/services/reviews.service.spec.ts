@@ -9,9 +9,7 @@ import { BookingStatus, ReviewAuthorRole } from '@prisma/client';
 import { ReviewsService } from './reviews.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 
-// ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTES
-// ─────────────────────────────────────────────────────────────────────────────
 
 const CLIENT_ID = 'client-uuid-001';
 const OWNER_ID = 'owner-uuid-001';
@@ -20,9 +18,7 @@ const BOOKING_ID = 'booking-uuid-001';
 const REVIEW_ID = 'review-uuid-001';
 const STRANGER_ID = 'stranger-uuid-001';
 
-// ─────────────────────────────────────────────────────────────────────────────
 // FACTORIES
-// ─────────────────────────────────────────────────────────────────────────────
 
 const makeBooking = (overrides: Record<string, unknown> = {}) => ({
   id: BOOKING_ID,
@@ -47,10 +43,8 @@ const makeReview = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MOCK DO PRISMA
-// Inclui os modelos usados dentro das transacções (tx)
-// ─────────────────────────────────────────────────────────────────────────────
+// Inclui os modelos usados dentro das transaccoes (tx)
 
 const makePrismaMock = () => {
   const mock = {
@@ -69,9 +63,7 @@ const makePrismaMock = () => {
   return mock;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
 // SUITE PRINCIPAL
-// ─────────────────────────────────────────────────────────────────────────────
 
 describe('ReviewsService', () => {
   let service: ReviewsService;
@@ -89,9 +81,7 @@ describe('ReviewsService', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  // ───────────────────────────────────────────────────────────────────────────
   // create()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('create()', () => {
     const clientDto = {
@@ -112,7 +102,7 @@ describe('ReviewsService', () => {
     const setupHappyTx = (reviewResult = makeReview()) => {
       prisma.$transaction.mockImplementation(
         async (callback: (tx: typeof prisma) => Promise<unknown>) => {
-          // O tx tem os mesmos métodos do prisma mock
+          // O tx tem os mesmos metodos do prisma mock
           prisma.review.create.mockResolvedValue(reviewResult);
           prisma.review.aggregate.mockResolvedValue({
             _avg: { rating: 4.5 },
@@ -326,9 +316,9 @@ describe('ReviewsService', () => {
 
       await service.create(OWNER_ID, ownerDto);
 
-      // aggregate chamado apenas 1 vez (só para o cliente)
+      // aggregate chamado apenas 1 vez (so para o cliente)
       expect(aggregateMock).toHaveBeenCalledTimes(1);
-      // equipment.update nunca é chamado quando OWNER avalia
+      // equipment.update nunca e chamado quando OWNER avalia
       expect(prisma.equipment.update).not.toHaveBeenCalled();
       expect(prisma.user.update).toHaveBeenCalledTimes(1);
     });
@@ -344,9 +334,7 @@ describe('ReviewsService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // findByEquipment()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('findByEquipment()', () => {
     it('lança NotFoundException se equipment não existe', async () => {
@@ -423,9 +411,7 @@ describe('ReviewsService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // findByUser()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('findByUser()', () => {
     it('lança NotFoundException se utilizador não existe', async () => {
@@ -503,9 +489,7 @@ describe('ReviewsService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // findMyReviews()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('findMyReviews()', () => {
     it('filtra por authorId do utilizador autenticado', async () => {
@@ -585,9 +569,7 @@ describe('ReviewsService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // canReview()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('canReview()', () => {
     it('lança NotFoundException se booking não existe', async () => {

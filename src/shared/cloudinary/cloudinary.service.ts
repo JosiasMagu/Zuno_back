@@ -4,7 +4,7 @@ import { Readable } from 'stream';
 
 @Injectable()
 export class CloudinaryService {
-  // Tamanho máximo por ficheiro: 5MB
+  // Tamanho maximo por ficheiro: 5MB
   private readonly MAX_SIZE_BYTES = 5 * 1024 * 1024;
 
   // Tipos aceites
@@ -26,9 +26,9 @@ export class CloudinaryService {
         {
           folder: `zuno/equipment/${equipmentId}`,
           transformation: [
-            // Redimensiona para máximo 1200px de largura mantendo proporção
+            // Redimensiona para maximo 1200px de largura mantendo proporcao
             { width: 1200, crop: 'limit' },
-            // Qualidade automática — Cloudinary optimiza o tamanho
+            // Qualidade automatica - Cloudinary optimiza o tamanho
             { quality: 'auto' },
             // Converte para webp para melhor performance no mobile
             { fetch_format: 'auto' },
@@ -60,8 +60,8 @@ export class CloudinaryService {
     try {
       await cloudinary.uploader.destroy(publicId);
     } catch {
-      // Falha silenciosa — se a foto já não existe no Cloudinary,
-      // não é motivo para rejeitar a operação na base de dados
+      // Falha silenciosa - se a foto ja nao existe no Cloudinary,
+      // nao e motivo para rejeitar a operacao na base de dados
     }
   }
 

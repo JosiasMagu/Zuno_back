@@ -28,7 +28,7 @@ import { ReviewsService } from '../services/reviews.service';
 export class ReviewsController {
   constructor(private readonly reviewsService: ReviewsService) {}
 
-  // ─── Submeter avaliação ───────────────────────────────────────────────────
+  // Submeter avaliacao
 
   @Post('reviews')
   @UseGuards(JwtAuthGuard)
@@ -52,7 +52,7 @@ export class ReviewsController {
     return this.reviewsService.create(user.id, dto);
   }
 
-  // ─── Verificar se pode avaliar ────────────────────────────────────────────
+  // Verificar se pode avaliar
 
   @Get('bookings/:bookingId/can-review')
   @UseGuards(JwtAuthGuard)
@@ -73,7 +73,7 @@ export class ReviewsController {
     return this.reviewsService.canReview(user.id, bookingId);
   }
 
-  // ─── Avaliações de um equipment ───────────────────────────────────────────
+  // Avaliacoes de um equipment
 
   @Get('equipment/:equipmentId/reviews')
   @ApiOperation({
@@ -93,7 +93,7 @@ export class ReviewsController {
     return this.reviewsService.findByEquipment(equipmentId, query);
   }
 
-  // ─── Avaliações de um utilizador (como target) ────────────────────────────
+  // Avaliacoes de um utilizador (como target)
 
   @Get('users/:userId/reviews')
   @ApiOperation({
@@ -119,7 +119,7 @@ export class ReviewsController {
     return this.reviewsService.findByUser(userId, query);
   }
 
-  // ─── As minhas avaliações submetidas ──────────────────────────────────────
+  // As minhas avaliacoes submetidas
 
   @Get('reviews/me')
   @UseGuards(JwtAuthGuard)

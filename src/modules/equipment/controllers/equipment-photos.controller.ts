@@ -34,7 +34,7 @@ import { EquipmentPhotosService } from '../services/equipment-photos.service';
 export class EquipmentPhotosController {
   constructor(private readonly photosService: EquipmentPhotosService) {}
 
-  // ─── Listar fotos (público) ───────────────────────────────────────────────
+  // Listar fotos (publico)
 
   @Get()
   @ApiOperation({ summary: 'Listar fotos de um equipamento' })
@@ -45,16 +45,16 @@ export class EquipmentPhotosController {
     return this.photosService.listPhotos(equipmentId);
   }
 
-  // ─── Upload de uma foto ───────────────────────────────────────────────────
+  // Upload de uma foto
 
   @Post('upload')
   @UseGuards(RolesGuard)
   @Roles(UserRole.PROVIDER, UserRole.ADMIN)
   @UseInterceptors(
     FileInterceptor('photo', {
-      // Guarda em memória (buffer) — o Cloudinary recebe o stream
+      // Guarda em memoria (buffer) - o Cloudinary recebe o stream
       storage: undefined,
-      limits: { fileSize: 5 * 1024 * 1024 }, // 5MB — validação extra no service
+      limits: { fileSize: 5 * 1024 * 1024 },
     }),
   )
   @ApiBearerAuth('access-token')
@@ -94,7 +94,7 @@ export class EquipmentPhotosController {
     return this.photosService.uploadPhoto(user.id, equipmentId, file);
   }
 
-  // ─── Upload múltiplo (até 5 fotos) ───────────────────────────────────────
+  // Upload multiplo (ate 5 fotos)
 
   @Post('upload-multiple')
   @UseGuards(RolesGuard)
@@ -141,7 +141,7 @@ export class EquipmentPhotosController {
     return this.photosService.uploadMultiplePhotos(user.id, equipmentId, files);
   }
 
-  // ─── Definir foto primária ────────────────────────────────────────────────
+  // Definir foto primaria
 
   @Patch(':photoId/set-primary')
   @UseGuards(RolesGuard)
@@ -171,7 +171,7 @@ export class EquipmentPhotosController {
     return this.photosService.setPrimary(user.id, equipmentId, photoId);
   }
 
-  // ─── Apagar foto ──────────────────────────────────────────────────────────
+  // Apagar foto
 
   @Delete(':photoId')
   @UseGuards(RolesGuard)

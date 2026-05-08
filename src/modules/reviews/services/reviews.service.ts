@@ -27,10 +27,7 @@ const REVIEWABLE_STATUSES: BookingStatus[] = [
 export class ReviewsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // ─── Submeter avaliação ───────────────────────────────────────────────────
-
   async create(userId: string, dto: CreateReviewDto) {
-    // 1. Buscar a booking com todos os dados necessários
     const booking = await this.prisma.booking.findUnique({
       where: { id: dto.bookingId },
       select: {
@@ -46,14 +43,12 @@ export class ReviewsService {
       throw new NotFoundException('Reserva não encontrada.');
     }
 
-    // 2. Verificar se o status permite avaliação
     if (!REVIEWABLE_STATUSES.includes(booking.status)) {
       throw new BadRequestException(
         'Só é possível avaliar reservas concluídas ou canceladas.',
       );
     }
 
-    // 3. Verificar se o utilizador é parte da booking e se o papel é coerente
     const isClient = booking.clientId === userId;
     const isOwner = booking.ownerId === userId;
 
@@ -75,7 +70,6 @@ export class ReviewsService {
       );
     }
 
-    // 4. Verificar se já avaliou esta booking (unicidade por bookingId + authorId)
     const existing = await this.prisma.review.findUnique({
       where: {
         bookingId_authorId: {

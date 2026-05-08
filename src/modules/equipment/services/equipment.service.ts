@@ -51,7 +51,7 @@ const PHOTOS_ORDER = [
 export class EquipmentService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // ─── Criar equipamento ────────────────────────────────────────────────────
+  // Criar equipamento
 
   async create(ownerId: string, dto: CreateEquipmentDto) {
     const categoryId = dto.categoryId.trim();
@@ -96,7 +96,7 @@ export class EquipmentService {
     };
   }
 
-  // ─── Listar equipamentos (público, só ACTIVE) ─────────────────────────────
+  // Listar equipamentos (publico, so ACTIVE)
 
   async findAll(query: FindEquipmentQueryDto) {
     const page = query.page ?? 1;
@@ -196,7 +196,7 @@ export class EquipmentService {
     };
   }
 
-  // ─── Detalhe público (só ACTIVE) ──────────────────────────────────────────
+  // Detalhe publico (so ACTIVE)
 
   async findOne(id: string) {
     const equipment = await this.prisma.equipment.findFirst({
@@ -218,7 +218,7 @@ export class EquipmentService {
     };
   }
 
-  // ─── Listings do owner / admin ────────────────────────────────────────────
+  // Listings do owner / admin
 
   async findMyListings(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -230,7 +230,7 @@ export class EquipmentService {
       throw new NotFoundException('Utilizador não encontrado.');
     }
 
-    // ADMIN vê todos; OWNER só vê os seus
+    // ADMIN ve todos; OWNER so ve os seus
     const where: Prisma.EquipmentWhereInput =
       user.role === UserRole.ADMIN ? {} : { ownerId: userId };
 
@@ -250,7 +250,7 @@ export class EquipmentService {
     };
   }
 
-  // ─── Aprovar equipamento (ADMIN) ──────────────────────────────────────────
+  // Aprovar equipamento (ADMIN)
 
   async approve(adminId: string, equipmentId: string) {
     await this.assertAdmin(adminId);
@@ -293,7 +293,7 @@ export class EquipmentService {
     };
   }
 
-  // ─── Rejeitar equipamento (ADMIN) ─────────────────────────────────────────
+  // Rejeitar equipamento (ADMIN)
 
   async reject(adminId: string, equipmentId: string, reason?: string) {
     await this.assertAdmin(adminId);
@@ -338,7 +338,7 @@ export class EquipmentService {
     };
   }
 
-  // ─── Pausar / reactivar equipamento (OWNER ou ADMIN) ─────────────────────
+  // Pausar / reactivar equipamento (OWNER ou ADMIN)
 
   async toggleAvailability(userId: string, equipmentId: string) {
     const equipment = await this.prisma.equipment.findUnique({
@@ -392,7 +392,7 @@ export class EquipmentService {
     };
   }
 
-  // ─── Actualizar equipamento (OWNER ou ADMIN) ──────────────────────────────
+  // Actualizar equipamento (OWNER ou ADMIN)
 
   async update(userId: string, id: string, dto: UpdateEquipmentDto) {
     const existingEquipment = await this.prisma.equipment.findUnique({
@@ -463,7 +463,7 @@ export class EquipmentService {
     };
   }
 
-  // ─── Soft delete (OWNER ou ADMIN) ─────────────────────────────────────────
+  // Soft delete (OWNER ou ADMIN)
 
   async remove(userId: string, id: string) {
     const existingEquipment = await this.prisma.equipment.findUnique({

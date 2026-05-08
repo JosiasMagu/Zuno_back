@@ -24,9 +24,6 @@ export class BookingsService {
   async create(clientId: string, dto: CreateBookingDto) {
     const equipmentId = dto.equipmentId.trim();
 
-    // ── 1. Carregar e validar equipamento ANTES da transacção ────────────────
-    // Leituras que não mudam de forma concorrente são feitas fora para não
-    // segurar o lock da transacção mais tempo do que o necessário.
     const equipment = await this.prisma.equipment.findUnique({
       where: { id: equipmentId },
       include: {
@@ -55,7 +52,6 @@ export class BookingsService {
       );
     }
 
-    // ── 2. Validar e normalizar datas ────────────────────────────────────────
     const startDate = new Date(dto.startDate);
     const endDate = new Date(dto.endDate);
 
@@ -86,23 +82,11 @@ export class BookingsService {
       throw new BadRequestException('A reserva deve ter pelo menos 1 dia.');
     }
 
-    // ── 3. Calcular valores ──────────────────────────────────────────────────
     const rentalAmount = Number(equipment.pricePerDay) * totalDays;
     const depositAmount = Number(equipment.depositAmount ?? 0);
     const platformFee = this.calculatePlatformFee(rentalAmount);
     const totalAmount = rentalAmount + depositAmount + platformFee;
 
-    // ── 4. Transacção SERIALIZABLE — elimina a race condition ────────────────
-    //
-    // PROBLEMA ANTERIOR: o findFirst e o create eram dois passos separados.
-    // Se dois pedidos chegassem em simultâneo, ambos passavam a verificação
-    // de conflito e ambos criavam a reserva — dupla reserva garantida.
-    //
-    // SOLUÇÃO: com isolationLevel Serializable, o PostgreSQL garante que dois
-    // findFirst + create concorrentes sobre o mesmo equipamento se comportam
-    // como se fossem executados em série. O segundo a chegar recebe P2034
-    // (serialization failure) que convertemos numa mensagem clara.
-    //
     const conflictWhere: Prisma.BookingWhereInput = {
       equipmentId: equipment.id,
       status: {
@@ -118,11 +102,6 @@ export class BookingsService {
       ],
     };
 
-    // ── Transacção SERIALIZABLE com const interno ────────────────────────────
-    // Declarar `booking` como const DENTRO do try é o padrão que o TypeScript
-    // consegue inferir correctamente — inclui os tipos das relações do `include`.
-    // Se usarmos `let` fora + try/catch, o TS perde a inferência dos includes
-    // e bate no tipo base do Booking sem relações (erro na linha do Presenter).
     try {
       const booking = await this.prisma.$transaction(
         async (tx) => {
@@ -173,9 +152,9 @@ export class BookingsService {
         data: BookingPresenter.toListItem(booking),
       };
     } catch (error) {
-      // P2034 = falha de serialização ou deadlock do Prisma/PostgreSQL.
+      // P2034 = falha de serializacao ou deadlock do Prisma/PostgreSQL.
       // Acontece exactamente quando dois pedidos concorrentes tentam criar
-      // reservas sobrepostas — relanço como mensagem legível pelo utilizador.
+      // reservas sobrepostas - relanco como mensagem legivel pelo utilizador.
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2034'
@@ -184,7 +163,7 @@ export class BookingsService {
           'Já existe uma reserva para este equipamento nesse período.',
         );
       }
-      // Excepções de negócio (BadRequestException, etc.) passam sem alteração.
+      // Excepcoes de negocio (BadRequestException, etc.) passam sem alteracao.
       throw error;
     }
   }
@@ -494,7 +473,7 @@ export class BookingsService {
     };
   }
 
-  // ── Helpers privados ───────────────────────────────────────────────────────
+  // Helpers privados
 
   private calculateTotalDays(startDate: Date, endDate: Date): number {
     const diffMs = endDate.getTime() - startDate.getTime();

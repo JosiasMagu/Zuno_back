@@ -10,7 +10,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-// ─── Iniciar conversa ─────────────────────────────────────────────────────────
+// Iniciar conversa
 
 export class StartConversationDto {
   @ApiProperty({
@@ -32,7 +32,7 @@ export class StartConversationDto {
   firstMessage: string;
 }
 
-// ─── Enviar mensagem (via REST — fallback) ────────────────────────────────────
+// Enviar mensagem (via REST - fallback)
 
 export class SendMessageDto {
   @ApiProperty({
@@ -47,7 +47,7 @@ export class SendMessageDto {
   content: string;
 }
 
-// ─── Query de mensagens ───────────────────────────────────────────────────────
+// Query de mensagens
 
 export class FindMessagesQueryDto {
   @ApiPropertyOptional({ example: 1, description: 'Página', default: 1 })
@@ -69,7 +69,7 @@ export class FindMessagesQueryDto {
   limit?: number = 30;
 }
 
-// ─── Payload WebSocket — cliente envia ao servidor ────────────────────────────
+// Payload WebSocket - cliente envia ao servidor
 
 export class WsMessagePayload {
   @IsUUID()

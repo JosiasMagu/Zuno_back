@@ -26,10 +26,10 @@ const EQUIPMENT_SELECT = {
 export class ChatService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // ─── Iniciar conversa (CLIENT) ────────────────────────────────────────────
+  // Iniciar conversa (CLIENT)
 
   async startConversation(clientId: string, dto: StartConversationDto) {
-    // Verificar se o utilizador é CLIENT
+    // Verificar se o utilizador e CLIENT
     const client = await this.prisma.user.findUnique({
       where: { id: clientId },
       select: { id: true, role: true },
@@ -41,7 +41,7 @@ export class ChatService {
       throw new ForbiddenException('Só clientes podem iniciar conversas.');
     }
 
-    // Verificar se o equipment existe e está activo
+    // Verificar se o equipment existe e esta activo
     const equipment = await this.prisma.equipment.findUnique({
       where: { id: dto.equipmentId },
       select: { id: true, ownerId: true, status: true, title: true },
@@ -53,7 +53,7 @@ export class ChatService {
       );
     }
 
-    // Cliente não pode contactar o seu próprio equipment
+    // Cliente nao pode contactar o seu proprio equipment
     if (equipment.ownerId === clientId) {
       throw new BadRequestException(
         'Não podes iniciar uma conversa sobre o teu próprio equipamento.',
