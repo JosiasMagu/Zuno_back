@@ -42,11 +42,17 @@ import { DatabaseModule } from './shared/db/database.module';
   ],
   controllers: [],
   providers: [
-    // Aplica o ThrottlerGuard globalmente a todas as rotas
-    {
-      provide: APP_GUARD,
-      useClass: ThrottlerGuard,
-    },
+{
+  provide: APP_GUARD,
+  useClass:
+    process.env.THROTTLER_DISABLED === 'true'
+      ? class NoopGuard {
+          canActivate() {
+            return true;
+          }
+        }
+      : ThrottlerGuard,
+},
   ],
 })
 export class AppModule {}
