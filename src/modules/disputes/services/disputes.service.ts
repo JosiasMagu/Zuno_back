@@ -5,12 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditAction,
   BookingStatus,
   DisputeStatus,
   PaymentStatus,
   UserRole,
 } from '@prisma/client';
 
+import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { CreateDisputeDto } from '../dto/create-dispute.dto';
 import { FindDisputesQueryDto } from '../dto/find-disputes-query.dto';
@@ -20,7 +22,10 @@ import { DisputePresenter } from '../presenters/dispute.presenter';
 
 @Injectable()
 export class DisputesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   async create(userId: string, dto: CreateDisputeDto) {
     const bookingId = dto.bookingId.trim();
@@ -64,10 +69,7 @@ export class DisputesService {
       );
     }
 
-    if (
-      payment.status !== PaymentStatus.HELD &&
-      payment.status !== PaymentStatus.RELEASED
-    ) {
+    if (payment.status !== PaymentStatus.HELD) {
       throw new BadRequestException(
         'O estado atual do pagamento não permite abrir disputa.',
       );
@@ -120,6 +122,18 @@ export class DisputesService {
           },
         },
       });
+    });
+
+    await this.audit.record({
+      action: AuditAction.DISPUTE_OPENED,
+      actorId: userId,
+      targetType: 'Dispute',
+      targetId: dispute.id,
+      metadata: {
+        bookingId: booking.id,
+        paymentId: payment.id,
+        reason: dto.reason,
+      },
     });
 
     return {
@@ -360,6 +374,13 @@ export class DisputesService {
       },
     });
 
+    await this.audit.record({
+      action: AuditAction.DISPUTE_RESPONDED,
+      actorId: userId,
+      targetType: 'Dispute',
+      targetId: disputeId,
+    });
+
     return {
       message: 'Resposta da disputa registrada com sucesso.',
       data: DisputePresenter.toDetails(updatedDispute),
@@ -448,6 +469,14 @@ export class DisputesService {
         },
       }),
     ]);
+
+    await this.audit.record({
+      action: AuditAction.DISPUTE_RESOLVED_CLIENT,
+      actorId: userId,
+      targetType: 'Dispute',
+      targetId: disputeId,
+      amount: dispute.payment.totalCharged,
+    });
 
     return {
       message: 'Disputa resolvida a favor do cliente.',
@@ -539,6 +568,14 @@ export class DisputesService {
         },
       }),
     ]);
+
+    await this.audit.record({
+      action: AuditAction.DISPUTE_RESOLVED_OWNER,
+      actorId: userId,
+      targetType: 'Dispute',
+      targetId: disputeId,
+      amount: dispute.payment.totalCharged,
+    });
 
     return {
       message: 'Disputa resolvida a favor do owner.',
@@ -635,6 +672,15 @@ export class DisputesService {
         },
       }),
     ]);
+
+    await this.audit.record({
+      action: AuditAction.DISPUTE_RESOLVED_PARTIAL,
+      actorId: userId,
+      targetType: 'Dispute',
+      targetId: disputeId,
+      amount: refundAmount,
+      metadata: { refundPercent: dto.refundPercent },
+    });
 
     return {
       message: 'Disputa resolvida parcialmente com sucesso.',
