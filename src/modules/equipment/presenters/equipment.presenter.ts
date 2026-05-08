@@ -52,7 +52,7 @@ function toNumber(value: unknown): number | null {
   return Number(value);
 }
 
-// Mapeia os valores do enum Prisma (maiúsculas) para o formato
+// Mapeia os valores do enum Prisma (maiusculas) para o formato
 // esperado pelo frontend (capitalizado: "New", "Good", etc.)
 const CONDITION_MAP: Record<string, string> = {
   NEW: 'New',

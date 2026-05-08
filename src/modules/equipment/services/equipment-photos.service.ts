@@ -9,7 +9,7 @@ import { UserRole } from '@prisma/client';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { CloudinaryService } from '../../../shared/cloudinary/cloudinary.service';
 
-// Máximo de fotos por equipamento
+// Maximo de fotos por equipamento
 const MAX_PHOTOS_PER_EQUIPMENT = 10;
 
 @Injectable()
@@ -19,7 +19,7 @@ export class EquipmentPhotosService {
     private readonly cloudinary: CloudinaryService,
   ) {}
 
-  // ─── Upload de uma foto ───────────────────────────────────────────────────
+  // Upload de uma foto
 
   async uploadPhoto(
     userId: string,
@@ -71,7 +71,7 @@ export class EquipmentPhotosService {
       equipmentId,
     );
 
-    // Calcula a próxima ordem
+    // Calcula a proxima ordem
     const nextOrder =
       equipment.photos.length > 0
         ? Math.max(...equipment.photos.map((p) => p.order)) + 1
@@ -85,7 +85,7 @@ export class EquipmentPhotosService {
       });
     }
 
-    // Se é a primeira foto, torna-a sempre primária
+    // Se e a primeira foto, torna-a sempre primaria
     const shouldBePrimary = isPrimary || equipment.photos.length === 0;
 
     const photo = await this.prisma.equipmentPhoto.create({
@@ -95,7 +95,7 @@ export class EquipmentPhotosService {
         isPrimary: shouldBePrimary,
         order: nextOrder,
         // Guardamos o publicId do Cloudinary para poder apagar depois
-        // Nota: precisas de adicionar o campo publicId ao schema (ver instruções abaixo)
+        // Nota: precisas de adicionar o campo publicId ao schema (ver instrucoes abaixo)
         publicId,
       },
     });
@@ -111,7 +111,7 @@ export class EquipmentPhotosService {
     };
   }
 
-  // ─── Upload múltiplo (até 5 fotos de uma vez) ─────────────────────────────
+  // Upload multiplo (ate 5 fotos de uma vez)
 
   async uploadMultiplePhotos(
     userId: string,
@@ -189,7 +189,7 @@ export class EquipmentPhotosService {
             equipmentId,
             url: result.url,
             publicId: result.publicId,
-            // Primeira foto do lote é primária se não havia fotos antes
+            // Primeira foto do lote e primaria se nao havia fotos antes
             isPrimary: currentCount === 0 && index === 0,
             order: startOrder + index,
           },
@@ -208,7 +208,7 @@ export class EquipmentPhotosService {
     };
   }
 
-  // ─── Definir foto como primária ───────────────────────────────────────────
+  // Definir foto como primaria
 
   async setPrimary(userId: string, equipmentId: string, photoId: string) {
     const photo = await this.prisma.equipmentPhoto.findFirst({
@@ -244,7 +244,7 @@ export class EquipmentPhotosService {
       throw new ForbiddenException('Não tens permissão para esta operação.');
     }
 
-    // Remove isPrimary de todas e define na seleccionada — dentro de transacção
+    // Remove isPrimary de todas e define na seleccionada - dentro de transaccao
     await this.prisma.$transaction([
       this.prisma.equipmentPhoto.updateMany({
         where: { equipmentId, isPrimary: true },
@@ -262,7 +262,7 @@ export class EquipmentPhotosService {
     };
   }
 
-  // ─── Apagar foto ──────────────────────────────────────────────────────────
+  // Apagar foto
 
   async deletePhoto(userId: string, equipmentId: string, photoId: string) {
     const photo = await this.prisma.equipmentPhoto.findFirst({
@@ -306,7 +306,7 @@ export class EquipmentPhotosService {
       this.prisma.equipmentPhoto.delete({ where: { id: photoId } }),
     ]);
 
-    // Se era a foto primária, promove a próxima na ordem
+    // Se era a foto primaria, promove a proxima na ordem
     if (photo.isPrimary) {
       const nextPhoto = await this.prisma.equipmentPhoto.findFirst({
         where: { equipmentId },
@@ -326,7 +326,7 @@ export class EquipmentPhotosService {
     };
   }
 
-  // ─── Listar fotos de um equipamento ──────────────────────────────────────
+  // Listar fotos de um equipamento
 
   async listPhotos(equipmentId: string) {
     const equipment = await this.prisma.equipment.findUnique({
