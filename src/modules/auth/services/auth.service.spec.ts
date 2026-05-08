@@ -7,6 +7,12 @@ import * as bcrypt from 'bcrypt';
 
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { AuthService } from './auth.service';
+import { VerificationService } from './verification.service';
+
+const verificationMock = {
+  issueCode: jest.fn(),
+  consumeCode: jest.fn(),
+};
 
 jest.mock('bcrypt', () => ({
   hash: jest.fn().mockResolvedValue('hashed-value'),
@@ -93,6 +99,7 @@ describe('AuthService', () => {
             get: jest.fn().mockReturnValue(undefined),
           },
         },
+        { provide: VerificationService, useValue: verificationMock },
       ],
     }).compile();
 
@@ -105,9 +112,7 @@ describe('AuthService', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  // ───────────────────────────────────────────────────────────────────────────
   // register()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('register()', () => {
     const dto = {
@@ -119,7 +124,7 @@ describe('AuthService', () => {
 
     it('regista o utilizador com sucesso e devolve tokens + dados seguros', async () => {
       prisma.user.findUnique.mockResolvedValue(null); // phone livre
-      // segundo findUnique = verificação de email (também livre)
+      // segundo findUnique = verificacao de email (tambem livre)
       prisma.user.findUnique
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(null);
@@ -198,7 +203,7 @@ describe('AuthService', () => {
         password: PASSWORD,
       });
 
-      // findUnique chamado apenas 1 vez (telefone) — não verifica email
+      // findUnique chamado apenas 1 vez (telefone) - nao verifica email
       expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
     });
 
@@ -247,9 +252,7 @@ describe('AuthService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // login()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('login()', () => {
     const dto = { phone: PHONE, password: PASSWORD };
@@ -325,9 +328,7 @@ describe('AuthService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // refreshToken()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('refreshToken()', () => {
     it('renova o token com sucesso e actualiza a sessão', async () => {
@@ -419,7 +420,7 @@ describe('AuthService', () => {
         UnauthorizedException,
       );
 
-      // A sessão expirada deve ser revogada
+      // A sessao expirada deve ser revogada
       expect(prisma.authSession.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: expiredSession.id },
@@ -445,9 +446,7 @@ describe('AuthService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // logout()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('logout()', () => {
     it('faz logout com sucesso e revoga a sessão correcta', async () => {
@@ -502,7 +501,7 @@ describe('AuthService', () => {
       ]);
       prisma.authSession.update.mockResolvedValue(targetSession);
 
-      // bcrypt.compare retorna true apenas para a primeira sessão
+      // bcrypt.compare retorna true apenas para a primeira sessao
       (bcrypt.compare as jest.Mock)
         .mockResolvedValueOnce(true)
         .mockResolvedValueOnce(false);
@@ -516,9 +515,7 @@ describe('AuthService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // getMe()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('getMe()', () => {
     it('devolve os dados do utilizador sem passwordHash', async () => {
