@@ -81,7 +81,6 @@ export class DisputePresenter {
       },
     };
   }
-  833915119;
 
   static toDetails(dispute: DisputeDetailsEntity) {
     return this.toListItem(dispute);

@@ -60,4 +60,3 @@ if (!process.env.JWT_REFRESH_EXPIRES_IN) {
 if (!process.env.ALLOWED_ORIGINS) {
   process.env.ALLOWED_ORIGINS = 'http://localhost:3000';
 }
-process.env.THROTTLER_DISABLED = 'true';
