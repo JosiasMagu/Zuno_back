@@ -7,7 +7,9 @@ const envPath = path.resolve(process.cwd(), '.env');
 if (!fs.existsSync(envPath)) {
   console.error('');
   console.error('ERRO: ficheiro .env nao encontrado em', envPath);
-  console.error('Os testes E2E precisam de DATABASE_URL_TEST definida no .env.');
+  console.error(
+    'Os testes E2E precisam de DATABASE_URL_TEST definida no .env.',
+  );
   console.error('');
   process.exit(1);
 }
@@ -20,15 +22,21 @@ if (!testDbUrl) {
   console.error('');
   console.error('ERRO: DATABASE_URL_TEST nao esta definida no .env');
   console.error('Adiciona uma linha tipo:');
-  console.error('  DATABASE_URL_TEST=postgresql://user:pass@localhost:5432/zuno_db_test');
+  console.error(
+    '  DATABASE_URL_TEST=postgresql://user:pass@localhost:5432/zuno_db_test',
+  );
   console.error('');
   process.exit(1);
 }
 
 if (!testDbUrl.includes('zuno_db_test')) {
   console.error('');
-  console.error('ERRO: DATABASE_URL_TEST nao aponta para uma BD com "zuno_db_test" no nome.');
-  console.error('Por seguranca, recusamos correr E2E numa BD que nao tem "test" no nome.');
+  console.error(
+    'ERRO: DATABASE_URL_TEST nao aponta para uma BD com "zuno_db_test" no nome.',
+  );
+  console.error(
+    'Por seguranca, recusamos correr E2E numa BD que nao tem "test" no nome.',
+  );
   console.error('Valor actual aponta para:', testDbUrl.split('/').pop());
   console.error('');
   process.exit(1);

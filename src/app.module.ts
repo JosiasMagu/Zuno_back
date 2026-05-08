@@ -42,17 +42,17 @@ import { DatabaseModule } from './shared/db/database.module';
   ],
   controllers: [],
   providers: [
-{
-  provide: APP_GUARD,
-  useClass:
-    process.env.THROTTLER_DISABLED === 'true'
-      ? class NoopGuard {
-          canActivate() {
-            return true;
-          }
-        }
-      : ThrottlerGuard,
-},
+    {
+      provide: APP_GUARD,
+      useClass:
+        process.env.THROTTLER_DISABLED === 'true'
+          ? class NoopGuard {
+              canActivate() {
+                return true;
+              }
+            }
+          : ThrottlerGuard,
+    },
   ],
 })
 export class AppModule {}
