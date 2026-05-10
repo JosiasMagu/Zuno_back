@@ -12,6 +12,7 @@ import { EquipmentModule } from './modules/equipment/equipment.module';
 import { HealthModule } from './modules/health/health.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
+import { ServicesModule } from './modules/services/services.module';
 import { UsersModule } from './modules/users/users.module';
 import { AuditModule } from './shared/audit/audit.module';
 import { DatabaseModule } from './shared/db/database.module';
@@ -39,6 +40,7 @@ import { NotificationsModule } from './shared/notifications/notifications.module
     UsersModule,
     CategoriesModule,
     EquipmentModule,
+    ServicesModule,
     BookingsModule,
     PaymentsModule,
     DisputesModule,
