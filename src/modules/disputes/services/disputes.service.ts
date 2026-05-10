@@ -9,6 +9,8 @@ import {
   BookingStatus,
   DisputeStatus,
   PaymentStatus,
+  Prisma,
+  ServiceBookingStatus,
   UserRole,
 } from '@prisma/client';
 
@@ -20,6 +22,38 @@ import { ResolvePartialDto } from '../dto/resolve-partial.dto';
 import { RespondDisputeDto } from '../dto/respond-dispute.dto';
 import { DisputePresenter } from '../presenters/dispute.presenter';
 
+const DISPUTE_FULL_INCLUDE = {
+  booking: {
+    select: {
+      id: true,
+      status: true,
+      startDate: true,
+      endDate: true,
+      clientId: true,
+      ownerId: true,
+    },
+  },
+  serviceBooking: {
+    select: {
+      id: true,
+      status: true,
+      scheduledFor: true,
+      clientId: true,
+      providerId: true,
+    },
+  },
+  payment: {
+    select: {
+      id: true,
+      status: true,
+      totalCharged: true,
+      receiptNumber: true,
+      refundAmount: true,
+    },
+  },
+  opener: { select: { id: true, name: true, avatarUrl: true } },
+} as const;
+
 @Injectable()
 export class DisputesService {
   constructor(
@@ -28,15 +62,36 @@ export class DisputesService {
   ) {}
 
   async create(userId: string, dto: CreateDisputeDto) {
-    const bookingId = dto.bookingId.trim();
+    const bookingId = dto.bookingId?.trim();
+    const serviceBookingId = dto.serviceBookingId?.trim();
     const paymentId = dto.paymentId.trim();
 
+    if ((!bookingId && !serviceBookingId) || (bookingId && serviceBookingId)) {
+      throw new BadRequestException(
+        'Forneça exactamente um de bookingId ou serviceBookingId.',
+      );
+    }
+
+    if (bookingId) {
+      return this.createBookingDispute(userId, bookingId, paymentId, dto);
+    }
+    return this.createServiceBookingDispute(
+      userId,
+      serviceBookingId as string,
+      paymentId,
+      dto,
+    );
+  }
+
+  private async createBookingDispute(
+    userId: string,
+    bookingId: string,
+    paymentId: string,
+    dto: CreateDisputeDto,
+  ) {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      include: {
-        payment: true,
-        dispute: true,
-      },
+      include: { payment: true, dispute: true },
     });
 
     if (!booking) {
@@ -78,9 +133,7 @@ export class DisputesService {
     const dispute = await this.prisma.$transaction(async (tx) => {
       await tx.booking.update({
         where: { id: booking.id },
-        data: {
-          status: BookingStatus.DISPUTED,
-        },
+        data: { status: BookingStatus.DISPUTED },
       });
 
       return tx.dispute.create({
@@ -93,34 +146,7 @@ export class DisputesService {
           status: DisputeStatus.AWAITING_OWNER,
           ownerDeadline: this.buildOwnerDeadline(),
         },
-        include: {
-          booking: {
-            select: {
-              id: true,
-              status: true,
-              startDate: true,
-              endDate: true,
-              clientId: true,
-              ownerId: true,
-            },
-          },
-          payment: {
-            select: {
-              id: true,
-              status: true,
-              totalCharged: true,
-              receiptNumber: true,
-              refundAmount: true,
-            },
-          },
-          opener: {
-            select: {
-              id: true,
-              name: true,
-              avatarUrl: true,
-            },
-          },
-        },
+        include: DISPUTE_FULL_INCLUDE,
       });
     });
 
@@ -131,6 +157,91 @@ export class DisputesService {
       targetId: dispute.id,
       metadata: {
         bookingId: booking.id,
+        paymentId: payment.id,
+        reason: dto.reason,
+      },
+    });
+
+    return {
+      message: 'Disputa criada com sucesso.',
+      data: DisputePresenter.toDetails(dispute),
+    };
+  }
+
+  private async createServiceBookingDispute(
+    userId: string,
+    serviceBookingId: string,
+    paymentId: string,
+    dto: CreateDisputeDto,
+  ) {
+    const booking = await this.prisma.serviceBooking.findUnique({
+      where: { id: serviceBookingId },
+      include: { payment: true, dispute: true },
+    });
+
+    if (!booking) {
+      throw new NotFoundException('Reserva de serviço não encontrada.');
+    }
+
+    if (!booking.payment) {
+      throw new BadRequestException(
+        'Esta reserva ainda não possui pagamento associado.',
+      );
+    }
+
+    const payment = booking.payment;
+
+    if (payment.id !== paymentId) {
+      throw new BadRequestException(
+        'O pagamento informado não corresponde à reserva.',
+      );
+    }
+
+    if (booking.clientId !== userId && booking.providerId !== userId) {
+      throw new ForbiddenException(
+        'Não tens permissão para abrir disputa nesta reserva.',
+      );
+    }
+
+    if (booking.dispute) {
+      throw new BadRequestException(
+        'Já existe uma disputa associada a esta reserva.',
+      );
+    }
+
+    if (payment.status !== PaymentStatus.HELD) {
+      throw new BadRequestException(
+        'O estado atual do pagamento não permite abrir disputa.',
+      );
+    }
+
+    const dispute = await this.prisma.$transaction(async (tx) => {
+      await tx.serviceBooking.update({
+        where: { id: booking.id },
+        data: { status: ServiceBookingStatus.DISPUTED },
+      });
+
+      return tx.dispute.create({
+        data: {
+          serviceBookingId: booking.id,
+          paymentId: payment.id,
+          openedBy: userId,
+          reason: dto.reason,
+          description: dto.description.trim(),
+          status: DisputeStatus.AWAITING_OWNER,
+          ownerDeadline: this.buildOwnerDeadline(),
+        },
+        include: DISPUTE_FULL_INCLUDE,
+      });
+    });
+
+    await this.audit.record({
+      action: AuditAction.DISPUTE_OPENED,
+      actorId: userId,
+      targetType: 'Dispute',
+      targetId: dispute.id,
+      metadata: {
+        serviceBookingId: booking.id,
         paymentId: payment.id,
         reason: dto.reason,
       },
@@ -169,6 +280,8 @@ export class DisputesService {
               { openedBy: userId },
               { booking: { clientId: userId } },
               { booking: { ownerId: userId } },
+              { serviceBooking: { clientId: userId } },
+              { serviceBooking: { providerId: userId } },
             ],
             ...(query.status ? { status: query.status } : {}),
           };
@@ -178,37 +291,8 @@ export class DisputesService {
         where,
         skip,
         take: limit,
-        orderBy: {
-          createdAt: 'desc',
-        },
-        include: {
-          booking: {
-            select: {
-              id: true,
-              status: true,
-              startDate: true,
-              endDate: true,
-              clientId: true,
-              ownerId: true,
-            },
-          },
-          payment: {
-            select: {
-              id: true,
-              status: true,
-              totalCharged: true,
-              receiptNumber: true,
-              refundAmount: true,
-            },
-          },
-          opener: {
-            select: {
-              id: true,
-              name: true,
-              avatarUrl: true,
-            },
-          },
-        },
+        orderBy: { createdAt: 'desc' },
+        include: DISPUTE_FULL_INCLUDE,
       }),
       this.prisma.dispute.count({ where }),
     ]);
@@ -230,34 +314,7 @@ export class DisputesService {
   async findOne(userId: string, disputeId: string) {
     const dispute = await this.prisma.dispute.findUnique({
       where: { id: disputeId },
-      include: {
-        booking: {
-          select: {
-            id: true,
-            status: true,
-            startDate: true,
-            endDate: true,
-            clientId: true,
-            ownerId: true,
-          },
-        },
-        payment: {
-          select: {
-            id: true,
-            status: true,
-            totalCharged: true,
-            receiptNumber: true,
-            refundAmount: true,
-          },
-        },
-        opener: {
-          select: {
-            id: true,
-            name: true,
-            avatarUrl: true,
-          },
-        },
-      },
+      include: DISPUTE_FULL_INCLUDE,
     });
 
     if (!dispute) {
@@ -266,27 +323,20 @@ export class DisputesService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: {
-        id: true,
-        role: true,
-      },
+      select: { id: true, role: true },
     });
 
     if (!user) {
       throw new NotFoundException('Utilizador não encontrado.');
     }
 
-    if (!dispute.booking) {
-      throw new BadRequestException(
-        'Disputa sem reserva associada — fluxo de serviço ainda não suportado por este endpoint.',
-      );
-    }
+    const parties = this.disputeParties(dispute);
 
     const canAccess =
       user.role === UserRole.ADMIN ||
       dispute.openedBy === userId ||
-      dispute.booking.clientId === userId ||
-      dispute.booking.ownerId === userId;
+      parties.clientId === userId ||
+      parties.providerId === userId;
 
     if (!canAccess) {
       throw new ForbiddenException('Não tens permissão para ver esta disputa.');
@@ -298,15 +348,31 @@ export class DisputesService {
     };
   }
 
+  private disputeParties(dispute: {
+    booking?: { clientId: string; ownerId: string } | null;
+    serviceBooking?: { clientId: string; providerId: string } | null;
+  }): { clientId: string | null; providerId: string | null } {
+    if (dispute.booking) {
+      return {
+        clientId: dispute.booking.clientId,
+        providerId: dispute.booking.ownerId,
+      };
+    }
+    if (dispute.serviceBooking) {
+      return {
+        clientId: dispute.serviceBooking.clientId,
+        providerId: dispute.serviceBooking.providerId,
+      };
+    }
+    return { clientId: null, providerId: null };
+  }
+
   async respond(userId: string, disputeId: string, dto: RespondDisputeDto) {
     const dispute = await this.prisma.dispute.findUnique({
       where: { id: disputeId },
       include: {
-        booking: {
-          select: {
-            ownerId: true,
-          },
-        },
+        booking: { select: { ownerId: true } },
+        serviceBooking: { select: { providerId: true } },
       },
     });
 
@@ -316,24 +382,21 @@ export class DisputesService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: {
-        id: true,
-        role: true,
-      },
+      select: { id: true, role: true },
     });
 
     if (!user) {
       throw new NotFoundException('Utilizador não encontrado.');
     }
 
-    if (!dispute.booking) {
-      throw new BadRequestException(
-        'Disputa sem reserva associada — fluxo de serviço ainda não suportado por este endpoint.',
-      );
+    const providerId =
+      dispute.booking?.ownerId ?? dispute.serviceBooking?.providerId ?? null;
+
+    if (!providerId) {
+      throw new BadRequestException('Disputa sem reserva associada.');
     }
 
-    const canRespond =
-      user.role === UserRole.ADMIN || dispute.booking.ownerId === userId;
+    const canRespond = user.role === UserRole.ADMIN || providerId === userId;
 
     if (!canRespond) {
       throw new ForbiddenException(
@@ -356,34 +419,7 @@ export class DisputesService {
         ownerResponse: dto.ownerResponse.trim(),
         status: DisputeStatus.UNDER_REVIEW,
       },
-      include: {
-        booking: {
-          select: {
-            id: true,
-            status: true,
-            startDate: true,
-            endDate: true,
-            clientId: true,
-            ownerId: true,
-          },
-        },
-        payment: {
-          select: {
-            id: true,
-            status: true,
-            totalCharged: true,
-            receiptNumber: true,
-            refundAmount: true,
-          },
-        },
-        opener: {
-          select: {
-            id: true,
-            name: true,
-            avatarUrl: true,
-          },
-        },
-      },
+      include: DISPUTE_FULL_INCLUDE,
     });
 
     await this.audit.record({
@@ -404,10 +440,7 @@ export class DisputesService {
 
     const dispute = await this.prisma.dispute.findUnique({
       where: { id: disputeId },
-      include: {
-        booking: true,
-        payment: true,
-      },
+      include: { booking: true, serviceBooking: true, payment: true },
     });
 
     if (!dispute) {
@@ -427,24 +460,37 @@ export class DisputesService {
       );
     }
 
-    if (!dispute.booking) {
-      throw new BadRequestException(
-        'Disputa sem reserva associada — fluxo de serviço ainda não suportado por este endpoint.',
+    const operations: Prisma.PrismaPromise<unknown>[] = [];
+
+    if (dispute.booking) {
+      operations.push(
+        this.prisma.booking.update({
+          where: { id: dispute.booking.id },
+          data: {
+            status: BookingStatus.CANCELLED,
+            cancelledAt: new Date(),
+            cancellationReason:
+              'Cancelada por resolução de disputa a favor do cliente.',
+          },
+        }),
       );
+    } else if (dispute.serviceBooking) {
+      operations.push(
+        this.prisma.serviceBooking.update({
+          where: { id: dispute.serviceBooking.id },
+          data: {
+            status: ServiceBookingStatus.CANCELLED,
+            cancelledAt: new Date(),
+            cancellationReason:
+              'Cancelada por resolução de disputa a favor do cliente.',
+          },
+        }),
+      );
+    } else {
+      throw new BadRequestException('Disputa sem reserva associada.');
     }
 
-    const bookingId = dispute.booking.id;
-
-    const [, , updatedDispute] = await this.prisma.$transaction([
-      this.prisma.booking.update({
-        where: { id: bookingId },
-        data: {
-          status: BookingStatus.CANCELLED,
-          cancelledAt: new Date(),
-          cancellationReason:
-            'Cancelada por resolução de disputa a favor do cliente.',
-        },
-      }),
+    operations.push(
       this.prisma.payment.update({
         where: { id: dispute.payment.id },
         data: {
@@ -459,36 +505,16 @@ export class DisputesService {
           status: DisputeStatus.RESOLVED_CLIENT,
           resolution: 'Resolvido a favor do cliente.',
         },
-        include: {
-          booking: {
-            select: {
-              id: true,
-              status: true,
-              startDate: true,
-              endDate: true,
-              clientId: true,
-              ownerId: true,
-            },
-          },
-          payment: {
-            select: {
-              id: true,
-              status: true,
-              totalCharged: true,
-              receiptNumber: true,
-              refundAmount: true,
-            },
-          },
-          opener: {
-            select: {
-              id: true,
-              name: true,
-              avatarUrl: true,
-            },
-          },
-        },
+        include: DISPUTE_FULL_INCLUDE,
       }),
-    ]);
+    );
+
+    const results = await this.prisma.$transaction(operations);
+    const updatedDispute = results[
+      results.length - 1
+    ] as Prisma.DisputeGetPayload<{
+      include: typeof DISPUTE_FULL_INCLUDE;
+    }>;
 
     await this.audit.record({
       action: AuditAction.DISPUTE_RESOLVED_CLIENT,
@@ -509,10 +535,7 @@ export class DisputesService {
 
     const dispute = await this.prisma.dispute.findUnique({
       where: { id: disputeId },
-      include: {
-        booking: true,
-        payment: true,
-      },
+      include: { booking: true, serviceBooking: true, payment: true },
     });
 
     if (!dispute) {
@@ -532,70 +555,66 @@ export class DisputesService {
       );
     }
 
-    if (!dispute.booking) {
-      throw new BadRequestException(
-        'Disputa sem reserva associada — fluxo de serviço ainda não suportado por este endpoint.',
+    const operations: Prisma.PrismaPromise<unknown>[] = [];
+
+    if (dispute.booking) {
+      operations.push(
+        this.prisma.booking.update({
+          where: { id: dispute.booking.id },
+          data: { status: BookingStatus.COMPLETED },
+        }),
+      );
+    } else if (dispute.serviceBooking) {
+      operations.push(
+        this.prisma.serviceBooking.update({
+          where: { id: dispute.serviceBooking.id },
+          data: {
+            status: ServiceBookingStatus.COMPLETED,
+            completedAt: new Date(),
+          },
+        }),
+      );
+    } else {
+      throw new BadRequestException('Disputa sem reserva associada.');
+    }
+
+    if (dispute.payment.status === PaymentStatus.HELD) {
+      operations.push(
+        this.prisma.payment.update({
+          where: { id: dispute.payment.id },
+          data: {
+            status: PaymentStatus.RELEASED,
+            releasedAt: new Date(),
+            depositReleasedAt: new Date(),
+          },
+        }),
+      );
+    } else {
+      operations.push(
+        this.prisma.payment.update({
+          where: { id: dispute.payment.id },
+          data: {},
+        }),
       );
     }
 
-    const ownerBookingId = dispute.booking.id;
-
-    const [, , updatedDispute] = await this.prisma.$transaction([
-      this.prisma.booking.update({
-        where: { id: ownerBookingId },
-        data: {
-          status: BookingStatus.COMPLETED,
-        },
-      }),
-      dispute.payment.status === PaymentStatus.HELD
-        ? this.prisma.payment.update({
-            where: { id: dispute.payment.id },
-            data: {
-              status: PaymentStatus.RELEASED,
-              releasedAt: new Date(),
-              depositReleasedAt: new Date(),
-            },
-          })
-        : this.prisma.payment.update({
-            where: { id: dispute.payment.id },
-            data: {},
-          }),
+    operations.push(
       this.prisma.dispute.update({
         where: { id: disputeId },
         data: {
           status: DisputeStatus.RESOLVED_OWNER,
           resolution: 'Resolvido a favor do owner.',
         },
-        include: {
-          booking: {
-            select: {
-              id: true,
-              status: true,
-              startDate: true,
-              endDate: true,
-              clientId: true,
-              ownerId: true,
-            },
-          },
-          payment: {
-            select: {
-              id: true,
-              status: true,
-              totalCharged: true,
-              receiptNumber: true,
-              refundAmount: true,
-            },
-          },
-          opener: {
-            select: {
-              id: true,
-              name: true,
-              avatarUrl: true,
-            },
-          },
-        },
+        include: DISPUTE_FULL_INCLUDE,
       }),
-    ]);
+    );
+
+    const results = await this.prisma.$transaction(operations);
+    const updatedDispute = results[
+      results.length - 1
+    ] as Prisma.DisputeGetPayload<{
+      include: typeof DISPUTE_FULL_INCLUDE;
+    }>;
 
     await this.audit.record({
       action: AuditAction.DISPUTE_RESOLVED_OWNER,
@@ -620,10 +639,7 @@ export class DisputesService {
 
     const dispute = await this.prisma.dispute.findUnique({
       where: { id: disputeId },
-      include: {
-        booking: true,
-        payment: true,
-      },
+      include: { booking: true, serviceBooking: true, payment: true },
     });
 
     if (!dispute) {
@@ -643,25 +659,35 @@ export class DisputesService {
       );
     }
 
-    if (!dispute.booking) {
-      throw new BadRequestException(
-        'Disputa sem reserva associada — fluxo de serviço ainda não suportado por este endpoint.',
-      );
-    }
-
-    const partialBookingId = dispute.booking.id;
     const totalCharged = Number(dispute.payment.totalCharged);
     const refundAmount = Number(
       ((totalCharged * dto.refundPercent) / 100).toFixed(2),
     );
 
-    const [, , updatedDispute] = await this.prisma.$transaction([
-      this.prisma.booking.update({
-        where: { id: partialBookingId },
-        data: {
-          status: BookingStatus.COMPLETED,
-        },
-      }),
+    const operations: Prisma.PrismaPromise<unknown>[] = [];
+
+    if (dispute.booking) {
+      operations.push(
+        this.prisma.booking.update({
+          where: { id: dispute.booking.id },
+          data: { status: BookingStatus.COMPLETED },
+        }),
+      );
+    } else if (dispute.serviceBooking) {
+      operations.push(
+        this.prisma.serviceBooking.update({
+          where: { id: dispute.serviceBooking.id },
+          data: {
+            status: ServiceBookingStatus.COMPLETED,
+            completedAt: new Date(),
+          },
+        }),
+      );
+    } else {
+      throw new BadRequestException('Disputa sem reserva associada.');
+    }
+
+    operations.push(
       this.prisma.payment.update({
         where: { id: dispute.payment.id },
         data: {
@@ -677,36 +703,16 @@ export class DisputesService {
           refundPercent: dto.refundPercent,
           resolution: `Resolvido parcialmente com reembolso de ${dto.refundPercent}%.`,
         },
-        include: {
-          booking: {
-            select: {
-              id: true,
-              status: true,
-              startDate: true,
-              endDate: true,
-              clientId: true,
-              ownerId: true,
-            },
-          },
-          payment: {
-            select: {
-              id: true,
-              status: true,
-              totalCharged: true,
-              receiptNumber: true,
-              refundAmount: true,
-            },
-          },
-          opener: {
-            select: {
-              id: true,
-              name: true,
-              avatarUrl: true,
-            },
-          },
-        },
+        include: DISPUTE_FULL_INCLUDE,
       }),
-    ]);
+    );
+
+    const results = await this.prisma.$transaction(operations);
+    const updatedDispute = results[
+      results.length - 1
+    ] as Prisma.DisputeGetPayload<{
+      include: typeof DISPUTE_FULL_INCLUDE;
+    }>;
 
     await this.audit.record({
       action: AuditAction.DISPUTE_RESOLVED_PARTIAL,

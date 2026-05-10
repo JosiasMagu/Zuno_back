@@ -1,8 +1,9 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { DisputeReason } from '@prisma/client';
 import {
   IsEnum,
+  IsOptional,
   IsString,
   IsUUID,
   MaxLength,
@@ -10,36 +11,34 @@ import {
 } from 'class-validator';
 
 export class CreateDisputeDto {
-  @ApiProperty({
-    example: '89619d24-e335-4cfb-82b0-75b8ed739195',
-    description: 'ID da reserva',
+  @ApiPropertyOptional({
+    description:
+      'ID da reserva de equipamento. Obrigatório se não fornecer serviceBookingId.',
   })
+  @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsUUID()
-  bookingId: string;
+  bookingId?: string;
 
-  @ApiProperty({
-    example: 'e19977c4-826a-41c0-8711-58b36b3b0750',
-    description: 'ID do pagamento',
+  @ApiPropertyOptional({
+    description:
+      'ID da reserva de serviço. Obrigatório se não fornecer bookingId.',
   })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsUUID()
+  serviceBookingId?: string;
+
+  @ApiProperty({ description: 'ID do pagamento associado' })
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsUUID()
   paymentId: string;
 
-  @ApiProperty({
-    enum: DisputeReason,
-    example: DisputeReason.DAMAGED,
-    description: 'Motivo da disputa',
-  })
+  @ApiProperty({ enum: DisputeReason, example: DisputeReason.DAMAGED })
   @IsEnum(DisputeReason)
   reason: DisputeReason;
 
-  @ApiProperty({
-    example: 'O equipamento chegou com defeito.',
-    description: 'Descrição detalhada da disputa',
-    minLength: 5,
-    maxLength: 2000,
-  })
+  @ApiProperty({ minLength: 5, maxLength: 2000 })
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MinLength(5)
