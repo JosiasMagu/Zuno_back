@@ -11,6 +11,7 @@ import {
   UserRole,
 } from '@prisma/client';
 
+import { calculatePlatformFee } from '../../../shared/constants/fees';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { CreateBookingDto } from '../dto/create-booking.dto';
 import { FindBookingsQueryDto } from '../dto/find-bookings-query.dto';
@@ -481,7 +482,7 @@ export class BookingsService {
   }
 
   private calculatePlatformFee(rentalAmount: number): number {
-    return Number((rentalAmount * 0.1).toFixed(2));
+    return calculatePlatformFee(rentalAmount);
   }
 
   private startOfDay(date: Date): Date {

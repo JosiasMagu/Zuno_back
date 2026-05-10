@@ -14,6 +14,7 @@ import {
 import * as crypto from 'crypto';
 
 import { AuditService } from '../../../shared/audit/audit.service';
+import { calculateProviderPayout } from '../../../shared/constants/fees';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { InitiatePaymentDto } from '../dto/initiate-payment.dto';
 import { FindPaymentsQueryDto } from '../dto/find-payments-query.dto';
@@ -676,7 +677,7 @@ export class PaymentsService {
   }
 
   private calculateOwnerPayout(rentalAmount: number, platformFee: number) {
-    return Number((rentalAmount - platformFee).toFixed(2));
+    return calculateProviderPayout(rentalAmount, platformFee);
   }
 
   private async generateUniqueReceiptNumber() {
