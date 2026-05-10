@@ -19,18 +19,29 @@ export class CloudinaryService {
     file: Express.Multer.File,
     equipmentId: string,
   ): Promise<{ url: string; publicId: string }> {
+    return this.upload(file, `zuno/equipment/${equipmentId}`);
+  }
+
+  async uploadServicePhoto(
+    file: Express.Multer.File,
+    serviceId: string,
+  ): Promise<{ url: string; publicId: string }> {
+    return this.upload(file, `zuno/services/${serviceId}`);
+  }
+
+  private async upload(
+    file: Express.Multer.File,
+    folder: string,
+  ): Promise<{ url: string; publicId: string }> {
     this.validateFile(file);
 
     return new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
-          folder: `zuno/equipment/${equipmentId}`,
+          folder,
           transformation: [
-            // Redimensiona para maximo 1200px de largura mantendo proporcao
             { width: 1200, crop: 'limit' },
-            // Qualidade automatica - Cloudinary optimiza o tamanho
             { quality: 'auto' },
-            // Converte para webp para melhor performance no mobile
             { fetch_format: 'auto' },
           ],
           resource_type: 'image',
@@ -51,7 +62,6 @@ export class CloudinaryService {
         },
       );
 
-      // Converte o buffer do Multer para stream e envia ao Cloudinary
       Readable.from(file.buffer).pipe(uploadStream);
     });
   }
