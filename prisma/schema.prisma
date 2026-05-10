@@ -26,18 +26,23 @@ model User {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  sessions             AuthSession[]
-  verificationCodes    VerificationCode[]
-  equipment            Equipment[]
-  clientBookings       Booking[]      @relation("ClientBookings")
-  ownerBookings        Booking[]      @relation("OwnerBookings")
-  clientPayments       Payment[]      @relation("ClientPayments")
-  ownerPayments        Payment[]      @relation("OwnerPayments")
-  openedDisputes       Dispute[]      @relation("OpenedDisputes")
-  authoredReviews      Review[]       @relation("AuthoredReviews")
-  clientConversations  Conversation[] @relation("ClientConversations")
-  ownerConversations   Conversation[] @relation("OwnerConversations")
-  sentMessages         Message[]      @relation("SentMessages")
+  sessions                AuthSession[]
+  verificationCodes       VerificationCode[]
+  equipment               Equipment[]
+  clientBookings          Booking[]          @relation("ClientBookings")
+  ownerBookings           Booking[]          @relation("OwnerBookings")
+  clientPayments          Payment[]          @relation("ClientPayments")
+  ownerPayments           Payment[]          @relation("OwnerPayments")
+  openedDisputes          Dispute[]          @relation("OpenedDisputes")
+  authoredReviews         Review[]           @relation("AuthoredReviews")
+  clientConversations     Conversation[]     @relation("ClientConversations")
+  ownerConversations      Conversation[]     @relation("OwnerConversations")
+  sentMessages            Message[]          @relation("SentMessages")
+  providedServices        Service[]          @relation("ProvidedServices")
+  clientServiceRequests   ServiceRequest[]   @relation("ClientServiceRequests")
+  providedQuotes          ServiceQuote[]     @relation("ProvidedQuotes")
+  clientServiceBookings   ServiceBooking[]   @relation("ClientServiceBookings")
+  providerServiceBookings ServiceBooking[]   @relation("ProviderServiceBookings")
 
   @@index([role])
   @@index([isActive])
@@ -64,21 +69,24 @@ model AuthSession {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Category {
-  id        String      @id @default(uuid())
+  id        String       @id @default(uuid())
   name      String
-  slug      String      @unique
+  slug      String       @unique
   iconUrl   String?
-  isActive  Boolean     @default(true)
+  isActive  Boolean      @default(true)
+  kind      CategoryKind @default(EQUIPMENT)
   parentId  String?
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
 
   parent    Category?   @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
   children  Category[]  @relation("CategoryHierarchy")
   equipment Equipment[]
+  services  Service[]
 
   @@index([parentId])
   @@index([isActive])
+  @@index([kind])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -183,7 +191,8 @@ model Booking {
 
 model Payment {
   id                String        @id @default(uuid())
-  bookingId         String        @unique
+  bookingId         String?       @unique
+  serviceBookingId  String?       @unique
   clientId          String
   ownerId           String
   rentalAmount      Decimal       @db.Decimal(12, 2)
@@ -205,15 +214,17 @@ model Payment {
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
-  booking  Booking  @relation(fields: [bookingId], references: [id])
-  client   User     @relation("ClientPayments", fields: [clientId], references: [id])
-  owner    User     @relation("OwnerPayments", fields: [ownerId], references: [id])
-  dispute  Dispute?
+  booking        Booking?        @relation(fields: [bookingId], references: [id])
+  serviceBooking ServiceBooking? @relation(fields: [serviceBookingId], references: [id])
+  client         User            @relation("ClientPayments", fields: [clientId], references: [id])
+  owner          User            @relation("OwnerPayments", fields: [ownerId], references: [id])
+  dispute        Dispute?
 
   @@index([status])
   @@index([mpesaReference])
   @@index([clientId])
   @@index([ownerId])
+  @@index([serviceBookingId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -221,28 +232,31 @@ model Payment {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Dispute {
-  id             String        @id @default(uuid())
-  bookingId      String        @unique
-  paymentId      String        @unique
-  openedBy       String
-  reason         DisputeReason
-  description    String
-  ownerResponse  String?
-  status         DisputeStatus @default(OPEN)
-  resolution     String?
-  refundPercent  Int?
-  autoResolvedAt DateTime?
-  ownerDeadline  DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  id               String        @id @default(uuid())
+  bookingId        String?       @unique
+  serviceBookingId String?       @unique
+  paymentId        String        @unique
+  openedBy         String
+  reason           DisputeReason
+  description      String
+  ownerResponse    String?
+  status           DisputeStatus @default(OPEN)
+  resolution       String?
+  refundPercent    Int?
+  autoResolvedAt   DateTime?
+  ownerDeadline    DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
-  booking Booking @relation(fields: [bookingId], references: [id])
-  payment Payment @relation(fields: [paymentId], references: [id])
-  opener  User    @relation("OpenedDisputes", fields: [openedBy], references: [id])
+  booking        Booking?        @relation(fields: [bookingId], references: [id])
+  serviceBooking ServiceBooking? @relation(fields: [serviceBookingId], references: [id])
+  payment        Payment         @relation(fields: [paymentId], references: [id])
+  opener         User            @relation("OpenedDisputes", fields: [openedBy], references: [id])
 
   @@index([status])
   @@index([ownerDeadline])
   @@index([openedBy])
+  @@index([serviceBookingId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -250,21 +264,23 @@ model Dispute {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Review {
-  id         String           @id @default(uuid())
-  bookingId  String
-  authorId   String
-  targetId   String
-  authorRole ReviewAuthorRole
-  rating     Int
-  comment    String?
-  createdAt  DateTime         @default(now())
-  updatedAt  DateTime         @updatedAt
+  id               String           @id @default(uuid())
+  bookingId        String?
+  serviceBookingId String?
+  authorId         String
+  targetId         String
+  authorRole       ReviewAuthorRole
+  rating           Int
+  comment          String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
-  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  author  User    @relation("AuthoredReviews", fields: [authorId], references: [id])
+  booking        Booking?        @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  serviceBooking ServiceBooking? @relation(fields: [serviceBookingId], references: [id], onDelete: Cascade)
+  author         User            @relation("AuthoredReviews", fields: [authorId], references: [id])
 
-  @@unique([bookingId, authorId])
   @@index([bookingId])
+  @@index([serviceBookingId])
   @@index([authorId])
   @@index([targetId])
 }
@@ -277,21 +293,23 @@ model Conversation {
   id            String    @id @default(uuid())
   clientId      String
   ownerId       String
-  equipmentId   String
+  equipmentId   String?
+  serviceId     String?
   lastMessage   String?
   lastMessageAt DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  client    User      @relation("ClientConversations", fields: [clientId], references: [id])
-  owner     User      @relation("OwnerConversations", fields: [ownerId], references: [id])
-  equipment Equipment @relation(fields: [equipmentId], references: [id])
+  client    User       @relation("ClientConversations", fields: [clientId], references: [id])
+  owner     User       @relation("OwnerConversations", fields: [ownerId], references: [id])
+  equipment Equipment? @relation(fields: [equipmentId], references: [id])
+  service   Service?   @relation(fields: [serviceId], references: [id])
   messages  Message[]
 
-  @@unique([clientId, ownerId, equipmentId])
   @@index([clientId])
   @@index([ownerId])
   @@index([equipmentId])
+  @@index([serviceId])
 }
 
 model Message {
@@ -307,6 +325,144 @@ model Message {
 
   @@index([conversationId])
   @@index([senderId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SERVIÇOS (PRESTAÇÃO DE SERVIÇOS)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Service {
+  id              String             @id @default(uuid())
+  providerId      String
+  title           String
+  description     String
+  categoryId      String
+  basePrice       Decimal            @db.Decimal(12, 2)
+  pricingType     ServicePricingType @default(FIXED)
+  estimatedHours  Int?
+  location        String
+  latitude        Decimal?           @db.Decimal(10, 7)
+  longitude       Decimal?           @db.Decimal(10, 7)
+  acceptsUrgent   Boolean            @default(false)
+  urgentSurcharge Decimal?           @db.Decimal(5, 2)
+  status          ServiceStatus      @default(PENDING_REVIEW)
+  isActive        Boolean            @default(true)
+  totalRating     Decimal?           @db.Decimal(3, 2)
+  totalReviews    Int                @default(0)
+  totalCompleted  Int                @default(0)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  provider      User             @relation("ProvidedServices", fields: [providerId], references: [id])
+  category      Category         @relation(fields: [categoryId], references: [id])
+  photos        ServicePhoto[]
+  requests      ServiceRequest[]
+  bookings      ServiceBooking[]
+  conversations Conversation[]
+
+  @@index([providerId])
+  @@index([categoryId])
+  @@index([status])
+  @@index([isActive])
+}
+
+model ServicePhoto {
+  id        String   @id @default(uuid())
+  serviceId String
+  url       String
+  publicId  String?
+  isPrimary Boolean  @default(false)
+  order     Int
+  createdAt DateTime @default(now())
+
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId])
+}
+
+model ServiceRequest {
+  id            String               @id @default(uuid())
+  clientId      String
+  serviceId     String
+  description   String
+  preferredDate DateTime?
+  isUrgent      Boolean              @default(false)
+  address       String
+  latitude      Decimal?             @db.Decimal(10, 7)
+  longitude     Decimal?             @db.Decimal(10, 7)
+  status        ServiceRequestStatus @default(OPEN)
+  expiresAt     DateTime?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  client  User            @relation("ClientServiceRequests", fields: [clientId], references: [id])
+  service Service         @relation(fields: [serviceId], references: [id])
+  quotes  ServiceQuote[]
+  booking ServiceBooking?
+
+  @@index([clientId])
+  @@index([serviceId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model ServiceQuote {
+  id              String             @id @default(uuid())
+  requestId       String
+  providerId      String
+  amount          Decimal            @db.Decimal(12, 2)
+  urgentSurcharge Decimal?           @db.Decimal(12, 2)
+  totalAmount     Decimal            @db.Decimal(12, 2)
+  estimatedDays   Int
+  message         String?
+  status          ServiceQuoteStatus @default(PENDING)
+  expiresAt       DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  request  ServiceRequest  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  provider User            @relation("ProvidedQuotes", fields: [providerId], references: [id])
+  booking  ServiceBooking?
+
+  @@unique([requestId, providerId])
+  @@index([requestId])
+  @@index([providerId])
+  @@index([status])
+}
+
+model ServiceBooking {
+  id                 String               @id @default(uuid())
+  clientId           String
+  providerId         String
+  serviceId          String
+  requestId          String               @unique
+  quoteId            String               @unique
+  scheduledFor       DateTime?
+  isUrgent           Boolean              @default(false)
+  serviceAmount      Decimal              @db.Decimal(12, 2)
+  platformFee        Decimal              @db.Decimal(12, 2)
+  totalAmount        Decimal              @db.Decimal(12, 2)
+  status             ServiceBookingStatus @default(PENDING)
+  startedAt          DateTime?
+  completedAt        DateTime?
+  cancelledAt        DateTime?
+  cancellationReason String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  client   User           @relation("ClientServiceBookings", fields: [clientId], references: [id])
+  provider User           @relation("ProviderServiceBookings", fields: [providerId], references: [id])
+  service  Service        @relation(fields: [serviceId], references: [id])
+  request  ServiceRequest @relation(fields: [requestId], references: [id])
+  quote    ServiceQuote   @relation(fields: [quoteId], references: [id])
+  payment  Payment?
+  dispute  Dispute?
+  reviews  Review[]
+
+  @@index([clientId])
+  @@index([providerId])
+  @@index([serviceId])
+  @@index([status])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -366,6 +522,8 @@ enum DisputeReason {
   DAMAGED
   DIFFERENT_FROM_AD
   LATE_DELIVERY
+  SERVICE_NOT_PERFORMED
+  SERVICE_QUALITY_POOR
   OTHER
 }
 
@@ -389,6 +547,57 @@ enum AuditAction {
   DISPUTE_RESOLVED_CLIENT
   DISPUTE_RESOLVED_OWNER
   DISPUTE_RESOLVED_PARTIAL
+  SERVICE_REQUEST_CREATED
+  SERVICE_QUOTE_SUBMITTED
+  SERVICE_QUOTE_ACCEPTED
+  SERVICE_BOOKING_STARTED
+  SERVICE_BOOKING_COMPLETED
+  SERVICE_BOOKING_CANCELLED
+}
+
+enum CategoryKind {
+  EQUIPMENT
+  SERVICE
+  BOTH
+}
+
+enum ServicePricingType {
+  FIXED
+  HOURLY
+  QUOTE
+}
+
+enum ServiceStatus {
+  PENDING_REVIEW
+  ACTIVE
+  PAUSED
+  REJECTED
+  DELETED
+}
+
+enum ServiceRequestStatus {
+  OPEN
+  QUOTED
+  ACCEPTED
+  CANCELLED
+  EXPIRED
+}
+
+enum ServiceQuoteStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+  EXPIRED
+}
+
+enum ServiceBookingStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  DISPUTED
 }
 
 enum VerificationPurpose {

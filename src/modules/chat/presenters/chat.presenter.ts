@@ -2,13 +2,15 @@ type ConversationEntity = {
   id: string;
   clientId: string;
   ownerId: string;
-  equipmentId: string;
+  equipmentId: string | null;
+  serviceId?: string | null;
   lastMessage: string | null;
   lastMessageAt: Date | null;
   createdAt: Date;
   client: { id: string; name: string; avatarUrl: string | null };
   owner: { id: string; name: string; avatarUrl: string | null };
-  equipment: { id: string; title: string; photos: { url: string }[] };
+  equipment: { id: string; title: string; photos: { url: string }[] } | null;
+  service?: { id: string; title: string; photos: { url: string }[] } | null;
   _count?: { messages: number };
 };
 
@@ -24,14 +26,15 @@ type MessageEntity = {
 
 export class ChatPresenter {
   static toConversation(conv: ConversationEntity, currentUserId: string) {
-    // Do ponto de vista do utilizador actual, o "outro" e o interlocutor
     const other = conv.clientId === currentUserId ? conv.owner : conv.client;
+    const subject = conv.equipment ?? conv.service ?? null;
 
     return {
       id: conv.id,
       equipmentId: conv.equipmentId,
-      equipmentTitle: conv.equipment.title,
-      equipmentImage: conv.equipment.photos?.[0]?.url ?? null,
+      serviceId: conv.serviceId ?? null,
+      equipmentTitle: subject?.title ?? null,
+      equipmentImage: subject?.photos?.[0]?.url ?? null,
       other: {
         id: other.id,
         name: other.name,
