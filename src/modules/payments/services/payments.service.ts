@@ -348,6 +348,12 @@ export class PaymentsService {
       );
     }
 
+    if (!payment.booking) {
+      throw new BadRequestException(
+        'Pagamento sem reserva associada — fluxo de serviço ainda não suportado por este endpoint.',
+      );
+    }
+
     if (payment.booking.status === BookingStatus.CANCELLED) {
       throw new BadRequestException(
         'Não é possível reter pagamento de uma reserva cancelada.',
@@ -460,6 +466,12 @@ export class PaymentsService {
       );
     }
 
+    if (!payment.booking) {
+      throw new BadRequestException(
+        'Pagamento sem reserva associada — fluxo de serviço ainda não suportado por este endpoint.',
+      );
+    }
+
     if (
       payment.booking.status !== BookingStatus.CONFIRMED &&
       payment.booking.status !== BookingStatus.ACTIVE
@@ -475,6 +487,8 @@ export class PaymentsService {
       );
     }
 
+    const bookingId = payment.booking.id;
+
     const updatedPayment = await this.prisma.$transaction(
       async (tx) => {
         const fresh = await tx.payment.findUnique({
@@ -489,7 +503,7 @@ export class PaymentsService {
         }
 
         await tx.booking.update({
-          where: { id: payment.booking.id },
+          where: { id: bookingId },
           data: { status: BookingStatus.COMPLETED },
         });
 
@@ -595,6 +609,12 @@ export class PaymentsService {
     if (payment.dispute && payment.dispute.status !== 'RESOLVED_CLIENT') {
       throw new BadRequestException(
         'Pagamento com disputa só pode ser reembolsado quando a resolução favorecer o cliente.',
+      );
+    }
+
+    if (!payment.booking) {
+      throw new BadRequestException(
+        'Pagamento sem reserva associada — fluxo de serviço ainda não suportado por este endpoint.',
       );
     }
 

@@ -276,6 +276,12 @@ export class DisputesService {
       throw new NotFoundException('Utilizador não encontrado.');
     }
 
+    if (!dispute.booking) {
+      throw new BadRequestException(
+        'Disputa sem reserva associada — fluxo de serviço ainda não suportado por este endpoint.',
+      );
+    }
+
     const canAccess =
       user.role === UserRole.ADMIN ||
       dispute.openedBy === userId ||
@@ -318,6 +324,12 @@ export class DisputesService {
 
     if (!user) {
       throw new NotFoundException('Utilizador não encontrado.');
+    }
+
+    if (!dispute.booking) {
+      throw new BadRequestException(
+        'Disputa sem reserva associada — fluxo de serviço ainda não suportado por este endpoint.',
+      );
     }
 
     const canRespond =
@@ -415,9 +427,17 @@ export class DisputesService {
       );
     }
 
+    if (!dispute.booking) {
+      throw new BadRequestException(
+        'Disputa sem reserva associada — fluxo de serviço ainda não suportado por este endpoint.',
+      );
+    }
+
+    const bookingId = dispute.booking.id;
+
     const [, , updatedDispute] = await this.prisma.$transaction([
       this.prisma.booking.update({
-        where: { id: dispute.booking.id },
+        where: { id: bookingId },
         data: {
           status: BookingStatus.CANCELLED,
           cancelledAt: new Date(),
@@ -512,9 +532,17 @@ export class DisputesService {
       );
     }
 
+    if (!dispute.booking) {
+      throw new BadRequestException(
+        'Disputa sem reserva associada — fluxo de serviço ainda não suportado por este endpoint.',
+      );
+    }
+
+    const ownerBookingId = dispute.booking.id;
+
     const [, , updatedDispute] = await this.prisma.$transaction([
       this.prisma.booking.update({
-        where: { id: dispute.booking.id },
+        where: { id: ownerBookingId },
         data: {
           status: BookingStatus.COMPLETED,
         },
@@ -615,6 +643,13 @@ export class DisputesService {
       );
     }
 
+    if (!dispute.booking) {
+      throw new BadRequestException(
+        'Disputa sem reserva associada — fluxo de serviço ainda não suportado por este endpoint.',
+      );
+    }
+
+    const partialBookingId = dispute.booking.id;
     const totalCharged = Number(dispute.payment.totalCharged);
     const refundAmount = Number(
       ((totalCharged * dto.refundPercent) / 100).toFixed(2),
@@ -622,7 +657,7 @@ export class DisputesService {
 
     const [, , updatedDispute] = await this.prisma.$transaction([
       this.prisma.booking.update({
-        where: { id: dispute.booking.id },
+        where: { id: partialBookingId },
         data: {
           status: BookingStatus.COMPLETED,
         },

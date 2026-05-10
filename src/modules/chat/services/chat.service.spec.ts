@@ -60,6 +60,7 @@ const makePrismaMock = () => ({
   equipment: { findUnique: jest.fn() },
   conversation: {
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
     findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
@@ -163,6 +164,7 @@ describe('ChatService', () => {
         makeUser(CLIENT_ID, UserRole.CLIENT),
       );
       prisma.equipment.findUnique.mockResolvedValue(makeEquipment());
+      prisma.conversation.findFirst.mockResolvedValue(makeConversation());
       prisma.conversation.findUnique.mockResolvedValue(makeConversation());
       prisma.conversation.update.mockResolvedValue({});
       prisma.$transaction.mockResolvedValue([makeMessage(), {}]);
@@ -179,7 +181,7 @@ describe('ChatService', () => {
         makeUser(CLIENT_ID, UserRole.CLIENT),
       );
       prisma.equipment.findUnique.mockResolvedValue(makeEquipment());
-      prisma.conversation.findUnique.mockResolvedValue(null);
+      prisma.conversation.findFirst.mockResolvedValue(null);
       prisma.$transaction.mockImplementation(
         async (cb: (tx: typeof prisma) => Promise<unknown>) => {
           prisma.conversation.create.mockResolvedValue(makeConversation());
@@ -201,7 +203,7 @@ describe('ChatService', () => {
         makeUser(CLIENT_ID, UserRole.CLIENT),
       );
       prisma.equipment.findUnique.mockResolvedValue(makeEquipment());
-      prisma.conversation.findUnique.mockResolvedValue(null);
+      prisma.conversation.findFirst.mockResolvedValue(null);
       prisma.$transaction.mockImplementation(
         async (cb: (tx: typeof prisma) => Promise<unknown>) => {
           prisma.conversation.create.mockResolvedValue(makeConversation());
@@ -212,14 +214,12 @@ describe('ChatService', () => {
 
       await service.startConversation(CLIENT_ID, validDto);
 
-      expect(prisma.conversation.findUnique).toHaveBeenCalledWith(
+      expect(prisma.conversation.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
-            clientId_ownerId_equipmentId: {
-              clientId: CLIENT_ID,
-              ownerId: OWNER_ID,
-              equipmentId: EQUIPMENT_ID,
-            },
+            clientId: CLIENT_ID,
+            ownerId: OWNER_ID,
+            equipmentId: EQUIPMENT_ID,
           },
         }),
       );

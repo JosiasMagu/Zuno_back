@@ -70,12 +70,10 @@ export class ReviewsService {
       );
     }
 
-    const existing = await this.prisma.review.findUnique({
+    const existing = await this.prisma.review.findFirst({
       where: {
-        bookingId_authorId: {
-          bookingId: dto.bookingId,
-          authorId: userId,
-        },
+        bookingId: dto.bookingId,
+        authorId: userId,
       },
     });
 
@@ -282,10 +280,8 @@ export class ReviewsService {
       };
     }
 
-    const existing = await this.prisma.review.findUnique({
-      where: {
-        bookingId_authorId: { bookingId, authorId: userId },
-      },
+    const existing = await this.prisma.review.findFirst({
+      where: { bookingId, authorId: userId },
     });
 
     if (existing) {

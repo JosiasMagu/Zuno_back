@@ -60,13 +60,11 @@ export class ChatService {
       );
     }
 
-    const existing = await this.prisma.conversation.findUnique({
+    const existing = await this.prisma.conversation.findFirst({
       where: {
-        clientId_ownerId_equipmentId: {
-          clientId,
-          ownerId: equipment.ownerId,
-          equipmentId: dto.equipmentId,
-        },
+        clientId,
+        ownerId: equipment.ownerId,
+        equipmentId: dto.equipmentId,
       },
       include: {
         client: { select: USER_SELECT },

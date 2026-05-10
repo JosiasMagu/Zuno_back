@@ -53,6 +53,7 @@ const makePrismaMock = () => {
     user: { findUnique: jest.fn(), update: jest.fn() },
     review: {
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       findMany: jest.fn(),
       count: jest.fn(),
       create: jest.fn(),
@@ -117,7 +118,7 @@ describe('ReviewsService', () => {
 
     it('CLIENT cria avaliação com sucesso — targetId é o equipment', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBooking());
-      prisma.review.findUnique.mockResolvedValue(null);
+      prisma.review.findFirst.mockResolvedValue(null);
       setupHappyTx();
 
       const result = await service.create(CLIENT_ID, clientDto);
@@ -128,7 +129,7 @@ describe('ReviewsService', () => {
 
     it('OWNER cria avaliação com sucesso — targetId é o clientId', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBooking());
-      prisma.review.findUnique.mockResolvedValue(null);
+      prisma.review.findFirst.mockResolvedValue(null);
       setupHappyTx(
         makeReview({
           authorId: OWNER_ID,
@@ -186,7 +187,7 @@ describe('ReviewsService', () => {
       prisma.booking.findUnique.mockResolvedValue(
         makeBooking({ status: BookingStatus.CANCELLED }),
       );
-      prisma.review.findUnique.mockResolvedValue(null);
+      prisma.review.findFirst.mockResolvedValue(null);
       setupHappyTx();
 
       const result = await service.create(CLIENT_ID, clientDto);
@@ -225,7 +226,7 @@ describe('ReviewsService', () => {
 
     it('lança BadRequestException se já existe avaliação do mesmo utilizador na mesma booking', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBooking());
-      prisma.review.findUnique.mockResolvedValue(makeReview()); // já existe
+      prisma.review.findFirst.mockResolvedValue(makeReview()); // já existe
 
       await expect(service.create(CLIENT_ID, clientDto)).rejects.toThrow(
         new BadRequestException(
@@ -236,7 +237,7 @@ describe('ReviewsService', () => {
 
     it('CLIENT: targetId é o equipmentId', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBooking());
-      prisma.review.findUnique.mockResolvedValue(null);
+      prisma.review.findFirst.mockResolvedValue(null);
       setupHappyTx();
 
       await service.create(CLIENT_ID, clientDto);
@@ -250,7 +251,7 @@ describe('ReviewsService', () => {
 
     it('OWNER: targetId é o clientId', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBooking());
-      prisma.review.findUnique.mockResolvedValue(null);
+      prisma.review.findFirst.mockResolvedValue(null);
       setupHappyTx(makeReview({ authorId: OWNER_ID, targetId: CLIENT_ID }));
 
       await service.create(OWNER_ID, ownerDto);
@@ -264,7 +265,7 @@ describe('ReviewsService', () => {
 
     it('CLIENT: recalcula rating do equipment E do owner após avaliação', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBooking());
-      prisma.review.findUnique.mockResolvedValue(null);
+      prisma.review.findFirst.mockResolvedValue(null);
 
       const aggregateMock = jest.fn().mockResolvedValue({
         _avg: { rating: 4.5 },
@@ -292,7 +293,7 @@ describe('ReviewsService', () => {
 
     it('OWNER: recalcula apenas rating do cliente (não do equipment)', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBooking());
-      prisma.review.findUnique.mockResolvedValue(null);
+      prisma.review.findFirst.mockResolvedValue(null);
 
       const aggregateMock = jest.fn().mockResolvedValue({
         _avg: { rating: 4.0 },
@@ -325,7 +326,7 @@ describe('ReviewsService', () => {
 
     it('usa $transaction — create directo no prisma nunca é chamado fora da transacção', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBooking());
-      prisma.review.findUnique.mockResolvedValue(null);
+      prisma.review.findFirst.mockResolvedValue(null);
       setupHappyTx();
 
       await service.create(CLIENT_ID, clientDto);
@@ -613,7 +614,7 @@ describe('ReviewsService', () => {
 
     it('devolve canReview=false se utilizador já avaliou', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBooking());
-      prisma.review.findUnique.mockResolvedValue(makeReview()); // já existe
+      prisma.review.findFirst.mockResolvedValue(makeReview()); // já existe
 
       const result = await service.canReview(CLIENT_ID, BOOKING_ID);
 
@@ -623,7 +624,7 @@ describe('ReviewsService', () => {
 
     it('CLIENT pode avaliar — devolve canReview=true e role=CLIENT', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBooking());
-      prisma.review.findUnique.mockResolvedValue(null);
+      prisma.review.findFirst.mockResolvedValue(null);
 
       const result = await service.canReview(CLIENT_ID, BOOKING_ID);
 
@@ -633,7 +634,7 @@ describe('ReviewsService', () => {
 
     it('OWNER pode avaliar — devolve canReview=true e role=OWNER', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBooking());
-      prisma.review.findUnique.mockResolvedValue(null);
+      prisma.review.findFirst.mockResolvedValue(null);
 
       const result = await service.canReview(OWNER_ID, BOOKING_ID);
 
@@ -645,7 +646,7 @@ describe('ReviewsService', () => {
       prisma.booking.findUnique.mockResolvedValue(
         makeBooking({ status: BookingStatus.CANCELLED }),
       );
-      prisma.review.findUnique.mockResolvedValue(null);
+      prisma.review.findFirst.mockResolvedValue(null);
 
       const result = await service.canReview(CLIENT_ID, BOOKING_ID);
       expect(result.data.canReview).toBe(true);

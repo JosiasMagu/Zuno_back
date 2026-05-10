@@ -1,6 +1,7 @@
 type ReviewEntity = {
   id: string;
-  bookingId: string;
+  bookingId: string | null;
+  serviceBookingId: string | null;
   authorId: string;
   targetId: string;
   authorRole: string;
@@ -19,6 +20,7 @@ export class ReviewPresenter {
     return {
       id: review.id,
       bookingId: review.bookingId,
+      serviceBookingId: review.serviceBookingId,
       authorRole: review.authorRole,
       rating: review.rating,
       comment: review.comment ?? null,
