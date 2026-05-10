@@ -93,6 +93,47 @@ export class ReviewsController {
     return this.reviewsService.findByEquipment(equipmentId, query);
   }
 
+  // Avaliacoes de um servico
+
+  @Get('services/:serviceId/reviews')
+  @ApiOperation({
+    summary: 'Listar avaliações de um serviço',
+    description:
+      'Público. Mostra avaliações submetidas por CLIENTs sobre o serviço.',
+  })
+  @ApiParam({ name: 'serviceId' })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 10 })
+  @ApiResponse({ status: 200, description: 'Avaliações obtidas com sucesso.' })
+  @ApiResponse({ status: 404, description: 'Serviço não encontrado.' })
+  findByService(
+    @Param('serviceId') serviceId: string,
+    @Query() query: FindReviewsQueryDto,
+  ) {
+    return this.reviewsService.findByService(serviceId, query);
+  }
+
+  // Verificar se pode avaliar reserva de servico
+
+  @Get('service-bookings/:serviceBookingId/can-review')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Verificar se o utilizador pode avaliar uma reserva de serviço',
+  })
+  @ApiParam({ name: 'serviceBookingId' })
+  @ApiResponse({ status: 200, description: 'Verificação concluída.' })
+  @ApiResponse({ status: 404, description: 'Reserva não encontrada.' })
+  canReviewServiceBooking(
+    @CurrentUser() user: { id: string },
+    @Param('serviceBookingId') serviceBookingId: string,
+  ) {
+    return this.reviewsService.canReviewServiceBooking(
+      user.id,
+      serviceBookingId,
+    );
+  }
+
   // Avaliacoes de um utilizador (como target)
 
   @Get('users/:userId/reviews')
