@@ -8,6 +8,7 @@ import { ServicePhotosController } from './controllers/service-photos.controller
 import { ServiceQuotesController } from './controllers/service-quotes.controller';
 import { ServiceRequestsController } from './controllers/service-requests.controller';
 import { ServicesController } from './controllers/services.controller';
+import { ServicesScheduler } from './schedulers/services.scheduler';
 import { ServiceBookingsService } from './services/service-bookings.service';
 import { ServicePhotosService } from './services/service-photos.service';
 import { ServiceQuotesService } from './services/service-quotes.service';
@@ -29,6 +30,7 @@ import { ServicesService } from './services/services.service';
     ServiceRequestsService,
     ServiceQuotesService,
     ServiceBookingsService,
+    ServicesScheduler,
   ],
   exports: [ServicesService, ServiceBookingsService],
 })
