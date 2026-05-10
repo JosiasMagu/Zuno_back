@@ -6,7 +6,13 @@ import { PrismaService } from '../db/prisma.service';
 export interface AuditEntry {
   action: AuditAction;
   actorId: string;
-  targetType: 'Payment' | 'Dispute' | 'Booking';
+  targetType:
+    | 'Payment'
+    | 'Dispute'
+    | 'Booking'
+    | 'ServiceBooking'
+    | 'ServiceRequest'
+    | 'ServiceQuote';
   targetId: string;
   amount?: number | string | Prisma.Decimal | null;
   metadata?: Record<string, unknown>;
