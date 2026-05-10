@@ -9,6 +9,7 @@ import {
   BookingStatus,
   PaymentStatus,
   Prisma,
+  ServiceBookingStatus,
   UserRole,
 } from '@prisma/client';
 import * as crypto from 'crypto';
@@ -202,6 +203,13 @@ export class PaymentsService {
               status: true,
             },
           },
+          serviceBooking: {
+            select: {
+              id: true,
+              status: true,
+              scheduledFor: true,
+            },
+          },
           owner: {
             select: {
               id: true,
@@ -248,6 +256,13 @@ export class PaymentsService {
             status: true,
             deliveryAddress: true,
             clientNote: true,
+          },
+        },
+        serviceBooking: {
+          select: {
+            id: true,
+            status: true,
+            scheduledFor: true,
           },
         },
         client: {
@@ -324,18 +339,9 @@ export class PaymentsService {
     const payment = await this.prisma.payment.findUnique({
       where: { id: paymentId },
       include: {
-        booking: {
-          select: {
-            id: true,
-            status: true,
-          },
-        },
-        dispute: {
-          select: {
-            id: true,
-            status: true,
-          },
-        },
+        booking: { select: { id: true, status: true } },
+        serviceBooking: { select: { id: true, status: true } },
+        dispute: { select: { id: true, status: true } },
       },
     });
 
@@ -349,16 +355,20 @@ export class PaymentsService {
       );
     }
 
-    if (!payment.booking) {
-      throw new BadRequestException(
-        'Pagamento sem reserva associada — fluxo de serviço ainda não suportado por este endpoint.',
-      );
-    }
-
-    if (payment.booking.status === BookingStatus.CANCELLED) {
-      throw new BadRequestException(
-        'Não é possível reter pagamento de uma reserva cancelada.',
-      );
+    if (payment.booking) {
+      if (payment.booking.status === BookingStatus.CANCELLED) {
+        throw new BadRequestException(
+          'Não é possível reter pagamento de uma reserva cancelada.',
+        );
+      }
+    } else if (payment.serviceBooking) {
+      if (payment.serviceBooking.status === ServiceBookingStatus.CANCELLED) {
+        throw new BadRequestException(
+          'Não é possível reter pagamento de uma reserva cancelada.',
+        );
+      }
+    } else {
+      throw new BadRequestException('Pagamento sem reserva associada.');
     }
 
     if (payment.dispute) {
@@ -380,6 +390,13 @@ export class PaymentsService {
             startDate: true,
             endDate: true,
             status: true,
+          },
+        },
+        serviceBooking: {
+          select: {
+            id: true,
+            status: true,
+            scheduledFor: true,
           },
         },
         client: {
@@ -417,19 +434,11 @@ export class PaymentsService {
     const payment = await this.prisma.payment.findUnique({
       where: { id: paymentId },
       include: {
-        booking: {
-          select: {
-            id: true,
-            status: true,
-            ownerId: true,
-          },
+        booking: { select: { id: true, status: true, ownerId: true } },
+        serviceBooking: {
+          select: { id: true, status: true, providerId: true },
         },
-        dispute: {
-          select: {
-            id: true,
-            status: true,
-          },
-        },
+        dispute: { select: { id: true, status: true } },
       },
     });
 
@@ -439,19 +448,15 @@ export class PaymentsService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: {
-        id: true,
-        role: true,
-      },
+      select: { id: true, role: true },
     });
 
     if (!user) {
       throw new NotFoundException('Utilizador não encontrado.');
     }
 
-    // So o CLIENT (confirma recepcao do equipamento) ou ADMIN pode liberar.
-    // O OWNER NUNCA pode liberar o seu proprio pagamento
-    // isso quebraria a garantia central do cofre digital.
+    // Regra de ouro: so o CLIENT (que confirma a entrega/execucao) ou ADMIN
+    // pode liberar. O PROVIDER NUNCA pode liberar o seu proprio pagamento.
     const canRelease =
       user.role === UserRole.ADMIN || payment.clientId === userId;
 
@@ -467,28 +472,39 @@ export class PaymentsService {
       );
     }
 
-    if (!payment.booking) {
-      throw new BadRequestException(
-        'Pagamento sem reserva associada — fluxo de serviço ainda não suportado por este endpoint.',
-      );
-    }
-
-    if (
-      payment.booking.status !== BookingStatus.CONFIRMED &&
-      payment.booking.status !== BookingStatus.ACTIVE
-    ) {
-      throw new BadRequestException(
-        'O estado atual da reserva não permite liberação do pagamento.',
-      );
-    }
-
     if (payment.dispute) {
       throw new BadRequestException(
         'Não é possível liberar pagamento com disputa associada.',
       );
     }
 
-    const bookingId = payment.booking.id;
+    const bookingId = payment.booking?.id ?? null;
+    const serviceBookingId = payment.serviceBooking?.id ?? null;
+
+    if (payment.booking) {
+      if (
+        payment.booking.status !== BookingStatus.CONFIRMED &&
+        payment.booking.status !== BookingStatus.ACTIVE
+      ) {
+        throw new BadRequestException(
+          'O estado atual da reserva não permite liberação do pagamento.',
+        );
+      }
+    } else if (payment.serviceBooking) {
+      // Em servicos: a libertacao acontece depois do provider chamar
+      // /service-bookings/:id/complete (status = COMPLETED) OU enquanto
+      // ainda esta IN_PROGRESS (cliente confirma a entrega antecipadamente).
+      if (
+        payment.serviceBooking.status !== ServiceBookingStatus.IN_PROGRESS &&
+        payment.serviceBooking.status !== ServiceBookingStatus.COMPLETED
+      ) {
+        throw new BadRequestException(
+          'O estado atual da reserva de serviço não permite liberação do pagamento.',
+        );
+      }
+    } else {
+      throw new BadRequestException('Pagamento sem reserva associada.');
+    }
 
     const updatedPayment = await this.prisma.$transaction(
       async (tx) => {
@@ -503,10 +519,20 @@ export class PaymentsService {
           );
         }
 
-        await tx.booking.update({
-          where: { id: bookingId },
-          data: { status: BookingStatus.COMPLETED },
-        });
+        if (bookingId) {
+          await tx.booking.update({
+            where: { id: bookingId },
+            data: { status: BookingStatus.COMPLETED },
+          });
+        } else if (serviceBookingId) {
+          await tx.serviceBooking.update({
+            where: { id: serviceBookingId },
+            data: {
+              status: ServiceBookingStatus.COMPLETED,
+              completedAt: new Date(),
+            },
+          });
+        }
 
         return tx.payment.update({
           where: { id: paymentId },
@@ -522,6 +548,13 @@ export class PaymentsService {
                 startDate: true,
                 endDate: true,
                 status: true,
+              },
+            },
+            serviceBooking: {
+              select: {
+                id: true,
+                status: true,
+                scheduledFor: true,
               },
             },
             client: {
@@ -579,18 +612,9 @@ export class PaymentsService {
     const payment = await this.prisma.payment.findUnique({
       where: { id: paymentId },
       include: {
-        booking: {
-          select: {
-            id: true,
-            status: true,
-          },
-        },
-        dispute: {
-          select: {
-            id: true,
-            status: true,
-          },
-        },
+        booking: { select: { id: true, status: true } },
+        serviceBooking: { select: { id: true, status: true } },
+        dispute: { select: { id: true, status: true } },
       },
     });
 
@@ -613,21 +637,37 @@ export class PaymentsService {
       );
     }
 
-    if (!payment.booking) {
-      throw new BadRequestException(
-        'Pagamento sem reserva associada — fluxo de serviço ainda não suportado por este endpoint.',
+    if (!payment.booking && !payment.serviceBooking) {
+      throw new BadRequestException('Pagamento sem reserva associada.');
+    }
+
+    const operations: Prisma.PrismaPromise<unknown>[] = [];
+
+    if (payment.booking) {
+      operations.push(
+        this.prisma.booking.update({
+          where: { id: payment.booking.id },
+          data: {
+            status: BookingStatus.CANCELLED,
+            cancelledAt: new Date(),
+            cancellationReason: 'Reserva cancelada por reembolso do pagamento.',
+          },
+        }),
+      );
+    } else if (payment.serviceBooking) {
+      operations.push(
+        this.prisma.serviceBooking.update({
+          where: { id: payment.serviceBooking.id },
+          data: {
+            status: ServiceBookingStatus.CANCELLED,
+            cancelledAt: new Date(),
+            cancellationReason: 'Reserva cancelada por reembolso do pagamento.',
+          },
+        }),
       );
     }
 
-    const [, updatedPayment] = await this.prisma.$transaction([
-      this.prisma.booking.update({
-        where: { id: payment.booking.id },
-        data: {
-          status: BookingStatus.CANCELLED,
-          cancelledAt: new Date(),
-          cancellationReason: 'Reserva cancelada por reembolso do pagamento.',
-        },
-      }),
+    operations.push(
       this.prisma.payment.update({
         where: { id: paymentId },
         data: {
@@ -642,6 +682,13 @@ export class PaymentsService {
               startDate: true,
               endDate: true,
               status: true,
+            },
+          },
+          serviceBooking: {
+            select: {
+              id: true,
+              status: true,
+              scheduledFor: true,
             },
           },
           client: {
@@ -660,7 +707,29 @@ export class PaymentsService {
           },
         },
       }),
-    ]);
+    );
+
+    const results = (await this.prisma.$transaction(operations)) as [
+      unknown,
+      Prisma.PaymentGetPayload<{
+        include: {
+          booking: {
+            select: {
+              id: true;
+              startDate: true;
+              endDate: true;
+              status: true;
+            };
+          };
+          serviceBooking: {
+            select: { id: true; status: true; scheduledFor: true };
+          };
+          client: { select: { id: true; name: true; avatarUrl: true } };
+          owner: { select: { id: true; name: true; avatarUrl: true } };
+        };
+      }>,
+    ];
+    const updatedPayment = results[1];
 
     await this.audit.record({
       action: AuditAction.PAYMENT_REFUNDED,
