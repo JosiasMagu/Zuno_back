@@ -5,13 +5,23 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { AuthSession, UserRole } from '@prisma/client';
+import { AuthSession, UserRole, VerificationPurpose } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import type { StringValue } from 'ms';
 
 import { PrismaService } from '../../../shared/db/prisma.service';
+import {
+  ChangePasswordDto,
+  ConfirmPhoneVerificationDto,
+  ForgotPasswordDto,
+  RequestPhoneVerificationDto,
+  ResetPasswordDto,
+} from '../dto/verification.dto';
 import { LoginDto } from '../dto/login.dto';
 import { RegisterDto } from '../dto/register.dto';
+import { VerificationService } from './verification.service';
+
+const PASSWORD_BCRYPT_ROUNDS = 12;
 
 @Injectable()
 export class AuthService {
@@ -19,7 +29,142 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly verification: VerificationService,
   ) {}
+
+  async requestPhoneVerification(dto: RequestPhoneVerificationDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { phone: dto.phone.trim() },
+      select: { id: true, phone: true, email: true, isVerified: true },
+    });
+
+    if (user && !user.isVerified) {
+      await this.verification.issueCode({
+        userId: user.id,
+        phone: user.phone,
+        email: user.email,
+        purpose: VerificationPurpose.PHONE_VERIFICATION,
+      });
+    }
+
+    return { message: 'Se a conta existir, foi enviado um codigo.' };
+  }
+
+  async confirmPhoneVerification(dto: ConfirmPhoneVerificationDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { phone: dto.phone.trim() },
+      select: { id: true, isVerified: true },
+    });
+
+    if (!user) {
+      throw new BadRequestException('Codigo invalido ou expirado.');
+    }
+
+    if (user.isVerified) {
+      return { message: 'Conta ja verificada.' };
+    }
+
+    await this.verification.consumeCode({
+      userId: user.id,
+      code: dto.code,
+      purpose: VerificationPurpose.PHONE_VERIFICATION,
+    });
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { isVerified: true },
+    });
+
+    return { message: 'Conta verificada com sucesso.' };
+  }
+
+  async forgotPassword(dto: ForgotPasswordDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { phone: dto.phone.trim() },
+      select: { id: true, phone: true, email: true, isActive: true },
+    });
+
+    if (user?.isActive) {
+      await this.verification.issueCode({
+        userId: user.id,
+        phone: user.phone,
+        email: user.email,
+        purpose: VerificationPurpose.PASSWORD_RESET,
+      });
+    }
+
+    return {
+      message:
+        'Se a conta existir, foi enviado um codigo para redefinir a password.',
+    };
+  }
+
+  async resetPassword(dto: ResetPasswordDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { phone: dto.phone.trim() },
+      select: { id: true, isActive: true },
+    });
+
+    if (!user || !user.isActive) {
+      throw new BadRequestException('Codigo invalido ou expirado.');
+    }
+
+    await this.verification.consumeCode({
+      userId: user.id,
+      code: dto.code,
+      purpose: VerificationPurpose.PASSWORD_RESET,
+    });
+
+    const passwordHash = await bcrypt.hash(
+      dto.newPassword,
+      PASSWORD_BCRYPT_ROUNDS,
+    );
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash },
+      }),
+      this.prisma.authSession.updateMany({
+        where: { userId: user.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+
+    return {
+      message:
+        'Password redefinida com sucesso. As sessoes activas foram revogadas.',
+    };
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, passwordHash: true },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Sessao invalida.');
+    }
+
+    const ok = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+
+    if (!ok) {
+      throw new UnauthorizedException('Password actual incorrecta.');
+    }
+
+    const passwordHash = await bcrypt.hash(
+      dto.newPassword,
+      PASSWORD_BCRYPT_ROUNDS,
+    );
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    });
+
+    return { message: 'Password alterada com sucesso.' };
+  }
 
   async register(dto: RegisterDto) {
     const phone = dto.phone.trim();
@@ -228,8 +373,8 @@ export class AuthService {
   }
 
   private async generateTokens(userId: string, phone: string, role: UserRole) {
-    // getOrThrow lança InternalServerErrorException se a variável não existir.
-    // Nunca usar fallback com string hardcoded — seria uma vulnerabilidade crítica.
+    // getOrThrow lanca InternalServerErrorException se a variavel nao existir.
+    // Nunca usar fallback com string hardcoded - seria uma vulnerabilidade critica.
     const accessSecret =
       this.configService.getOrThrow<string>('JWT_ACCESS_SECRET');
 

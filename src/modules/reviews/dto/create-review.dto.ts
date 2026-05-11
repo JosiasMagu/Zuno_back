@@ -12,12 +12,21 @@ import {
 import { ReviewAuthorRole } from '@prisma/client';
 
 export class CreateReviewDto {
-  @ApiProperty({
-    example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-    description: 'ID da booking associada a esta avaliação',
+  @ApiPropertyOptional({
+    description:
+      'ID da reserva de equipamento. Obrigatório se não fornecer serviceBookingId.',
   })
+  @IsOptional()
   @IsUUID()
-  bookingId: string;
+  bookingId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'ID da reserva de serviço. Obrigatório se não fornecer bookingId.',
+  })
+  @IsOptional()
+  @IsUUID()
+  serviceBookingId?: string;
 
   @ApiProperty({
     enum: ReviewAuthorRole,

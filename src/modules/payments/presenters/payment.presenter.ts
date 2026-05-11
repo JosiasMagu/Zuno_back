@@ -1,6 +1,7 @@
 type PaymentListEntity = {
   id: string;
-  bookingId: string;
+  bookingId: string | null;
+  serviceBookingId?: string | null;
   clientId: string;
   ownerId: string;
   rentalAmount: unknown;
@@ -26,7 +27,12 @@ type PaymentListEntity = {
     startDate: Date;
     endDate: Date;
     status: string;
-  };
+  } | null;
+  serviceBooking?: {
+    id: string;
+    status: string;
+    scheduledFor: Date | null;
+  } | null;
   client?: {
     id: string;
     name: string;
@@ -48,7 +54,7 @@ type PaymentDetailsEntity = PaymentListEntity & {
     status: string;
     deliveryAddress: string | null;
     clientNote: string | null;
-  };
+  } | null;
   dispute?: {
     id: string;
     status: string;
@@ -83,12 +89,21 @@ export class PaymentPresenter {
       receiptNumber: payment.receiptNumber,
       createdAt: payment.createdAt,
       updatedAt: payment.updatedAt,
-      booking: {
-        id: payment.booking.id,
-        startDate: payment.booking.startDate,
-        endDate: payment.booking.endDate,
-        status: payment.booking.status,
-      },
+      booking: payment.booking
+        ? {
+            id: payment.booking.id,
+            startDate: payment.booking.startDate,
+            endDate: payment.booking.endDate,
+            status: payment.booking.status,
+          }
+        : null,
+      serviceBooking: payment.serviceBooking
+        ? {
+            id: payment.serviceBooking.id,
+            status: payment.serviceBooking.status,
+            scheduledFor: payment.serviceBooking.scheduledFor,
+          }
+        : null,
       client: payment.client
         ? {
             id: payment.client.id,
@@ -128,15 +143,24 @@ export class PaymentPresenter {
       receiptNumber: payment.receiptNumber,
       createdAt: payment.createdAt,
       updatedAt: payment.updatedAt,
-      booking: {
-        id: payment.booking.id,
-        startDate: payment.booking.startDate,
-        endDate: payment.booking.endDate,
-        totalDays: payment.booking.totalDays,
-        status: payment.booking.status,
-        deliveryAddress: payment.booking.deliveryAddress,
-        clientNote: payment.booking.clientNote,
-      },
+      booking: payment.booking
+        ? {
+            id: payment.booking.id,
+            startDate: payment.booking.startDate,
+            endDate: payment.booking.endDate,
+            totalDays: payment.booking.totalDays,
+            status: payment.booking.status,
+            deliveryAddress: payment.booking.deliveryAddress,
+            clientNote: payment.booking.clientNote,
+          }
+        : null,
+      serviceBooking: payment.serviceBooking
+        ? {
+            id: payment.serviceBooking.id,
+            status: payment.serviceBooking.status,
+            scheduledFor: payment.serviceBooking.scheduledFor,
+          }
+        : null,
       client: payment.client
         ? {
             id: payment.client.id,

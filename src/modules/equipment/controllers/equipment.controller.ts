@@ -38,7 +38,7 @@ import { EquipmentService } from '../services/equipment.service';
 export class EquipmentController {
   constructor(private readonly equipmentService: EquipmentService) {}
 
-  // ─── Criar equipamento (OWNER / ADMIN) ────────────────────────────────────
+  // Criar equipamento (OWNER / ADMIN)
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.PROVIDER, UserRole.ADMIN)
@@ -57,7 +57,7 @@ export class EquipmentController {
     return this.equipmentService.create(user.id, dto);
   }
 
-  // ─── Listar equipamentos activos (público) ────────────────────────────────
+  // Listar equipamentos activos (publico)
 
   @Get()
   @ApiOperation({
@@ -90,7 +90,7 @@ export class EquipmentController {
     return this.equipmentService.findAll(query);
   }
 
-  // ─── Listings do utilizador autenticado (OWNER / ADMIN) ──────────────────
+  // Listings do utilizador autenticado (OWNER / ADMIN)
 
   @Get('me/listings')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -110,7 +110,7 @@ export class EquipmentController {
     return this.equipmentService.findMyListings(user.id);
   }
 
-  // ─── Equipamentos pendentes de revisão (ADMIN) ────────────────────────────
+  // Equipamentos pendentes de revisao (ADMIN)
 
   @Get('admin/pending')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -130,7 +130,7 @@ export class EquipmentController {
     return this.equipmentService.findPending(user.id);
   }
 
-  // ─── Detalhe público (só ACTIVE) ─────────────────────────────────────────
+  // Detalhe publico (so ACTIVE)
 
   @Get(':id')
   @ApiOperation({
@@ -144,7 +144,7 @@ export class EquipmentController {
     return this.equipmentService.findOne(id);
   }
 
-  // ─── Aprovar equipamento (ADMIN) ──────────────────────────────────────────
+  // Aprovar equipamento (ADMIN)
 
   @Patch(':id/approve')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -167,7 +167,7 @@ export class EquipmentController {
     return this.equipmentService.approve(user.id, id);
   }
 
-  // ─── Rejeitar equipamento (ADMIN) ─────────────────────────────────────────
+  // Rejeitar equipamento (ADMIN)
 
   @Patch(':id/reject')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -191,7 +191,7 @@ export class EquipmentController {
     return this.equipmentService.reject(user.id, id, dto.reason);
   }
 
-  // ─── Alternar disponibilidade (OWNER / ADMIN) ─────────────────────────────
+  // Alternar disponibilidade (OWNER / ADMIN)
 
   @Patch(':id/toggle-availability')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -218,7 +218,7 @@ export class EquipmentController {
     return this.equipmentService.toggleAvailability(user.id, id);
   }
 
-  // ─── Actualizar equipamento (OWNER / ADMIN) ───────────────────────────────
+  // Actualizar equipamento (OWNER / ADMIN)
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.PROVIDER, UserRole.ADMIN)
@@ -242,7 +242,7 @@ export class EquipmentController {
     return this.equipmentService.update(user.id, id, dto);
   }
 
-  // ─── Soft delete (OWNER / ADMIN) ──────────────────────────────────────────
+  // Soft delete (OWNER / ADMIN)
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.PROVIDER, UserRole.ADMIN)

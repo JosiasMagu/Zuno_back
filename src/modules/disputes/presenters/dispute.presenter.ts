@@ -1,6 +1,7 @@
 type DisputeListEntity = {
   id: string;
-  bookingId: string;
+  bookingId: string | null;
+  serviceBookingId?: string | null;
   paymentId: string;
   openedBy: string;
   reason: string;
@@ -20,7 +21,14 @@ type DisputeListEntity = {
     endDate: Date;
     clientId?: string;
     ownerId?: string;
-  };
+  } | null;
+  serviceBooking?: {
+    id: string;
+    status: string;
+    scheduledFor: Date | null;
+    clientId?: string;
+    providerId?: string;
+  } | null;
   payment: {
     id: string;
     status: string;
@@ -59,14 +67,25 @@ export class DisputePresenter {
       ownerDeadline: dispute.ownerDeadline,
       createdAt: dispute.createdAt,
       updatedAt: dispute.updatedAt,
-      booking: {
-        id: dispute.booking.id,
-        status: dispute.booking.status,
-        startDate: dispute.booking.startDate,
-        endDate: dispute.booking.endDate,
-        clientId: dispute.booking.clientId,
-        ownerId: dispute.booking.ownerId,
-      },
+      booking: dispute.booking
+        ? {
+            id: dispute.booking.id,
+            status: dispute.booking.status,
+            startDate: dispute.booking.startDate,
+            endDate: dispute.booking.endDate,
+            clientId: dispute.booking.clientId,
+            ownerId: dispute.booking.ownerId,
+          }
+        : null,
+      serviceBooking: dispute.serviceBooking
+        ? {
+            id: dispute.serviceBooking.id,
+            status: dispute.serviceBooking.status,
+            scheduledFor: dispute.serviceBooking.scheduledFor,
+            clientId: dispute.serviceBooking.clientId,
+            providerId: dispute.serviceBooking.providerId,
+          }
+        : null,
       payment: {
         id: dispute.payment.id,
         status: dispute.payment.status,
@@ -81,7 +100,6 @@ export class DisputePresenter {
       },
     };
   }
-  833915119;
 
   static toDetails(dispute: DisputeDetailsEntity) {
     return this.toListItem(dispute);

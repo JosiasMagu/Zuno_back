@@ -3,6 +3,7 @@ import {
   UserRole,
   EquipmentStatus,
   EquipmentCondition,
+  CategoryKind,
 } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import * as bcrypt from 'bcrypt';
@@ -48,12 +49,18 @@ function abortIfProduction(): void {
 }
 
 const CATEGORIES = [
-  { slug: 'construcao', name: 'Construção' },
-  { slug: 'agricultura', name: 'Agricultura' },
-  { slug: 'transporte', name: 'Transporte' },
-  { slug: 'eventos', name: 'Eventos' },
-  { slug: 'limpeza', name: 'Limpeza' },
-  { slug: 'jardinagem', name: 'Jardinagem' },
+  { slug: 'construcao', name: 'Construção', kind: CategoryKind.BOTH },
+  { slug: 'agricultura', name: 'Agricultura', kind: CategoryKind.EQUIPMENT },
+  { slug: 'transporte', name: 'Transporte', kind: CategoryKind.BOTH },
+  { slug: 'eventos', name: 'Eventos', kind: CategoryKind.EQUIPMENT },
+  { slug: 'limpeza', name: 'Limpeza', kind: CategoryKind.BOTH },
+  { slug: 'jardinagem', name: 'Jardinagem', kind: CategoryKind.BOTH },
+  {
+    slug: 'electricidade',
+    name: 'Electricidade',
+    kind: CategoryKind.SERVICE,
+  },
+  { slug: 'canalizacao', name: 'Canalização', kind: CategoryKind.SERVICE },
 ] as const;
 
 async function seedCategories() {
@@ -62,8 +69,13 @@ async function seedCategories() {
   for (const cat of CATEGORIES) {
     await prisma.category.upsert({
       where: { slug: cat.slug },
-      create: { name: cat.name, slug: cat.slug, isActive: true },
-      update: { name: cat.name, isActive: true },
+      create: {
+        name: cat.name,
+        slug: cat.slug,
+        isActive: true,
+        kind: cat.kind,
+      },
+      update: { name: cat.name, isActive: true, kind: cat.kind },
     });
   }
 
@@ -289,19 +301,13 @@ async function printSummary() {
   ]);
 
   console.log('');
-  console.log(
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-  );
+  console.log('------------------------------------------------------------');
   console.log('  Estado da BD');
-  console.log(
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-  );
+  console.log('------------------------------------------------------------');
   console.log(`  Utilizadores:   ${users}`);
   console.log(`  Categorias:     ${categories}`);
   console.log(`  Equipamentos:   ${equipment}`);
-  console.log(
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-  );
+  console.log('------------------------------------------------------------');
   console.log('');
   console.log(`  Password de teste: ${SEED_PASSWORD}`);
   console.log('  admin:        +258840000000  (admin@zuno.co.mz)');
@@ -316,7 +322,7 @@ async function main() {
   abortIfProduction();
 
   console.log('');
-  console.log('Zuno — Seed da base de dados');
+  console.log('Zuno - Seed da base de dados');
   console.log('');
 
   const passwordHash = await hashPassword(SEED_PASSWORD);

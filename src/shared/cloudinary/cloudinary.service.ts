@@ -4,7 +4,7 @@ import { Readable } from 'stream';
 
 @Injectable()
 export class CloudinaryService {
-  // Tamanho máximo por ficheiro: 5MB
+  // Tamanho maximo por ficheiro: 5MB
   private readonly MAX_SIZE_BYTES = 5 * 1024 * 1024;
 
   // Tipos aceites
@@ -19,18 +19,29 @@ export class CloudinaryService {
     file: Express.Multer.File,
     equipmentId: string,
   ): Promise<{ url: string; publicId: string }> {
+    return this.upload(file, `zuno/equipment/${equipmentId}`);
+  }
+
+  async uploadServicePhoto(
+    file: Express.Multer.File,
+    serviceId: string,
+  ): Promise<{ url: string; publicId: string }> {
+    return this.upload(file, `zuno/services/${serviceId}`);
+  }
+
+  private async upload(
+    file: Express.Multer.File,
+    folder: string,
+  ): Promise<{ url: string; publicId: string }> {
     this.validateFile(file);
 
     return new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
-          folder: `zuno/equipment/${equipmentId}`,
+          folder,
           transformation: [
-            // Redimensiona para máximo 1200px de largura mantendo proporção
             { width: 1200, crop: 'limit' },
-            // Qualidade automática — Cloudinary optimiza o tamanho
             { quality: 'auto' },
-            // Converte para webp para melhor performance no mobile
             { fetch_format: 'auto' },
           ],
           resource_type: 'image',
@@ -51,7 +62,6 @@ export class CloudinaryService {
         },
       );
 
-      // Converte o buffer do Multer para stream e envia ao Cloudinary
       Readable.from(file.buffer).pipe(uploadStream);
     });
   }
@@ -60,8 +70,8 @@ export class CloudinaryService {
     try {
       await cloudinary.uploader.destroy(publicId);
     } catch {
-      // Falha silenciosa — se a foto já não existe no Cloudinary,
-      // não é motivo para rejeitar a operação na base de dados
+      // Falha silenciosa - se a foto ja nao existe no Cloudinary,
+      // nao e motivo para rejeitar a operacao na base de dados
     }
   }
 

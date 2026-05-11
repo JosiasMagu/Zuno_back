@@ -6,6 +6,7 @@ import type { StringValue } from 'ms';
 import { DatabaseModule } from '../../shared/db/database.module';
 import { AuthController } from './controllers/auth.controller';
 import { AuthService } from './services/auth.service';
+import { VerificationService } from './services/verification.service';
 import { RolesGuard } from './guards/roles.guard';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
@@ -33,7 +34,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, RolesGuard],
+  providers: [AuthService, VerificationService, JwtStrategy, RolesGuard],
   exports: [AuthService, JwtModule, RolesGuard],
 })
 export class AuthModule {}
