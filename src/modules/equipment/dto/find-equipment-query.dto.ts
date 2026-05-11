@@ -15,9 +15,9 @@ export enum EquipmentSortBy {
   RELEVANT = 'relevant',
   LOWEST_PRICE = 'lowest_price',
   HIGHEST_PRICE = 'highest_price',
-  // Para o MVP, NEAREST é aceite mas tratado como NEWEST internamente.
-  // Quando geolocalização real for implementada, substituir o fallback
-  // no buildOrderBy() do equipment.service.ts pela ordenação por distância.
+  // Para o MVP, NEAREST e aceite mas tratado como NEWEST internamente.
+  // Quando geolocalizacao real for implementada, substituir o fallback
+  // no buildOrderBy() do equipment.service.ts pela ordenacao por distancia.
   NEAREST = 'nearest',
   NEWEST = 'newest',
 }

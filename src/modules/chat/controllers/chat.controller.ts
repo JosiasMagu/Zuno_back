@@ -35,7 +35,7 @@ import { ChatService } from '../services/chat.service';
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
-  // ─── Iniciar conversa (CLIENT) ────────────────────────────────────────────
+  // Iniciar conversa (CLIENT)
 
   @Post('conversations')
   @UseGuards(RolesGuard)
@@ -58,7 +58,7 @@ export class ChatController {
     return this.chatService.startConversation(user.id, dto);
   }
 
-  // ─── Listar conversas do utilizador ───────────────────────────────────────
+  // Listar conversas do utilizador
 
   @Get('conversations')
   @ApiOperation({
@@ -71,7 +71,7 @@ export class ChatController {
     return this.chatService.findMyConversations(user.id);
   }
 
-  // ─── Detalhe de uma conversa + mensagens ─────────────────────────────────
+  // Detalhe de uma conversa + mensagens
 
   @Get('conversations/:id')
   @ApiOperation({
@@ -92,7 +92,7 @@ export class ChatController {
     return this.chatService.findConversation(user.id, id, query);
   }
 
-  // ─── Enviar mensagem via REST (fallback quando WebSocket não disponível) ───
+  // Enviar mensagem via REST (fallback quando WebSocket nao disponivel)
 
   @Post('conversations/:id/messages')
   @ApiOperation({
@@ -123,7 +123,7 @@ export class ChatController {
     };
   }
 
-  // ─── Contar mensagens não lidas ───────────────────────────────────────────
+  // Contar mensagens nao lidas
 
   @Get('unread-count')
   @ApiOperation({

@@ -14,11 +14,12 @@ import {
 } from '@prisma/client';
 
 import { DisputesService } from './disputes.service';
+import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 
-// ─────────────────────────────────────────────────────────────────────────────
+const auditMock = { record: jest.fn() };
+
 // CONSTANTES DE TESTE
-// ─────────────────────────────────────────────────────────────────────────────
 
 const CLIENT_ID = 'client-uuid-001';
 const OWNER_ID = 'owner-uuid-001';
@@ -28,9 +29,7 @@ const PAYMENT_ID = 'payment-uuid-001';
 const DISPUTE_ID = 'dispute-uuid-001';
 const STRANGER_ID = 'stranger-uuid-001';
 
-// ─────────────────────────────────────────────────────────────────────────────
 // FACTORIES
-// ─────────────────────────────────────────────────────────────────────────────
 
 const makeUser = (id: string, role: UserRole) => ({
   id,
@@ -138,9 +137,7 @@ const makeDispute = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MOCK DO PRISMA
-// ─────────────────────────────────────────────────────────────────────────────
 
 const makePrismaMock = () => ({
   user: { findUnique: jest.fn() },
@@ -156,9 +153,7 @@ const makePrismaMock = () => ({
   $transaction: jest.fn(),
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
 // SUITE PRINCIPAL
-// ─────────────────────────────────────────────────────────────────────────────
 
 describe('DisputesService', () => {
   let service: DisputesService;
@@ -171,6 +166,7 @@ describe('DisputesService', () => {
       providers: [
         DisputesService,
         { provide: PrismaService, useValue: prisma },
+        { provide: AuditService, useValue: auditMock },
       ],
     }).compile();
 
@@ -179,9 +175,7 @@ describe('DisputesService', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  // ───────────────────────────────────────────────────────────────────────────
   // create()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('create()', () => {
     const validDto = {
@@ -298,16 +292,18 @@ describe('DisputesService', () => {
       );
     });
 
-    it('permite abrir disputa com pagamento RELEASED', async () => {
+    it('rejeita disputa em pagamento RELEASED — escrow ja libertado', async () => {
       prisma.booking.findUnique.mockResolvedValue(
         makeBooking({
           payment: makePayment({ status: PaymentStatus.RELEASED }),
         }),
       );
-      setupHappyTx();
 
-      const result = await service.create(CLIENT_ID, validDto);
-      expect(result.message).toBe('Disputa criada com sucesso.');
+      await expect(service.create(CLIENT_ID, validDto)).rejects.toThrow(
+        new BadRequestException(
+          'O estado atual do pagamento não permite abrir disputa.',
+        ),
+      );
     });
 
     it('marca a booking como DISPUTED dentro da transacção', async () => {
@@ -355,9 +351,7 @@ describe('DisputesService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // findMyDisputes()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('findMyDisputes()', () => {
     it('lança NotFoundException se utilizador não existe', async () => {
@@ -440,9 +434,7 @@ describe('DisputesService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // findOne()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('findOne()', () => {
     it('lança NotFoundException se disputa não existe', async () => {
@@ -504,9 +496,7 @@ describe('DisputesService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // respond()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('respond()', () => {
     const dto = {
@@ -647,9 +637,7 @@ describe('DisputesService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // resolveClient() — dinheiro volta ao cliente
-  // ───────────────────────────────────────────────────────────────────────────
+  // resolveClient() - dinheiro volta ao cliente
 
   describe('resolveClient()', () => {
     const setupAdminAndDispute = (
@@ -744,7 +732,7 @@ describe('DisputesService', () => {
 
       expect(result.message).toBe('Disputa resolvida a favor do cliente.');
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-      // A transacção deve ter 3 operações (booking update, payment update, dispute update)
+      // A transaccao deve ter 3 operacoes (booking update, payment update, dispute update)
       const txArg = prisma.$transaction.mock.calls[0][0] as unknown[];
       expect(txArg).toHaveLength(3);
     });
@@ -766,9 +754,7 @@ describe('DisputesService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // resolveOwner() — dinheiro vai para o owner
-  // ───────────────────────────────────────────────────────────────────────────
+  // resolveOwner() - dinheiro vai para o owner
 
   describe('resolveOwner()', () => {
     const setupAdminAndDispute = (
@@ -874,9 +860,7 @@ describe('DisputesService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // resolvePartial() — reembolso parcial
-  // ───────────────────────────────────────────────────────────────────────────
+  // resolvePartial() - reembolso parcial
 
   describe('resolvePartial()', () => {
     const dto = { refundPercent: 50 };

@@ -14,10 +14,8 @@ import {
 import { BookingsService } from './bookings.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 
-// ─────────────────────────────────────────────────────────────────────────────
 // FACTORIES DE DADOS DE TESTE
-// Centralizar a construção de dados evita repetição e torna os testes legíveis.
-// ─────────────────────────────────────────────────────────────────────────────
+// Centralizar a construcao de dados evita repeticao e torna os testes legiveis.
 
 const CLIENT_ID = 'client-uuid-001';
 const OWNER_ID = 'owner-uuid-001';
@@ -120,11 +118,9 @@ const makeBooking = (overrides: Partial<Record<string, unknown>> = {}) => {
   };
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MOCK DO PRISMA SERVICE
-// Usamos jest.fn() em cada método para controlar o comportamento em cada teste.
-// A abordagem de fábrica (makePrisma) garante isolamento entre testes.
-// ─────────────────────────────────────────────────────────────────────────────
+// Usamos jest.fn() em cada metodo para controlar o comportamento em cada teste.
+// A abordagem de fabrica (makePrisma) garante isolamento entre testes.
 
 type TxClient = {
   booking: {
@@ -152,9 +148,7 @@ const makePrismaMock = () => {
   return mock;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
 // SUITE PRINCIPAL
-// ─────────────────────────────────────────────────────────────────────────────
 
 describe('BookingsService', () => {
   let service: BookingsService;
@@ -177,9 +171,7 @@ describe('BookingsService', () => {
     jest.clearAllMocks();
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // create()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('create()', () => {
     const validDto = {
@@ -327,7 +319,7 @@ describe('BookingsService', () => {
     it('lança BadRequestException se existe reserva conflituosa (dentro da transacção)', async () => {
       prisma.equipment.findUnique.mockResolvedValue(makeEquipment());
 
-      // A transacção devolve um conflito → o callback lança BadRequestException
+      // A transaccao devolve um conflito → o callback lanca BadRequestException
       prisma.$transaction.mockImplementation(
         async (callback: (tx: TxClient) => Promise<unknown>) => {
           const tx: TxClient = {
@@ -371,7 +363,7 @@ describe('BookingsService', () => {
 
       await service.create(CLIENT_ID, validDto);
 
-      // A criação real deve ocorrer dentro de $transaction, não directamente no prisma
+      // A criacao real deve ocorrer dentro de $transaction, nao directamente no prisma
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       expect(prisma.booking.create).not.toHaveBeenCalled();
     });
@@ -380,8 +372,8 @@ describe('BookingsService', () => {
       prisma.equipment.findUnique.mockResolvedValue(makeEquipment());
 
       // Usamos container object em vez de `let x = null` porque o TypeScript
-      // não consegue rastrear atribuições dentro de callbacks assíncronos de mocks
-      // — inferiria `capturedData` como `never` após o await.
+      // nao consegue rastrear atribuicoes dentro de callbacks assincronos de mocks
+      // inferiria `capturedData` como `never` apos o await.
       const captured = { data: {} as Record<string, unknown> };
       prisma.$transaction.mockImplementation(
         async (callback: (tx: TxClient) => Promise<unknown>) => {
@@ -444,9 +436,7 @@ describe('BookingsService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // findMyBookings()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('findMyBookings()', () => {
     it('lança NotFoundException se utilizador não existe', async () => {
@@ -558,9 +548,7 @@ describe('BookingsService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // findOwnerBookings()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('findOwnerBookings()', () => {
     it('lança NotFoundException se utilizador não existe', async () => {
@@ -623,9 +611,7 @@ describe('BookingsService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // findOne()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('findOne()', () => {
     it('lança NotFoundException se reserva não existe', async () => {
@@ -748,9 +734,7 @@ describe('BookingsService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // confirm()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('confirm()', () => {
     const makeBookingWithEquipment = (
@@ -926,9 +910,7 @@ describe('BookingsService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // cancel()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('cancel()', () => {
     const cancelledBooking = makeBooking({

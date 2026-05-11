@@ -4,17 +4,13 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { CategoriesService } from './categories.service';
 
-// ─────────────────────────────────────────────────────────────────────────────
 // IDs FIXOS
-// ─────────────────────────────────────────────────────────────────────────────
 
 const CAT_ID = 'cat-uuid-001';
 const PARENT_ID = 'cat-uuid-parent';
 const OTHER_CAT_ID = 'cat-uuid-other';
 
-// ─────────────────────────────────────────────────────────────────────────────
 // FACTORIES
-// ─────────────────────────────────────────────────────────────────────────────
 
 const makeCategory = (overrides: Record<string, unknown> = {}) => ({
   id: CAT_ID,
@@ -28,12 +24,11 @@ const makeCategory = (overrides: Record<string, unknown> = {}) => ({
   parent: null,
   children: [],
   equipment: [],
+  services: [],
   ...overrides,
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MOCK DO PRISMA
-// ─────────────────────────────────────────────────────────────────────────────
 
 const makePrisma = () => ({
   category: {
@@ -44,9 +39,7 @@ const makePrisma = () => ({
   },
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
 // SUITE
-// ─────────────────────────────────────────────────────────────────────────────
 
 describe('CategoriesService', () => {
   let service: CategoriesService;
@@ -67,9 +60,7 @@ describe('CategoriesService', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  // ───────────────────────────────────────────────────────────────────────────
   // create()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('create()', () => {
     const dto = { name: 'Construção', iconUrl: undefined, parentId: undefined };
@@ -246,9 +237,7 @@ describe('CategoriesService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // findAll()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('findAll()', () => {
     it('devolve apenas categorias activas', async () => {
@@ -299,9 +288,7 @@ describe('CategoriesService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // findOne()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('findOne()', () => {
     it('devolve categoria activa com sucesso', async () => {
@@ -344,9 +331,7 @@ describe('CategoriesService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // update()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('update()', () => {
     it('actualiza o nome com sucesso — regenera o slug', async () => {
@@ -505,9 +490,7 @@ describe('CategoriesService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // remove()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('remove()', () => {
     it('remove categoria com sucesso (soft delete — isActive=false)', async () => {

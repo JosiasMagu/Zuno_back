@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { CategoryKind, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { CreateCategoryDto } from '../dto/create-category.dto';
@@ -53,6 +54,7 @@ export class CategoriesService {
         iconUrl,
         parentId,
         isActive: true,
+        kind: dto.kind ?? CategoryKind.EQUIPMENT,
       },
       include: {
         parent: {
@@ -71,11 +73,24 @@ export class CategoriesService {
     };
   }
 
-  async findAll() {
+  async findAll(filter?: { kind?: CategoryKind }) {
+    const where: Prisma.CategoryWhereInput = { isActive: true };
+
+    if (filter?.kind) {
+      // EQUIPMENT match → kind in [EQUIPMENT, BOTH]
+      // SERVICE match → kind in [SERVICE, BOTH]
+      // BOTH match → only BOTH
+      if (filter.kind === CategoryKind.EQUIPMENT) {
+        where.kind = { in: [CategoryKind.EQUIPMENT, CategoryKind.BOTH] };
+      } else if (filter.kind === CategoryKind.SERVICE) {
+        where.kind = { in: [CategoryKind.SERVICE, CategoryKind.BOTH] };
+      } else {
+        where.kind = CategoryKind.BOTH;
+      }
+    }
+
     const items = await this.prisma.category.findMany({
-      where: {
-        isActive: true,
-      },
+      where,
       orderBy: [{ name: 'asc' }],
       include: {
         parent: {
@@ -238,16 +253,9 @@ export class CategoriesService {
     const existingCategory = await this.prisma.category.findUnique({
       where: { id },
       include: {
-        children: {
-          where: { isActive: true },
-        },
-        equipment: {
-          where: {
-            status: {
-              not: 'DELETED',
-            },
-          },
-        },
+        children: { where: { isActive: true } },
+        equipment: { where: { status: { not: 'DELETED' } } },
+        services: { where: { status: { not: 'DELETED' } } },
       },
     });
 
@@ -264,6 +272,12 @@ export class CategoriesService {
     if (existingCategory.equipment.length > 0) {
       throw new BadRequestException(
         'Não é possível remover uma categoria que possui equipamentos vinculados.',
+      );
+    }
+
+    if (existingCategory.services.length > 0) {
+      throw new BadRequestException(
+        'Não é possível remover uma categoria que possui serviços vinculados.',
       );
     }
 
