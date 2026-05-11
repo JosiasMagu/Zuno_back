@@ -45,6 +45,12 @@ jobs:
       JWT_REFRESH_EXPIRES_IN: 7d
       ALLOWED_ORIGINS: http://localhost:3000
       NODE_ENV: test
+      # Cloudinary nao e chamado nos E2E (fluxo de fotos nao testado).
+      # Estes valores apenas satisfazem o getOrThrow do CloudinaryProvider
+      # no bootstrap do AppModule.
+      CLOUDINARY_CLOUD_NAME: ci-dummy
+      CLOUDINARY_API_KEY: ci-dummy-key
+      CLOUDINARY_API_SECRET: ci-dummy-secret
 
     steps:
       - name: Checkout
