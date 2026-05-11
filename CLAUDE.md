@@ -84,6 +84,61 @@ npx prisma db seed                     # corre prisma/seed.ts (configurado em pr
 
 ---
 
+## Fluxo de serviços
+
+O módulo `services/` coexiste com `equipment/` mas tem semântica diferente:
+o cliente **pede** um serviço (não reserva um período), o provider **orçamenta**,
+e a aceitação cria um `ServiceBooking` que reusa o mesmo escrow.
+
+```
+ServiceRequest    →    ServiceQuote    →    ServiceBooking    →    Payment (mesmo escrow do equipamento)
+(cliente abre)         (provider envia)     (criado na aceitação)    PENDING → HELD → RELEASED
+   OPEN                   PENDING              PENDING                                     ↓
+   QUOTED                 ACCEPTED             IN_PROGRESS                              REFUNDED
+   ACCEPTED               REJECTED             COMPLETED                                ou PARTIAL
+   CANCELLED              WITHDRAWN            CANCELLED
+   EXPIRED                EXPIRED              DISPUTED
+```
+
+### Regras críticas
+
+1. **`acceptQuote` é atómico** — `prisma.$transaction` com isolamento `Serializable`:
+   atualiza quote → ACCEPTED, outros quotes do request → REJECTED, request → ACCEPTED,
+   cria `ServiceBooking(PENDING)` + `Payment(PENDING)`. Falha em qualquer ponto
+   → rollback total. Re-leitura do estado dentro da transacção detecta race conditions.
+
+2. **Urgência com majoração** — se `request.isUrgent === true`, o `ServiceQuote`
+   exige `urgentSurcharge` igual a `amount * service.urgentSurcharge / 100`.
+   Validação estrita em `validateQuoteTotals`.
+
+3. **Estados sequenciais do `ServiceBooking`**:
+   - `start` (PROVIDER) — só com `Payment.status === HELD`.
+   - `complete` (PROVIDER) — só de IN_PROGRESS para COMPLETED.
+   - `release` no Payment é independente do `complete` do booking, mas só CLIENT ou ADMIN o pode chamar.
+
+4. **`CategoryKind`** — `Category` ganhou `kind: EQUIPMENT | SERVICE | BOTH`.
+   `ServicesService.create` rejeita categorias com `kind = EQUIPMENT`.
+   `findAll` aceita filtro: `EQUIPMENT` mostra `[EQUIPMENT, BOTH]`, etc.
+
+5. **Polimorfismo (`Payment`, `Dispute`, `Review`, `Conversation`)** — colunas
+   opcionais `bookingId` / `serviceBookingId` (e `equipmentId` / `serviceId` em
+   `Conversation`), com **CHECK XOR** constraint e **partial unique indexes**
+   em SQL bruto na migration (não modeláveis em Prisma DSL).
+
+6. **Scheduler de expiração** — `ServicesScheduler` corre `@Cron(EVERY_5_MINUTES)`:
+   marca quotes PENDING com `expiresAt < now()` como EXPIRED, e requests
+   OPEN/QUOTED com `expiresAt < now()` como EXPIRED. Desactivado em `NODE_ENV=test`.
+   Documentado em `RUNBOOK.md`.
+
+7. **Platform fee centralizada** — `src/shared/constants/fees.ts` exporta
+   `PLATFORM_FEE_PERCENT = 10` e `calculatePlatformFee(amount)`.
+   Tanto `BookingsService` como `ServiceQuotesService.accept` consomem daqui.
+   Para alterar o fee, mudar **apenas neste ficheiro**.
+
+Ver `docs/SERVICES.md` para exemplo end-to-end completo.
+
+---
+
 ## Fluxo de pagamento (escrow) — regra crítica
 
 Os estados do pagamento são sequenciais e nenhum pode ser saltado:
@@ -235,7 +290,8 @@ src/
     users/        → perfil privado (getMe, updateMe) e público (getPublicProfile)
     categories/   → categorias hierárquicas de equipamentos
     equipment/    → CRUD, aprovação/rejeição, toggle disponibilidade, soft delete
-    bookings/     → reservas, validação de datas, overlap, confirmação/cancelamento
+    services/     → Service + Request + Quote + Booking + scheduler de expiração
+    bookings/     → reservas de equipamento, validação de datas, overlap, confirmação/cancelamento
     payments/     → escrow, estados do pagamento, recibos
     disputes/     → criação, resposta do provider, resolução pelo admin
     reviews/      → avaliações com recálculo atómico de ratings
@@ -274,8 +330,18 @@ prisma/
 1. Integração real com M-Pesa (webhook de confirmação automática → markHeld)
 2. Sistema de notificações push / WebSocket events
 3. Redis para sessões WebSocket (necessário antes de deploy horizontal)
-4. Testes do `chat.service` e `categories.service`
-5. Logs de auditoria para operações financeiras
-6. Geolocalização real para `sortBy=nearest`
-7. Endpoints admin de moderação de utilizadores
-8. Paginação no `findMyListings`
+4. Geolocalização real para `sortBy=nearest` (equipment + services)
+5. Endpoints admin de moderação de utilizadores
+6. Paginação no `findMyListings` (equipment e services)
+7. **Rating do provider via reviews de cliente** — actualmente
+   `recalculateUserRating` agrega só reviews com `targetId === userId`,
+   pelo que o rating do provider só sobe quando um cliente é review
+   *do provider directamente* (não acontece no fluxo actual). Para
+   refletir a satisfação total do provider, agregar sobre reviews
+   onde `booking.ownerId === providerId` OU `serviceBooking.providerId === providerId`.
+8. **Scheduler distribuído** — `ServicesScheduler` corre em todas as
+   réplicas. Antes de scale horizontal, adicionar lock (Redis ou tabela
+   `LeaderElection`) para garantir single-execution.
+9. **Refactor naming `ownerId`** — `Booking`, `Conversation` e `Payment`
+   ainda usam `ownerId` apesar do role ser PROVIDER. Renomear num PR
+   isolado depois de M-Pesa estar a funcionar.

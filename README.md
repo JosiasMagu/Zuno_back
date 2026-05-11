@@ -108,9 +108,17 @@ Apos `npm run db:seed`, ficam disponiveis 5 contas para teste local
 | `POST /api/v1/equipment` | PROVIDER | Cria equipamento (entra em PENDING_REVIEW) |
 | `POST /api/v1/bookings` | CLIENT | Criar reserva |
 | `POST /api/v1/payments` | CLIENT | Iniciar pagamento (PENDING) |
-| `PATCH /api/v1/payments/:id/release` | CLIENT ou ADMIN | Liberta o escrow |
-| `POST /api/v1/disputes` | CLIENT ou PROVIDER | Abrir disputa (so com pagamento HELD) |
-| WebSocket `/chat` | access JWT | Chat em tempo real |
+| `PATCH /api/v1/payments/:id/release` | CLIENT ou ADMIN | Liberta o escrow (suporta ambos os tipos de booking) |
+| `POST /api/v1/disputes` | CLIENT ou PROVIDER | Abrir disputa (com bookingId ou serviceBookingId) |
+| `GET /api/v1/services` | publico | Listagem de servicos ACTIVE |
+| `POST /api/v1/services` | PROVIDER | Cria servico (entra em PENDING_REVIEW) |
+| `POST /api/v1/service-requests` | CLIENT | Pede um servico (escolhe Service-alvo) |
+| `POST /api/v1/service-requests/:id/quotes` | PROVIDER | Envia orcamento |
+| `PATCH /api/v1/service-quotes/:id/accept` | CLIENT | Aceita orcamento -> cria ServiceBooking + Payment(PENDING) |
+| `PATCH /api/v1/service-bookings/:id/start` | PROVIDER | Inicia execucao (exige Payment HELD) |
+| `PATCH /api/v1/service-bookings/:id/complete` | PROVIDER | Conclui execucao |
+| `GET /api/v1/services/:id/reviews` | publico | Reviews de um servico |
+| WebSocket `/chat` | access JWT | Chat em tempo real (equipment ou service) |
 
 Documentacao completa: `http://localhost:3000/docs`.
 
@@ -125,6 +133,7 @@ src/
     users/        Perfil privado (getMe, updateMe) e publico
     categories/   Categorias hierarquicas de equipamentos
     equipment/    CRUD, aprovacao, fotos via Cloudinary
+    services/     Prestacao de servicos: Service + Request + Quote + Booking
     bookings/     Reservas com deteccao de overlap (Serializable)
     payments/     Escrow: PENDING -> HELD -> RELEASED|REFUNDED
     disputes/     Abertura, resposta do provider, resolucao admin
