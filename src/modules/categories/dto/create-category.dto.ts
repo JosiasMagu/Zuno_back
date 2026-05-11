@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { CategoryKind } from '@prisma/client';
 import { Transform } from 'class-transformer';
 import {
+  IsEnum,
   IsOptional,
   IsString,
   IsUUID,
@@ -40,4 +42,12 @@ export class CreateCategoryDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsUUID()
   parentId?: string;
+
+  @ApiPropertyOptional({
+    enum: CategoryKind,
+    description: 'Tipo de items que esta categoria serve. Default: EQUIPMENT.',
+  })
+  @IsOptional()
+  @IsEnum(CategoryKind)
+  kind?: CategoryKind;
 }
