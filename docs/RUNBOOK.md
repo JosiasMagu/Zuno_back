@@ -259,7 +259,88 @@ fazer deploy.
 
 ---
 
-## 13. Contactos e ownership
+## 13. Modulo de servicos: inspecao operacional
+
+### Scheduler de expiracao
+
+Corre a cada 5 minutos via `@nestjs/schedule` em `ServicesScheduler`:
+- `ServiceQuote` em PENDING com `expiresAt < now()` -> EXPIRED.
+- `ServiceRequest` em OPEN/QUOTED com `expiresAt < now()` -> EXPIRED.
+
+Em `NODE_ENV=test` o cron e no-op para nao interferir com E2E. Em
+producao single-instance e seguro; ANTES de scale horizontal, adicionar
+lock (Redis SETNX ou tabela `LeaderElection`) para evitar dupla execucao.
+
+### Inspeccionar pedidos/orcamentos em estados terminais
+
+```sql
+-- Quotes que expiraram nas ultimas 24h
+SELECT id, "requestId", "providerId", "expiresAt", "updatedAt"
+FROM "ServiceQuote"
+WHERE status = 'EXPIRED'
+  AND "updatedAt" > NOW() - INTERVAL '1 day'
+ORDER BY "updatedAt" DESC;
+
+-- Requests que ficaram OPEN sem qualquer orcamento
+SELECT r.id, r."clientId", r."createdAt", r."expiresAt"
+FROM "ServiceRequest" r
+LEFT JOIN "ServiceQuote" q ON q."requestId" = r.id
+WHERE r.status IN ('OPEN', 'EXPIRED')
+  AND q.id IS NULL
+ORDER BY r."createdAt" DESC
+LIMIT 50;
+
+-- Service bookings com pagamento em estado inesperado
+SELECT sb.id, sb.status AS booking_status, p.status AS payment_status, p."receiptNumber"
+FROM "ServiceBooking" sb
+JOIN "Payment" p ON p."serviceBookingId" = sb.id
+WHERE sb.status = 'IN_PROGRESS' AND p.status <> 'HELD';
+```
+
+### Reverter uma aceitacao errada via audit trail
+
+Se um cliente aceitou um orcamento por engano e o admin precisa de
+desfazer (apenas com pagamento ainda PENDING):
+
+1. Localizar o audit log e confirmar a sequencia:
+
+```sql
+SELECT action, "actorId", "targetId", "createdAt"
+FROM "AuditLog"
+WHERE "targetId" = '<quoteId>'
+ORDER BY "createdAt" DESC;
+```
+
+2. Validar que o pagamento ainda esta em PENDING (caso contrario, abrir
+   disputa em vez de reverter):
+
+```sql
+SELECT status FROM "Payment"
+WHERE "serviceBookingId" = (
+  SELECT id FROM "ServiceBooking" WHERE "quoteId" = '<quoteId>'
+);
+```
+
+3. Reverter em transacao:
+
+```sql
+BEGIN;
+UPDATE "ServiceQuote" SET status = 'PENDING' WHERE id = '<quoteId>';
+UPDATE "ServiceRequest" SET status = 'QUOTED' WHERE id = '<requestId>';
+-- Apagar booking e payment criados pela aceitacao
+DELETE FROM "Payment" WHERE "serviceBookingId" = '<bookingId>';
+DELETE FROM "ServiceBooking" WHERE id = '<bookingId>';
+-- Re-abrir outros quotes que tinham sido rejeitados automaticamente
+UPDATE "ServiceQuote" SET status = 'PENDING'
+WHERE "requestId" = '<requestId>' AND id <> '<quoteId>' AND status = 'REJECTED';
+COMMIT;
+```
+
+Registar a operacao manualmente no audit log com motivo explicito.
+
+---
+
+## 14. Contactos e ownership
 
 Preencher antes do alpha:
 
