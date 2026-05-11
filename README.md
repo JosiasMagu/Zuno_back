@@ -115,6 +115,10 @@ Apos `npm run db:seed`, ficam disponiveis 5 contas para teste local
 | `POST /api/v1/service-requests` | CLIENT | Pede um servico (escolhe Service-alvo) |
 | `POST /api/v1/service-requests/:id/quotes` | PROVIDER | Envia orcamento |
 | `PATCH /api/v1/service-quotes/:id/accept` | CLIENT | Aceita orcamento -> cria ServiceBooking + Payment(PENDING) |
+| `POST /api/v1/service-photos/upload` | PROVIDER | Upload de foto para um servico (serviceId em body) |
+| `POST /api/v1/service-photos/upload-multiple` | PROVIDER | Upload em batch (ate 5 fotos) |
+| `PATCH /api/v1/service-photos/:photoId/set-primary` | PROVIDER | Definir foto como primaria |
+| `DELETE /api/v1/service-photos/:photoId` | PROVIDER | Apagar foto |
 | `PATCH /api/v1/service-bookings/:id/start` | PROVIDER | Inicia execucao (exige Payment HELD) |
 | `PATCH /api/v1/service-bookings/:id/complete` | PROVIDER | Conclui execucao |
 | `GET /api/v1/services/:id/reviews` | publico | Reviews de um servico |

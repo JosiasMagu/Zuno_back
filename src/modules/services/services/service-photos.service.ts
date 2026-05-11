@@ -191,9 +191,10 @@ export class ServicePhotosService {
     };
   }
 
-  async setPrimary(userId: string, serviceId: string, photoId: string) {
-    const photo = await this.prisma.servicePhoto.findFirst({
-      where: { id: photoId, serviceId },
+  async setPrimary(userId: string, photoId: string) {
+    const photo = await this.prisma.servicePhoto.findUnique({
+      where: { id: photoId },
+      select: { id: true, serviceId: true },
     });
 
     if (!photo) {
@@ -201,7 +202,7 @@ export class ServicePhotosService {
     }
 
     const service = await this.prisma.service.findUnique({
-      where: { id: serviceId },
+      where: { id: photo.serviceId },
       select: { id: true, providerId: true },
     });
 
@@ -227,7 +228,7 @@ export class ServicePhotosService {
 
     await this.prisma.$transaction([
       this.prisma.servicePhoto.updateMany({
-        where: { serviceId, isPrimary: true },
+        where: { serviceId: photo.serviceId, isPrimary: true },
         data: { isPrimary: false },
       }),
       this.prisma.servicePhoto.update({
@@ -242,9 +243,9 @@ export class ServicePhotosService {
     };
   }
 
-  async deletePhoto(userId: string, serviceId: string, photoId: string) {
-    const photo = await this.prisma.servicePhoto.findFirst({
-      where: { id: photoId, serviceId },
+  async deletePhoto(userId: string, photoId: string) {
+    const photo = await this.prisma.servicePhoto.findUnique({
+      where: { id: photoId },
     });
 
     if (!photo) {
@@ -252,7 +253,7 @@ export class ServicePhotosService {
     }
 
     const service = await this.prisma.service.findUnique({
-      where: { id: serviceId },
+      where: { id: photo.serviceId },
       select: { id: true, providerId: true },
     });
 
@@ -285,7 +286,7 @@ export class ServicePhotosService {
 
     if (photo.isPrimary) {
       const nextPhoto = await this.prisma.servicePhoto.findFirst({
-        where: { serviceId },
+        where: { serviceId: photo.serviceId },
         orderBy: { order: 'asc' },
       });
 
@@ -298,31 +299,5 @@ export class ServicePhotosService {
     }
 
     return { message: 'Foto removida com sucesso.' };
-  }
-
-  async listPhotos(serviceId: string) {
-    const service = await this.prisma.service.findUnique({
-      where: { id: serviceId },
-      select: { id: true },
-    });
-
-    if (!service) {
-      throw new NotFoundException('Serviço não encontrado.');
-    }
-
-    const photos = await this.prisma.servicePhoto.findMany({
-      where: { serviceId },
-      orderBy: [{ isPrimary: 'desc' }, { order: 'asc' }],
-    });
-
-    return {
-      message: 'Fotos obtidas com sucesso.',
-      data: photos.map((photo) => ({
-        id: photo.id,
-        url: photo.url,
-        isPrimary: photo.isPrimary,
-        order: photo.order,
-      })),
-    };
   }
 }
