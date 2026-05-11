@@ -1,5 +1,5 @@
 import * as bcrypt from 'bcrypt';
-import { UserRole } from '@prisma/client';
+import { CategoryKind, UserRole } from '@prisma/client';
 import { getTestPrisma } from './db';
 
 export const TEST_PASSWORD = 'TestPass@2026!';
@@ -24,6 +24,7 @@ export interface TestSeedResult {
   client: TestUserSeed;
   categories: {
     construcao: TestCategorySeed;
+    electricidade: TestCategorySeed;
   };
 }
 
@@ -72,6 +73,16 @@ export async function seedMinimalTestData(): Promise<TestSeedResult> {
       slug: 'construcao-e2e',
       name: 'Construção (e2e)',
       isActive: true,
+      kind: CategoryKind.EQUIPMENT,
+    },
+  });
+
+  const electricidade = await prisma.category.create({
+    data: {
+      slug: 'electricidade-e2e',
+      name: 'Electricidade (e2e)',
+      isActive: true,
+      kind: CategoryKind.SERVICE,
     },
   });
 
@@ -102,6 +113,11 @@ export async function seedMinimalTestData(): Promise<TestSeedResult> {
         id: construcao.id,
         slug: construcao.slug,
         name: construcao.name,
+      },
+      electricidade: {
+        id: electricidade.id,
+        slug: electricidade.slug,
+        name: electricidade.name,
       },
     },
   };
