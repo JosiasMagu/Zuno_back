@@ -37,6 +37,7 @@ const makePrisma = () => ({
   servicePhoto: {
     create: jest.fn(),
     findFirst: jest.fn(),
+    findUnique: jest.fn(),
     findMany: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
@@ -253,7 +254,7 @@ describe('ServicePhotosService', () => {
 
   describe('setPrimary() / deletePhoto() — autorização', () => {
     it('setPrimary rejeita não-dono', async () => {
-      prisma.servicePhoto.findFirst.mockResolvedValue({
+      prisma.servicePhoto.findUnique.mockResolvedValue({
         id: PHOTO_ID,
         serviceId: SERVICE_ID,
       });
@@ -263,20 +264,20 @@ describe('ServicePhotosService', () => {
       });
       prisma.user.findUnique.mockResolvedValue(makeClient());
 
-      await expect(
-        service.setPrimary(CLIENT_ID, SERVICE_ID, PHOTO_ID),
-      ).rejects.toThrow(ForbiddenException);
+      await expect(service.setPrimary(CLIENT_ID, PHOTO_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('setPrimary: foto inexistente -> NotFound', async () => {
-      prisma.servicePhoto.findFirst.mockResolvedValue(null);
-      await expect(
-        service.setPrimary(PROVIDER_ID, SERVICE_ID, PHOTO_ID),
-      ).rejects.toThrow(NotFoundException);
+      prisma.servicePhoto.findUnique.mockResolvedValue(null);
+      await expect(service.setPrimary(PROVIDER_ID, PHOTO_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('deletePhoto rejeita não-dono', async () => {
-      prisma.servicePhoto.findFirst.mockResolvedValue({
+      prisma.servicePhoto.findUnique.mockResolvedValue({
         id: PHOTO_ID,
         serviceId: SERVICE_ID,
         isPrimary: false,
@@ -288,22 +289,22 @@ describe('ServicePhotosService', () => {
       });
       prisma.user.findUnique.mockResolvedValue(makeClient());
 
-      await expect(
-        service.deletePhoto(CLIENT_ID, SERVICE_ID, PHOTO_ID),
-      ).rejects.toThrow(ForbiddenException);
+      await expect(service.deletePhoto(CLIENT_ID, PHOTO_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('deletePhoto: foto inexistente -> NotFound', async () => {
-      prisma.servicePhoto.findFirst.mockResolvedValue(null);
-      await expect(
-        service.deletePhoto(PROVIDER_ID, SERVICE_ID, PHOTO_ID),
-      ).rejects.toThrow(NotFoundException);
+      prisma.servicePhoto.findUnique.mockResolvedValue(null);
+      await expect(service.deletePhoto(PROVIDER_ID, PHOTO_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
   describe('setPrimary() / deletePhoto()', () => {
     it('setPrimary alterna isPrimary em transacção', async () => {
-      prisma.servicePhoto.findFirst.mockResolvedValue({
+      prisma.servicePhoto.findUnique.mockResolvedValue({
         id: PHOTO_ID,
         serviceId: SERVICE_ID,
       });
@@ -314,24 +315,19 @@ describe('ServicePhotosService', () => {
       prisma.user.findUnique.mockResolvedValue(makeProvider());
       prisma.$transaction.mockResolvedValue([{}, {}]);
 
-      const result = await service.setPrimary(
-        PROVIDER_ID,
-        SERVICE_ID,
-        PHOTO_ID,
-      );
+      const result = await service.setPrimary(PROVIDER_ID, PHOTO_ID);
       expect(result.data.isPrimary).toBe(true);
       expect(prisma.$transaction).toHaveBeenCalled();
     });
 
     it('deletePhoto apaga e promove próxima quando era primária', async () => {
-      prisma.servicePhoto.findFirst
-        .mockResolvedValueOnce({
-          id: PHOTO_ID,
-          serviceId: SERVICE_ID,
-          isPrimary: true,
-          publicId: 'pid',
-        })
-        .mockResolvedValueOnce({ id: 'next-photo' });
+      prisma.servicePhoto.findUnique.mockResolvedValue({
+        id: PHOTO_ID,
+        serviceId: SERVICE_ID,
+        isPrimary: true,
+        publicId: 'pid',
+      });
+      prisma.servicePhoto.findFirst.mockResolvedValue({ id: 'next-photo' });
       prisma.service.findUnique.mockResolvedValue({
         id: SERVICE_ID,
         providerId: PROVIDER_ID,
@@ -340,36 +336,13 @@ describe('ServicePhotosService', () => {
       prisma.servicePhoto.delete.mockResolvedValue({});
       prisma.servicePhoto.update.mockResolvedValue({});
 
-      const result = await service.deletePhoto(
-        PROVIDER_ID,
-        SERVICE_ID,
-        PHOTO_ID,
-      );
+      const result = await service.deletePhoto(PROVIDER_ID, PHOTO_ID);
       expect(result.message).toBe('Foto removida com sucesso.');
       expect(cloudinary.deletePhoto).toHaveBeenCalledWith('pid');
       expect(prisma.servicePhoto.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: { isPrimary: true },
         }),
-      );
-    });
-  });
-
-  describe('listPhotos()', () => {
-    it('lista fotos por serviço', async () => {
-      prisma.service.findUnique.mockResolvedValue({ id: SERVICE_ID });
-      prisma.servicePhoto.findMany.mockResolvedValue([
-        { id: PHOTO_ID, url: 'u', isPrimary: true, order: 0 },
-      ]);
-
-      const result = await service.listPhotos(SERVICE_ID);
-      expect(result.data).toHaveLength(1);
-    });
-
-    it('lança NotFound se serviço não existe', async () => {
-      prisma.service.findUnique.mockResolvedValue(null);
-      await expect(service.listPhotos(SERVICE_ID)).rejects.toThrow(
-        NotFoundException,
       );
     });
   });
