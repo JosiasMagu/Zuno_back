@@ -13,8 +13,11 @@ import {
 } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 
+import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { PaymentsService } from './payments.service';
+
+const auditMock = { record: jest.fn() };
 
 const CLIENT_ID = 'client-uuid-001';
 const OWNER_ID = 'owner-uuid-001';
@@ -140,6 +143,7 @@ describe('PaymentsService', () => {
       providers: [
         PaymentsService,
         { provide: PrismaService, useValue: prisma },
+        { provide: AuditService, useValue: auditMock },
       ],
     }).compile();
 
@@ -148,9 +152,7 @@ describe('PaymentsService', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  // ───────────────────────────────────────────────────────────────────────────
   // initiate()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('initiate()', () => {
     const dto = { method: PaymentMethod.MPESA };
@@ -262,9 +264,7 @@ describe('PaymentsService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // findMyPayments()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('findMyPayments()', () => {
     const query = { page: 1, limit: 10 };
@@ -342,9 +342,7 @@ describe('PaymentsService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // findOne()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('findOne()', () => {
     it('lança NotFoundException se o pagamento não existe', async () => {
@@ -409,9 +407,7 @@ describe('PaymentsService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // markHeld()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('markHeld()', () => {
     it('ADMIN marca pagamento PENDING como HELD com sucesso', async () => {
@@ -540,9 +536,7 @@ describe('PaymentsService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // release()  ← O MAIS CRÍTICO — protege o escrow
-  // ───────────────────────────────────────────────────────────────────────────
+  // release()  ← O MAIS CRITICO - protege o escrow
 
   describe('release()', () => {
     const heldPayment = () =>
@@ -572,11 +566,13 @@ describe('PaymentsService', () => {
       prisma.user.findUnique.mockResolvedValue(
         makeUser(CLIENT_ID, UserRole.CLIENT),
       );
-      // booking.update e payment.update são chamados para construir o array
-      // que é passado ao $transaction (array-style Prisma transaction)
+      // booking.update e payment.update sao chamados para construir o array
+      // que e passado ao $transaction (array-style Prisma transaction)
       prisma.booking.update.mockResolvedValue({});
       prisma.payment.update.mockResolvedValue(releasedPayment);
-      prisma.$transaction.mockResolvedValue([{}, releasedPayment]);
+      prisma.$transaction.mockImplementation(
+        async (cb: (tx: typeof prisma) => Promise<unknown>) => cb(prisma),
+      );
 
       const result = await service.release(CLIENT_ID, PAYMENT_ID);
 
@@ -591,7 +587,9 @@ describe('PaymentsService', () => {
       );
       prisma.booking.update.mockResolvedValue({});
       prisma.payment.update.mockResolvedValue(releasedPayment);
-      prisma.$transaction.mockResolvedValue([{}, releasedPayment]);
+      prisma.$transaction.mockImplementation(
+        async (cb: (tx: typeof prisma) => Promise<unknown>) => cb(prisma),
+      );
 
       const result = await service.release(ADMIN_ID, PAYMENT_ID);
 
@@ -605,7 +603,9 @@ describe('PaymentsService', () => {
       );
       prisma.booking.update.mockResolvedValue({});
       prisma.payment.update.mockResolvedValue(releasedPayment);
-      prisma.$transaction.mockResolvedValue([{}, releasedPayment]);
+      prisma.$transaction.mockImplementation(
+        async (cb: (tx: typeof prisma) => Promise<unknown>) => cb(prisma),
+      );
 
       await service.release(CLIENT_ID, PAYMENT_ID);
 
@@ -623,7 +623,7 @@ describe('PaymentsService', () => {
       );
     });
 
-    // ── REGRA CENTRAL DO ESCROW ──────────────────────────────────────────────
+    // REGRA CENTRAL DO ESCROW
 
     it('OWNER NÃO pode liberar o seu próprio pagamento — ForbiddenException', async () => {
       prisma.payment.findUnique.mockResolvedValue(heldPayment());
@@ -728,7 +728,9 @@ describe('PaymentsService', () => {
       );
       prisma.booking.update.mockResolvedValue({});
       prisma.payment.update.mockResolvedValue(releasedPayment);
-      prisma.$transaction.mockResolvedValue([{}, releasedPayment]);
+      prisma.$transaction.mockImplementation(
+        async (cb: (tx: typeof prisma) => Promise<unknown>) => cb(prisma),
+      );
 
       const result = await service.release(CLIENT_ID, PAYMENT_ID);
       expect(result.message).toBe('Pagamento liberado com sucesso.');
@@ -758,9 +760,7 @@ describe('PaymentsService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // refund()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('refund()', () => {
     const heldPayment = () =>

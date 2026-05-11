@@ -10,7 +10,7 @@ import { ChatService } from './services/chat.service';
 @Module({
   imports: [
     AuthModule,
-    // JwtModule necessário no gateway para verificar o token no handshake WebSocket
+    // JwtModule necessario no gateway para verificar o token no handshake WebSocket
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

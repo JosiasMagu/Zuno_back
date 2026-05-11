@@ -287,7 +287,7 @@ describe('UsersService', () => {
     });
 
     it('permite actualizar email para um email que pertencia ao próprio utilizador (mesmo id)', async () => {
-      // Cenário: o findUnique de verificação devolve o próprio utilizador — é permitido
+      // Cenario: o findUnique de verificacao devolve o proprio utilizador - e permitido
       const proprio = makeUser({ email: 'novo@zuno.co.mz' });
 
       prisma.user.findUnique
@@ -310,7 +310,7 @@ describe('UsersService', () => {
       prisma.user.findUnique.mockResolvedValue(makeUser());
       prisma.user.update.mockResolvedValue(makeUser());
 
-      // Passar apenas name — bio, email, avatarUrl não devem aparecer no data
+      // Passar apenas name - bio, email, avatarUrl nao devem aparecer no data
       await service.updateMe(USER_ID, { name: 'Novo Nome' });
 
       const updateCall = prisma.user.update.mock.calls[0][0];

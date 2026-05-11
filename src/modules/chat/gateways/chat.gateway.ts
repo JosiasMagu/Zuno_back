@@ -25,7 +25,7 @@ interface JwtPayload {
   exp?: number;
 }
 
-// Socket com data tipada — evita os 'any' em client.data.userId
+// Socket com data tipada - evita os 'any' em client.data.userId
 interface AuthenticatedSocket extends Socket {
   data: {
     userId?: string;
@@ -59,7 +59,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly configService: ConfigService,
   ) {}
 
-  // ─── Ciclo de vida da conexão ─────────────────────────────────────────────
+  // Ciclo de vida da conexao
 
   async handleConnection(client: AuthenticatedSocket) {
     try {
@@ -76,7 +76,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     } catch (error) {
       if (error instanceof UnauthorizedException) {
         this.logger.debug(
-          `Connection rejected — ${error.message} (socket: ${client.id})`,
+          `Connection rejected: ${error.message} (socket: ${client.id})`,
         );
       } else {
         this.logger.error(
@@ -101,7 +101,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  // ─── Entrar/sair de conversas ─────────────────────────────────────────────
+  // Entrar/sair de conversas
 
   @SubscribeMessage('join_conversation')
   async handleJoinConversation(
@@ -145,7 +145,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.emit('left_conversation', { conversationId: data.conversationId });
   }
 
-  // ─── Envio de mensagens ───────────────────────────────────────────────────
+  // Envio de mensagens
 
   @SubscribeMessage('send_message')
   async handleSendMessage(
@@ -197,7 +197,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  // ─── Indicadores de digitação ─────────────────────────────────────────────
+  // Indicadores de digitacao
 
   @SubscribeMessage('typing')
   handleTyping(
@@ -219,7 +219,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.to(data.conversationId).emit('user_stop_typing', { userId });
   }
 
-  // ─── Helpers privados ─────────────────────────────────────────────────────
+  // Helpers privados
 
   private notifyRecipient(
     senderId: string,

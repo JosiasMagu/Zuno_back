@@ -15,9 +15,7 @@ import { PrismaService } from '../../../shared/db/prisma.service';
 import { EquipmentSortBy } from '../dto/find-equipment-query.dto';
 import { EquipmentService } from './equipment.service';
 
-// ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTES
-// ─────────────────────────────────────────────────────────────────────────────
 
 const OWNER_ID = 'owner-uuid-001';
 const ADMIN_ID = 'admin-uuid-001';
@@ -25,9 +23,7 @@ const STRANGER_ID = 'stranger-uuid-001';
 const EQUIPMENT_ID = 'equipment-uuid-001';
 const CATEGORY_ID = 'category-uuid-001';
 
-// ─────────────────────────────────────────────────────────────────────────────
 // FACTORIES
-// ─────────────────────────────────────────────────────────────────────────────
 
 const makeUser = (id: string, role: UserRole) => ({
   id,
@@ -88,9 +84,7 @@ const makeEquipment = (overrides: Partial<Record<string, unknown>> = {}) => ({
   ...overrides,
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MOCK DO PRISMA
-// ─────────────────────────────────────────────────────────────────────────────
 
 const makePrismaMock = () => ({
   equipment: {
@@ -109,9 +103,7 @@ const makePrismaMock = () => ({
   },
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
 // SUITE PRINCIPAL
-// ─────────────────────────────────────────────────────────────────────────────
 
 describe('EquipmentService', () => {
   let service: EquipmentService;
@@ -132,9 +124,7 @@ describe('EquipmentService', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  // ───────────────────────────────────────────────────────────────────────────
   // create()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('create()', () => {
     const validDto = {
@@ -261,9 +251,7 @@ describe('EquipmentService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // findAll()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('findAll()', () => {
     it('filtra apenas equipamentos ACTIVE', async () => {
@@ -489,9 +477,7 @@ describe('EquipmentService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // findOne()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('findOne()', () => {
     it('devolve equipamento ACTIVE com sucesso', async () => {
@@ -527,9 +513,7 @@ describe('EquipmentService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // findMyListings()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('findMyListings()', () => {
     it('lança NotFoundException se utilizador não existe', async () => {
@@ -583,9 +567,7 @@ describe('EquipmentService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // approve()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('approve()', () => {
     it('ADMIN aprova equipamento PENDING_REVIEW com sucesso', async () => {
@@ -714,9 +696,7 @@ describe('EquipmentService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // reject()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('reject()', () => {
     it('ADMIN rejeita equipamento com sucesso', async () => {
@@ -830,9 +810,7 @@ describe('EquipmentService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // toggleAvailability()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('toggleAvailability()', () => {
     it('OWNER alterna disponibilidade de true para false', async () => {
@@ -975,9 +953,7 @@ describe('EquipmentService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // update()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('update()', () => {
     const validDto = { title: 'Novo título', location: 'Beira' };
@@ -1109,9 +1085,7 @@ describe('EquipmentService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // remove()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('remove()', () => {
     it('OWNER remove o seu equipamento com sucesso (soft delete)', async () => {
@@ -1161,7 +1135,7 @@ describe('EquipmentService', () => {
 
       await service.remove(OWNER_ID, EQUIPMENT_ID);
 
-      // O mock não tem delete — se fosse chamado, o teste rebentaria.
+      // O mock nao tem delete - se fosse chamado, o teste rebentaria.
       // Verificamos que update foi chamado em vez disso.
       expect(prisma.equipment.update).toHaveBeenCalledTimes(1);
     });
@@ -1217,9 +1191,7 @@ describe('EquipmentService', () => {
     });
   });
 
-  // ───────────────────────────────────────────────────────────────────────────
   // findPending()
-  // ───────────────────────────────────────────────────────────────────────────
 
   describe('findPending()', () => {
     it('ADMIN obtém equipamentos PENDING_REVIEW', async () => {
