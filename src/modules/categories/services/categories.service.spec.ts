@@ -24,6 +24,7 @@ const makeCategory = (overrides: Record<string, unknown> = {}) => ({
   parent: null,
   children: [],
   equipment: [],
+  services: [],
   ...overrides,
 });
 

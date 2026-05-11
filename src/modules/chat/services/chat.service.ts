@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { EquipmentStatus, UserRole } from '@prisma/client';
+import { EquipmentStatus, ServiceStatus, UserRole } from '@prisma/client';
 
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { FindMessagesQueryDto, StartConversationDto } from '../dto/chat.dto';
@@ -22,6 +22,23 @@ const EQUIPMENT_SELECT = {
   },
 };
 
+const SERVICE_SELECT = {
+  id: true,
+  title: true,
+  photos: {
+    where: { isPrimary: true },
+    take: 1,
+    select: { url: true },
+  },
+};
+
+const CONVERSATION_INCLUDE = {
+  client: { select: USER_SELECT },
+  owner: { select: USER_SELECT },
+  equipment: { select: EQUIPMENT_SELECT },
+  service: { select: SERVICE_SELECT },
+} as const;
+
 @Injectable()
 export class ChatService {
   constructor(private readonly prisma: PrismaService) {}
@@ -29,7 +46,15 @@ export class ChatService {
   // Iniciar conversa (CLIENT)
 
   async startConversation(clientId: string, dto: StartConversationDto) {
-    // Verificar se o utilizador e CLIENT
+    const hasEquipment = Boolean(dto.equipmentId);
+    const hasService = Boolean(dto.serviceId);
+
+    if (hasEquipment === hasService) {
+      throw new BadRequestException(
+        'Forneça exactamente um de equipmentId ou serviceId.',
+      );
+    }
+
     const client = await this.prisma.user.findUnique({
       where: { id: clientId },
       select: { id: true, role: true },
@@ -41,36 +66,18 @@ export class ChatService {
       throw new ForbiddenException('Só clientes podem iniciar conversas.');
     }
 
-    // Verificar se o equipment existe e esta activo
-    const equipment = await this.prisma.equipment.findUnique({
-      where: { id: dto.equipmentId },
-      select: { id: true, ownerId: true, status: true, title: true },
-    });
-
-    if (!equipment || equipment.status !== EquipmentStatus.ACTIVE) {
-      throw new NotFoundException(
-        'Equipamento não encontrado ou indisponível.',
-      );
-    }
-
-    // Cliente nao pode contactar o seu proprio equipment
-    if (equipment.ownerId === clientId) {
-      throw new BadRequestException(
-        'Não podes iniciar uma conversa sobre o teu próprio equipamento.',
-      );
-    }
+    const target = hasEquipment
+      ? await this.resolveEquipmentTarget(dto.equipmentId as string, clientId)
+      : await this.resolveServiceTarget(dto.serviceId as string, clientId);
 
     const existing = await this.prisma.conversation.findFirst({
       where: {
         clientId,
-        ownerId: equipment.ownerId,
-        equipmentId: dto.equipmentId,
+        ownerId: target.providerId,
+        equipmentId: target.equipmentId,
+        serviceId: target.serviceId,
       },
-      include: {
-        client: { select: USER_SELECT },
-        owner: { select: USER_SELECT },
-        equipment: { select: EQUIPMENT_SELECT },
-      },
+      include: CONVERSATION_INCLUDE,
     });
 
     if (existing) {
@@ -95,16 +102,13 @@ export class ChatService {
       const conversation = await tx.conversation.create({
         data: {
           clientId,
-          ownerId: equipment.ownerId,
-          equipmentId: dto.equipmentId,
+          ownerId: target.providerId,
+          equipmentId: target.equipmentId,
+          serviceId: target.serviceId,
           lastMessage: dto.firstMessage,
           lastMessageAt: now,
         },
-        include: {
-          client: { select: USER_SELECT },
-          owner: { select: USER_SELECT },
-          equipment: { select: EQUIPMENT_SELECT },
-        },
+        include: CONVERSATION_INCLUDE,
       });
 
       const msg = await tx.message.create({
@@ -129,17 +133,65 @@ export class ChatService {
     };
   }
 
+  private async resolveEquipmentTarget(equipmentId: string, clientId: string) {
+    const equipment = await this.prisma.equipment.findUnique({
+      where: { id: equipmentId },
+      select: { id: true, ownerId: true, status: true },
+    });
+
+    if (!equipment || equipment.status !== EquipmentStatus.ACTIVE) {
+      throw new NotFoundException(
+        'Equipamento não encontrado ou indisponível.',
+      );
+    }
+
+    if (equipment.ownerId === clientId) {
+      throw new BadRequestException(
+        'Não podes iniciar uma conversa sobre o teu próprio equipamento.',
+      );
+    }
+
+    return {
+      providerId: equipment.ownerId,
+      equipmentId: equipment.id,
+      serviceId: null,
+    };
+  }
+
+  private async resolveServiceTarget(serviceId: string, clientId: string) {
+    const service = await this.prisma.service.findUnique({
+      where: { id: serviceId },
+      select: { id: true, providerId: true, status: true, isActive: true },
+    });
+
+    if (
+      !service ||
+      service.status !== ServiceStatus.ACTIVE ||
+      !service.isActive
+    ) {
+      throw new NotFoundException('Serviço não encontrado ou indisponível.');
+    }
+
+    if (service.providerId === clientId) {
+      throw new BadRequestException(
+        'Não podes iniciar uma conversa sobre o teu próprio serviço.',
+      );
+    }
+
+    return {
+      providerId: service.providerId,
+      equipmentId: null,
+      serviceId: service.id,
+    };
+  }
+
   async findMyConversations(userId: string) {
     const conversations = await this.prisma.conversation.findMany({
       where: {
         OR: [{ clientId: userId }, { ownerId: userId }],
       },
       orderBy: { lastMessageAt: 'desc' },
-      include: {
-        client: { select: USER_SELECT },
-        owner: { select: USER_SELECT },
-        equipment: { select: EQUIPMENT_SELECT },
-      },
+      include: CONVERSATION_INCLUDE,
     });
 
     return {
@@ -157,11 +209,7 @@ export class ChatService {
   ) {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
-      include: {
-        client: { select: USER_SELECT },
-        owner: { select: USER_SELECT },
-        equipment: { select: EQUIPMENT_SELECT },
-      },
+      include: CONVERSATION_INCLUDE,
     });
 
     if (!conversation) {

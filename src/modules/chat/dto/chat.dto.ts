@@ -13,19 +13,21 @@ import { Type } from 'class-transformer';
 // Iniciar conversa
 
 export class StartConversationDto {
-  @ApiProperty({
-    example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-    description: 'ID do equipamento sobre o qual o cliente quer falar',
+  @ApiPropertyOptional({
+    description: 'ID do equipamento. Obrigatório se não fornecer serviceId.',
   })
+  @IsOptional()
   @IsUUID()
-  equipmentId: string;
+  equipmentId?: string;
 
-  @ApiProperty({
-    example: 'Olá, o equipamento ainda está disponível para a próxima semana?',
-    description: 'Primeira mensagem da conversa (mín. 1, máx. 1000 caracteres)',
-    minLength: 1,
-    maxLength: 1000,
+  @ApiPropertyOptional({
+    description: 'ID do serviço. Obrigatório se não fornecer equipmentId.',
   })
+  @IsOptional()
+  @IsUUID()
+  serviceId?: string;
+
+  @ApiProperty({ minLength: 1, maxLength: 1000 })
   @IsString()
   @MinLength(1)
   @MaxLength(1000)

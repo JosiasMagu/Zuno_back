@@ -220,6 +220,7 @@ describe('ChatService', () => {
             clientId: CLIENT_ID,
             ownerId: OWNER_ID,
             equipmentId: EQUIPMENT_ID,
+            serviceId: null,
           },
         }),
       );

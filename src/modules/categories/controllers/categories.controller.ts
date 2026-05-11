@@ -6,14 +6,16 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
+import { CategoryKind, UserRole } from '@prisma/client';
 import {
   ApiBearerAuth,
   ApiBody,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -45,9 +47,16 @@ export class CategoriesController {
 
   @Get()
   @ApiOperation({ summary: 'Listar categorias ativas' })
+  @ApiQuery({
+    name: 'kind',
+    required: false,
+    enum: CategoryKind,
+    description:
+      'Filtra por tipo. EQUIPMENT inclui EQUIPMENT+BOTH; SERVICE inclui SERVICE+BOTH.',
+  })
   @ApiResponse({ status: 200, description: 'Categorias obtidas com sucesso.' })
-  findAll() {
-    return this.categoriesService.findAll();
+  findAll(@Query('kind') kind?: CategoryKind) {
+    return this.categoriesService.findAll({ kind });
   }
 
   @Get(':id')
