@@ -20,7 +20,7 @@ import { BookingPresenter } from '../presenters/booking.presenter';
 
 @Injectable()
 export class BookingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   async create(clientId: string, dto: CreateBookingDto) {
     const equipmentId = dto.equipmentId.trim();
@@ -153,9 +153,6 @@ export class BookingsService {
         data: BookingPresenter.toListItem(booking),
       };
     } catch (error) {
-      // P2034 = falha de serializacao ou deadlock do Prisma/PostgreSQL.
-      // Acontece exactamente quando dois pedidos concorrentes tentam criar
-      // reservas sobrepostas - relanco como mensagem legivel pelo utilizador.
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2034'
@@ -164,7 +161,6 @@ export class BookingsService {
           'Já existe uma reserva para este equipamento nesse período.',
         );
       }
-      // Excepcoes de negocio (BadRequestException, etc.) passam sem alteracao.
       throw error;
     }
   }
@@ -187,9 +183,9 @@ export class BookingsService {
       user.role === UserRole.ADMIN
         ? { ...(query.status ? { status: query.status } : {}) }
         : {
-            clientId: userId,
-            ...(query.status ? { status: query.status } : {}),
-          };
+          clientId: userId,
+          ...(query.status ? { status: query.status } : {}),
+        };
 
     const [items, total] = await Promise.all([
       this.prisma.booking.findMany({
@@ -239,9 +235,9 @@ export class BookingsService {
       user.role === UserRole.ADMIN
         ? { ...(query.status ? { status: query.status } : {}) }
         : {
-            ownerId: userId,
-            ...(query.status ? { status: query.status } : {}),
-          };
+          ownerId: userId,
+          ...(query.status ? { status: query.status } : {}),
+        };
 
     const [items, total] = await Promise.all([
       this.prisma.booking.findMany({
@@ -387,17 +383,24 @@ export class BookingsService {
       );
     }
 
-    const updatedBooking = await this.prisma.booking.update({
-      where: { id: bookingId },
-      data: { status: BookingStatus.CONFIRMED, confirmedAt: new Date() },
-      include: {
-        client: { select: { id: true, name: true, avatarUrl: true } },
-        owner: { select: { id: true, name: true, avatarUrl: true } },
-        equipment: {
-          select: { id: true, title: true, location: true, status: true },
+    // Confirma reserva E marca equipamento como indisponível numa transacção
+    const [updatedBooking] = await this.prisma.$transaction([
+      this.prisma.booking.update({
+        where: { id: bookingId },
+        data: { status: BookingStatus.CONFIRMED, confirmedAt: new Date() },
+        include: {
+          client: { select: { id: true, name: true, avatarUrl: true } },
+          owner: { select: { id: true, name: true, avatarUrl: true } },
+          equipment: {
+            select: { id: true, title: true, location: true, status: true },
+          },
         },
-      },
-    });
+      }),
+      this.prisma.equipment.update({
+        where: { id: booking.equipmentId },
+        data: { isAvailable: false },
+      }),
+    ]);
 
     return {
       message: 'Reserva confirmada com sucesso.',
@@ -410,7 +413,7 @@ export class BookingsService {
       where: { id: bookingId },
       include: {
         equipment: {
-          select: { id: true, title: true, location: true, status: true },
+          select: { id: true, title: true, location: true, status: true, isAvailable: true },
         },
         client: { select: { id: true, name: true, avatarUrl: true } },
         owner: { select: { id: true, name: true, avatarUrl: true } },
@@ -452,21 +455,35 @@ export class BookingsService {
 
     const cancellationReason = dto.reason?.trim() || null;
 
-    const updatedBooking = await this.prisma.booking.update({
-      where: { id: bookingId },
-      data: {
-        status: BookingStatus.CANCELLED,
-        cancelledAt: new Date(),
-        cancellationReason,
-      },
-      include: {
-        client: { select: { id: true, name: true, avatarUrl: true } },
-        owner: { select: { id: true, name: true, avatarUrl: true } },
-        equipment: {
-          select: { id: true, title: true, location: true, status: true },
+    // Só repõe isAvailable se estava CONFIRMED — PENDING não chegou a bloquear
+    const wasConfirmed = booking.status === BookingStatus.CONFIRMED;
+
+    const [updatedBooking] = await this.prisma.$transaction([
+      this.prisma.booking.update({
+        where: { id: bookingId },
+        data: {
+          status: BookingStatus.CANCELLED,
+          cancelledAt: new Date(),
+          cancellationReason,
         },
-      },
-    });
+        include: {
+          client: { select: { id: true, name: true, avatarUrl: true } },
+          owner: { select: { id: true, name: true, avatarUrl: true } },
+          equipment: {
+            select: { id: true, title: true, location: true, status: true },
+          },
+        },
+      }),
+      // Só desbloqueia o equipamento se a reserva estava confirmada
+      ...(wasConfirmed
+        ? [
+            this.prisma.equipment.update({
+              where: { id: booking.equipmentId },
+              data: { isAvailable: true },
+            }),
+          ]
+        : []),
+    ]);
 
     return {
       message: 'Reserva cancelada com sucesso.',
