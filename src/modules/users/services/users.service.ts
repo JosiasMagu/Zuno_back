@@ -120,4 +120,15 @@ export class UsersService {
       data: UserPresenter.toPublicProfile(user),
     };
   }
+
+  async savePushToken(userId: string, token: string) {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { pushToken: token },
+    });
+
+    return {
+      message: 'Token push guardado com sucesso.',
+    };
+  }
 }

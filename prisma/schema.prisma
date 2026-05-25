@@ -21,6 +21,7 @@ model User {
   isActive        Boolean        @default(true)
   avatarUrl       String?
   bio             String?
+  pushToken       String?
   totalRating     Decimal?       @db.Decimal(3, 2)
   totalReviews    Int            @default(0)
   createdAt       DateTime       @default(now())

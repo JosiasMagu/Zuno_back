@@ -5,6 +5,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 
 import { AuthModule } from './modules/auth/auth.module';
+import { PushModule } from './shared/push/push.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { ChatModule } from './modules/chat/chat.module';
@@ -48,6 +49,7 @@ import { NotificationsModule } from './shared/notifications/notifications.module
     DisputesModule,
     ReviewsModule,
     ChatModule,
+    PushModule,
   ],
   controllers: [],
   providers: [

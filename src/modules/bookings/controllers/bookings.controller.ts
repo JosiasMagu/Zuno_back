@@ -32,7 +32,7 @@ import { BookingsService } from '../services/bookings.service';
 @Controller('bookings')
 @UseGuards(JwtAuthGuard)
 export class BookingsController {
-  constructor(private readonly bookingsService: BookingsService) {}
+  constructor(private readonly bookingsService: BookingsService) { }
 
   @Post()
   @UseGuards(RolesGuard)
@@ -110,6 +110,17 @@ export class BookingsController {
   @ApiResponse({ status: 404, description: 'Reserva não encontrada.' })
   confirm(@CurrentUser() user: { id: string }, @Param('id') id: string) {
     return this.bookingsService.confirm(user.id, id);
+  }
+
+  @Patch(':id/complete')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Marcar reserva como concluída' })
+  @ApiParam({ name: 'id', description: 'ID da reserva' })
+  @ApiResponse({ status: 200, description: 'Reserva concluída com sucesso.' })
+  complete(@CurrentUser() user: { id: string }, @Param('id') id: string) {
+    return this.bookingsService.complete(user.id, id);
   }
 
   @Patch(':id/cancel')

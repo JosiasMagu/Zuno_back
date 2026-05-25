@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -11,6 +11,7 @@ import {
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { UpdateUserDto } from '../dto/update-user.dto';
+import { SavePushTokenDto } from '../dto/save-push-token.dto';
 import { UsersService } from '../services/users.service';
 
 @ApiTags('Users')
@@ -40,13 +41,24 @@ export class UsersController {
     return this.usersService.updateMe(user.id, dto);
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Post('push-token')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Guardar token push do dispositivo' })
+  @ApiBody({ type: SavePushTokenDto })
+  @ApiResponse({ status: 201, description: 'Token guardado com sucesso.' })
+  @ApiResponse({ status: 401, description: 'Não autenticado.' })
+  savePushToken(
+    @CurrentUser() user: { id: string },
+    @Body() dto: SavePushTokenDto,
+  ) {
+    return (this.usersService as any).savePushToken(user.id, dto.token);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Obter perfil público de um utilizador por ID' })
   @ApiParam({ name: 'id', description: 'ID do utilizador' })
-  @ApiResponse({
-    status: 200,
-    description: 'Perfil público obtido com sucesso.',
-  })
+  @ApiResponse({ status: 200, description: 'Perfil público obtido com sucesso.' })
   @ApiResponse({ status: 404, description: 'Utilizador não encontrado.' })
   getPublicProfile(@Param('id') id: string) {
     return this.usersService.getPublicProfile(id);

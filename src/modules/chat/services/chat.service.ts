@@ -7,10 +7,12 @@ import {
 import { EquipmentStatus, ServiceStatus, UserRole } from '@prisma/client';
 
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { PushService } from '../../../shared/push/push.service';
 import { FindMessagesQueryDto, StartConversationDto } from '../dto/chat.dto';
 import { ChatPresenter } from '../presenters/chat.presenter';
 
 const USER_SELECT = { id: true, name: true, avatarUrl: true };
+const USER_SELECT_WITH_TOKEN = { id: true, name: true, avatarUrl: true, pushToken: true };
 
 const EQUIPMENT_SELECT = {
   id: true,
@@ -41,9 +43,10 @@ const CONVERSATION_INCLUDE = {
 
 @Injectable()
 export class ChatService {
-  constructor(private readonly prisma: PrismaService) {}
-
-  // Iniciar conversa (CLIENT)
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly push: PushService,
+  ) {}
 
   async startConversation(clientId: string, dto: StartConversationDto) {
     const hasEquipment = Boolean(dto.equipmentId);
@@ -61,10 +64,6 @@ export class ChatService {
     });
 
     if (!client) throw new NotFoundException('Utilizador não encontrado.');
-
-    if (client.role !== UserRole.CLIENT) {
-      throw new ForbiddenException('Só clientes podem iniciar conversas.');
-    }
 
     const target = hasEquipment
       ? await this.resolveEquipmentTarget(dto.equipmentId as string, clientId)
@@ -123,6 +122,21 @@ export class ChatService {
       return { conversation, msg };
     });
 
+    // Notifica o owner — nova conversa
+    const owner = await this.prisma.user.findUnique({
+      where: { id: target.providerId },
+      select: USER_SELECT_WITH_TOKEN,
+    });
+
+    if (owner?.pushToken) {
+      this.push.send({
+        to: owner.pushToken,
+        title: '💬 Nova mensagem',
+        body: `${msg.sender.name}: ${dto.firstMessage.substring(0, 60)}`,
+        data: { type: 'chat', conversationId: conversation.id },
+      }).catch(() => {});
+    }
+
     return {
       message: 'Conversa iniciada com sucesso.',
       data: {
@@ -140,9 +154,7 @@ export class ChatService {
     });
 
     if (!equipment || equipment.status !== EquipmentStatus.ACTIVE) {
-      throw new NotFoundException(
-        'Equipamento não encontrado ou indisponível.',
-      );
+      throw new NotFoundException('Equipamento não encontrado ou indisponível.');
     }
 
     if (equipment.ownerId === clientId) {
@@ -164,11 +176,7 @@ export class ChatService {
       select: { id: true, providerId: true, status: true, isActive: true },
     });
 
-    if (
-      !service ||
-      service.status !== ServiceStatus.ACTIVE ||
-      !service.isActive
-    ) {
+    if (!service || service.status !== ServiceStatus.ACTIVE || !service.isActive) {
       throw new NotFoundException('Serviço não encontrado ou indisponível.');
     }
 
@@ -212,16 +220,12 @@ export class ChatService {
       include: CONVERSATION_INCLUDE,
     });
 
-    if (!conversation) {
-      throw new NotFoundException('Conversa não encontrada.');
-    }
+    if (!conversation) throw new NotFoundException('Conversa não encontrada.');
 
     const isParticipant =
       conversation.clientId === userId || conversation.ownerId === userId;
 
-    if (!isParticipant) {
-      throw new ForbiddenException('Não tens acesso a esta conversa.');
-    }
+    if (!isParticipant) throw new ForbiddenException('Não tens acesso a esta conversa.');
 
     const page = query.page ?? 1;
     const limit = query.limit ?? 30;
@@ -239,11 +243,7 @@ export class ChatService {
     ]);
 
     await this.prisma.message.updateMany({
-      where: {
-        conversationId,
-        senderId: { not: userId },
-        isRead: false,
-      },
+      where: { conversationId, senderId: { not: userId }, isRead: false },
       data: { isRead: true },
     });
 
@@ -253,9 +253,7 @@ export class ChatService {
         conversation: ChatPresenter.toConversation(conversation, userId),
         messages: messages.map((m) => ChatPresenter.toMessage(m)),
         meta: {
-          page,
-          limit,
-          total,
+          page, limit, total,
           totalPages: Math.ceil(total / limit),
           hasNextPage: page * limit < total,
           hasPreviousPage: page > 1,
@@ -282,16 +280,12 @@ export class ChatService {
       select: { id: true, clientId: true, ownerId: true },
     });
 
-    if (!conversation) {
-      throw new NotFoundException('Conversa não encontrada.');
-    }
+    if (!conversation) throw new NotFoundException('Conversa não encontrada.');
 
     const isParticipant =
       conversation.clientId === senderId || conversation.ownerId === senderId;
 
-    if (!isParticipant) {
-      throw new ForbiddenException('Não tens acesso a esta conversa.');
-    }
+    if (!isParticipant) throw new ForbiddenException('Não tens acesso a esta conversa.');
 
     const now = new Date();
 
@@ -305,6 +299,25 @@ export class ChatService {
         data: { lastMessage: trimmed, lastMessageAt: now },
       }),
     ]);
+
+    // Notifica o destinatário
+    const recipientId = conversation.clientId === senderId
+      ? conversation.ownerId
+      : conversation.clientId;
+
+    const recipient = await this.prisma.user.findUnique({
+      where: { id: recipientId },
+      select: USER_SELECT_WITH_TOKEN,
+    });
+
+    if (recipient?.pushToken) {
+      this.push.send({
+        to: recipient.pushToken,
+        title: `💬 ${message.sender.name}`,
+        body: trimmed.substring(0, 100),
+        data: { type: 'chat', conversationId },
+      }).catch(() => {});
+    }
 
     return message;
   }

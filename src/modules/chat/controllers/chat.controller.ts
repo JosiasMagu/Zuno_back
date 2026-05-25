@@ -38,8 +38,7 @@ export class ChatController {
   // Iniciar conversa (CLIENT)
 
   @Post('conversations')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.CLIENT)
+
   @ApiOperation({
     summary: 'Iniciar conversa sobre um equipamento',
     description:
