@@ -25,7 +25,7 @@ export class CreateEquipmentDto {
   @IsString()
   @MinLength(2)
   @MaxLength(150)
-  title: string;
+  title!: string;
 
   @ApiProperty({
     example: 'Camera profissional para fotografia e vídeo.',
@@ -37,7 +37,7 @@ export class CreateEquipmentDto {
   @IsString()
   @MinLength(10)
   @MaxLength(3000)
-  description: string;
+  description!: string;
 
   @ApiProperty({
     example: 'ba6aae31-80be-46a2-9d91-6dcd19074d66',
@@ -45,7 +45,7 @@ export class CreateEquipmentDto {
   })
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsUUID()
-  categoryId: string;
+  categoryId!: string;
 
   @ApiProperty({
     example: 1500,
@@ -55,7 +55,7 @@ export class CreateEquipmentDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0.01)
-  pricePerDay: number;
+  pricePerDay!: number;
 
   @ApiPropertyOptional({
     example: 8000,
@@ -87,7 +87,7 @@ export class CreateEquipmentDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  depositAmount: number;
+  depositAmount!: number;
 
   @ApiProperty({
     example: 'Maputo',
@@ -99,7 +99,7 @@ export class CreateEquipmentDto {
   @IsString()
   @MinLength(2)
   @MaxLength(255)
-  location: string;
+  location!: string;
 
   @ApiPropertyOptional({
     example: -25.9653,

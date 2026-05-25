@@ -38,26 +38,26 @@ import { EquipmentService } from '../services/equipment.service';
 export class EquipmentController {
   constructor(private readonly equipmentService: EquipmentService) {}
 
-  // Criar equipamento (OWNER / ADMIN)
+  // Criar equipamento — qualquer utilizador autenticado
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard)
   @Post()
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Criar equipamento',
     description:
-      'Cria um novo equipamento. Fica em PENDING_REVIEW até o ADMIN aprovar.',
+      'Cria um novo equipamento. Fica em PENDING_REVIEW até o ADMIN aprovar. ' +
+      'CLIENT é promovido automaticamente a PROVIDER.',
   })
   @ApiBody({ type: CreateEquipmentDto })
   @ApiResponse({ status: 201, description: 'Equipamento criado com sucesso.' })
   @ApiResponse({ status: 400, description: 'Dados inválidos.' })
-  @ApiResponse({ status: 403, description: 'Sem permissão.' })
+  @ApiResponse({ status: 401, description: 'Não autenticado.' })
   create(@CurrentUser() user: { id: string }, @Body() dto: CreateEquipmentDto) {
     return this.equipmentService.create(user.id, dto);
   }
 
-  // Listar equipamentos activos (publico)
+  // Listar equipamentos activos (público)
 
   @Get()
   @ApiOperation({
@@ -82,35 +82,27 @@ export class EquipmentController {
     enum: EquipmentSortBy,
     example: EquipmentSortBy.NEWEST,
   })
-  @ApiResponse({
-    status: 200,
-    description: 'Equipamentos obtidos com sucesso.',
-  })
+  @ApiResponse({ status: 200, description: 'Equipamentos obtidos com sucesso.' })
   findAll(@Query() query: FindEquipmentQueryDto) {
     return this.equipmentService.findAll(query);
   }
 
-  // Listings do utilizador autenticado (OWNER / ADMIN)
+  // Listings do utilizador autenticado — qualquer autenticado
 
   @Get('me/listings')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Listar os meus equipamentos',
-    description:
-      'OWNER vê os seus equipamentos em todos os estados. ADMIN vê todos.',
+    description: 'PROVIDER vê os seus. ADMIN vê todos.',
   })
-  @ApiResponse({
-    status: 200,
-    description: 'Equipamentos obtidos com sucesso.',
-  })
-  @ApiResponse({ status: 403, description: 'Sem permissão.' })
+  @ApiResponse({ status: 200, description: 'Equipamentos obtidos com sucesso.' })
+  @ApiResponse({ status: 401, description: 'Não autenticado.' })
   findMyListings(@CurrentUser() user: { id: string }) {
     return this.equipmentService.findMyListings(user.id);
   }
 
-  // Equipamentos pendentes de revisao (ADMIN)
+  // Equipamentos pendentes de revisão (ADMIN)
 
   @Get('admin/pending')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -118,25 +110,17 @@ export class EquipmentController {
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: '[ADMIN] Listar equipamentos pendentes de aprovação',
-    description:
-      'Devolve todos os equipamentos em PENDING_REVIEW, por ordem de criação (FIFO).',
   })
-  @ApiResponse({
-    status: 200,
-    description: 'Equipamentos pendentes obtidos com sucesso.',
-  })
+  @ApiResponse({ status: 200, description: 'Equipamentos pendentes obtidos com sucesso.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   findPending(@CurrentUser() user: { id: string }) {
     return this.equipmentService.findPending(user.id);
   }
 
-  // Detalhe publico (so ACTIVE)
+  // Detalhe público (só ACTIVE)
 
   @Get(':id')
-  @ApiOperation({
-    summary: 'Obter equipamento por ID',
-    description: 'Devolve detalhe completo. Apenas equipamentos ACTIVE.',
-  })
+  @ApiOperation({ summary: 'Obter equipamento por ID' })
   @ApiParam({ name: 'id', description: 'ID do equipamento' })
   @ApiResponse({ status: 200, description: 'Equipamento obtido com sucesso.' })
   @ApiResponse({ status: 404, description: 'Equipamento não encontrado.' })
@@ -150,17 +134,9 @@ export class EquipmentController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @ApiBearerAuth('access-token')
-  @ApiOperation({
-    summary: '[ADMIN] Aprovar equipamento',
-    description:
-      'Muda o status para ACTIVE e torna o equipamento visível no catálogo.',
-  })
+  @ApiOperation({ summary: '[ADMIN] Aprovar equipamento' })
   @ApiParam({ name: 'id', description: 'ID do equipamento' })
-  @ApiResponse({
-    status: 200,
-    description: 'Equipamento aprovado com sucesso.',
-  })
-  @ApiResponse({ status: 400, description: 'Operação inválida.' })
+  @ApiResponse({ status: 200, description: 'Equipamento aprovado com sucesso.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Equipamento não encontrado.' })
   approve(@CurrentUser() user: { id: string }, @Param('id') id: string) {
@@ -173,14 +149,10 @@ export class EquipmentController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @ApiBearerAuth('access-token')
-  @ApiOperation({
-    summary: '[ADMIN] Rejeitar equipamento',
-    description: 'Muda o status para REJECTED com motivo opcional.',
-  })
+  @ApiOperation({ summary: '[ADMIN] Rejeitar equipamento' })
   @ApiParam({ name: 'id', description: 'ID do equipamento' })
   @ApiBody({ type: RejectEquipmentDto })
   @ApiResponse({ status: 200, description: 'Equipamento rejeitado.' })
-  @ApiResponse({ status: 400, description: 'Operação inválida.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Equipamento não encontrado.' })
   reject(
@@ -191,24 +163,14 @@ export class EquipmentController {
     return this.equipmentService.reject(user.id, id, dto.reason);
   }
 
-  // Alternar disponibilidade (OWNER / ADMIN)
+  // Alternar disponibilidade — qualquer autenticado, service valida ownership
 
   @Patch(':id/toggle-availability')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')
-  @ApiOperation({
-    summary: 'Alternar disponibilidade do equipamento',
-    description:
-      'Alterna isAvailable entre true e false. Apenas equipamentos ACTIVE. ' +
-      'Útil para o owner pausar temporariamente um equipamento.',
-  })
+  @ApiOperation({ summary: 'Alternar disponibilidade do equipamento' })
   @ApiParam({ name: 'id', description: 'ID do equipamento' })
-  @ApiResponse({
-    status: 200,
-    description: 'Disponibilidade alterada com sucesso.',
-  })
-  @ApiResponse({ status: 400, description: 'Operação inválida.' })
+  @ApiResponse({ status: 200, description: 'Disponibilidade alterada com sucesso.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Equipamento não encontrado.' })
   toggleAvailability(
@@ -218,20 +180,15 @@ export class EquipmentController {
     return this.equipmentService.toggleAvailability(user.id, id);
   }
 
-  // Actualizar equipamento (OWNER / ADMIN)
+  // Actualizar equipamento — qualquer autenticado, service valida ownership
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard)
   @Patch(':id')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Actualizar equipamento' })
   @ApiParam({ name: 'id', description: 'ID do equipamento' })
   @ApiBody({ type: UpdateEquipmentDto })
-  @ApiResponse({
-    status: 200,
-    description: 'Equipamento atualizado com sucesso.',
-  })
-  @ApiResponse({ status: 400, description: 'Dados inválidos.' })
+  @ApiResponse({ status: 200, description: 'Equipamento atualizado com sucesso.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Equipamento não encontrado.' })
   update(
@@ -242,18 +199,14 @@ export class EquipmentController {
     return this.equipmentService.update(user.id, id, dto);
   }
 
-  // Soft delete (OWNER / ADMIN)
+  // Soft delete — qualquer autenticado, service valida ownership
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard)
   @Delete(':id')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Remover equipamento (soft delete)' })
   @ApiParam({ name: 'id', description: 'ID do equipamento' })
-  @ApiResponse({
-    status: 200,
-    description: 'Equipamento removido com sucesso.',
-  })
+  @ApiResponse({ status: 200, description: 'Equipamento removido com sucesso.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Equipamento não encontrado.' })
   remove(@CurrentUser() user: { id: string }, @Param('id') id: string) {

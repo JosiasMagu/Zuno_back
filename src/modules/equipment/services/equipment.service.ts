@@ -49,13 +49,25 @@ const PHOTOS_ORDER = [
 
 @Injectable()
 export class EquipmentService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   // Criar equipamento
 
+
   async create(ownerId: string, dto: CreateEquipmentDto) {
     const categoryId = dto.categoryId.trim();
+    // Promove automaticamente CLIENT → PROVIDER ao criar primeiro equipamento
+    const owner = await this.prisma.user.findUnique({
+      where: { id: ownerId },
+      select: { role: true },
+    });
 
+    if (owner?.role === UserRole.CLIENT) {
+      await this.prisma.user.update({
+        where: { id: ownerId },
+        data: { role: UserRole.PROVIDER },
+      });
+    }
     const category = await this.prisma.category.findFirst({
       where: { id: categoryId, isActive: true },
     });
@@ -232,7 +244,9 @@ export class EquipmentService {
 
     // ADMIN ve todos; OWNER so ve os seus
     const where: Prisma.EquipmentWhereInput =
-      user.role === UserRole.ADMIN ? {} : { ownerId: userId };
+      user.role === UserRole.ADMIN
+        ? { status: { not: EquipmentStatus.DELETED } }
+        : { ownerId: userId, status: { not: EquipmentStatus.DELETED } };
 
     const items = await this.prisma.equipment.findMany({
       where,

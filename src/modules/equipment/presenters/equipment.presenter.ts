@@ -52,34 +52,37 @@ function toNumber(value: unknown): number | null {
   return Number(value);
 }
 
-// Mapeia os valores do enum Prisma (maiusculas) para o formato
-// esperado pelo frontend (capitalizado: "New", "Good", etc.)
-const CONDITION_MAP: Record<string, string> = {
-  NEW: 'New',
-  EXCELLENT: 'Excellent',
-  GOOD: 'Good',
-  USED: 'Used',
-};
-
-function toConditionLabel(condition: string): string {
-  return CONDITION_MAP[condition] ?? condition;
-}
-
 export class EquipmentPresenter {
   static toListItem(equipment: EquipmentListEntity) {
     return {
       id: equipment.id,
       title: equipment.title,
-      category: equipment.category.name,
+      description: equipment.description,
       location: equipment.location,
       pricePerDay: Number(equipment.pricePerDay),
-      image: equipment.photos?.[0]?.url ?? null,
-      owner: equipment.owner.name,
-      description: equipment.description,
-      deliveryAvailable: equipment.deliveryIncluded,
+      isAvailable: equipment.isAvailable,
+      deliveryIncluded: equipment.deliveryIncluded,
       operatorAvailable: equipment.operatorAvailable,
-      availableNow: equipment.isAvailable,
-      condition: toConditionLabel(equipment.condition),
+      condition: equipment.condition,
+      status: equipment.status,
+      totalRating: null,
+      totalReviews: 0,
+      totalBookings: 0,
+      category: {
+        id: equipment.category.id,
+        name: equipment.category.name,
+        slug: equipment.category.slug,
+      },
+      owner: {
+        id: equipment.owner.id,
+        name: equipment.owner.name,
+        avatarUrl: equipment.owner.avatarUrl,
+      },
+      photos: (equipment.photos ?? []).map((photo) => ({
+        url: photo.url,
+        isPrimary: photo.isPrimary,
+        order: photo.order,
+      })),
     };
   }
 
@@ -88,11 +91,6 @@ export class EquipmentPresenter {
       id: equipment.id,
       title: equipment.title,
       description: equipment.description,
-      category: {
-        id: equipment.category.id,
-        name: equipment.category.name,
-        slug: equipment.category.slug,
-      },
       location: equipment.location,
       pricePerDay: Number(equipment.pricePerDay),
       pricePerWeek: toNumber(equipment.pricePerWeek),
@@ -100,19 +98,21 @@ export class EquipmentPresenter {
       depositAmount: toNumber(equipment.depositAmount),
       latitude: toNumber(equipment.latitude),
       longitude: toNumber(equipment.longitude),
-      deliveryAvailable: equipment.deliveryIncluded,
+      isAvailable: equipment.isAvailable,
+      deliveryIncluded: equipment.deliveryIncluded,
       operatorAvailable: equipment.operatorAvailable,
-      availableNow: equipment.isAvailable,
-      condition: toConditionLabel(equipment.condition),
+      condition: equipment.condition,
       status: equipment.status,
       totalRating: toNumber(equipment.totalRating),
       totalReviews: equipment.totalReviews ?? 0,
       totalBookings: equipment.totalBookings ?? 0,
-      photos: equipment.photos.map((photo) => ({
-        url: photo.url,
-        isPrimary: photo.isPrimary,
-        order: photo.order,
-      })),
+      createdAt: equipment.createdAt,
+      updatedAt: equipment.updatedAt,
+      category: {
+        id: equipment.category.id,
+        name: equipment.category.name,
+        slug: equipment.category.slug,
+      },
       owner: {
         id: equipment.owner.id,
         name: equipment.owner.name,
@@ -121,8 +121,11 @@ export class EquipmentPresenter {
         totalRating: toNumber(equipment.owner.totalRating),
         totalReviews: equipment.owner.totalReviews ?? 0,
       },
-      createdAt: equipment.createdAt,
-      updatedAt: equipment.updatedAt,
+      photos: (equipment.photos ?? []).map((photo) => ({
+        url: photo.url,
+        isPrimary: photo.isPrimary,
+        order: photo.order,
+      })),
     };
   }
 
@@ -141,32 +144,36 @@ export class EquipmentPresenter {
     return {
       id: equipment.id,
       title: equipment.title,
-      category: {
-        id: equipment.category.id,
-        name: equipment.category.name,
-        slug: equipment.category.slug,
-      },
+      description: equipment.description,
       location: equipment.location,
       pricePerDay: Number(equipment.pricePerDay),
       pricePerWeek: toNumber(equipment.pricePerWeek),
       pricePerMonth: toNumber(equipment.pricePerMonth),
       depositAmount: toNumber(equipment.depositAmount),
-      image: equipment.photos?.[0]?.url ?? null,
-      description: equipment.description,
-      deliveryAvailable: equipment.deliveryIncluded,
+      isAvailable: equipment.isAvailable,
+      deliveryIncluded: equipment.deliveryIncluded,
       operatorAvailable: equipment.operatorAvailable,
-      availableNow: equipment.isAvailable,
-      condition: toConditionLabel(equipment.condition),
+      condition: equipment.condition,
       status: equipment.status,
       isPremium: equipment.isPremium ?? false,
       totalRating: toNumber(equipment.totalRating),
       totalReviews: equipment.totalReviews ?? 0,
       totalBookings: equipment.totalBookings ?? 0,
+      category: {
+        id: equipment.category.id,
+        name: equipment.category.name,
+        slug: equipment.category.slug,
+      },
       owner: {
         id: equipment.owner.id,
         name: equipment.owner.name,
         avatarUrl: equipment.owner.avatarUrl,
       },
+      photos: (equipment.photos ?? []).map((photo) => ({
+        url: photo.url,
+        isPrimary: photo.isPrimary,
+        order: photo.order,
+      })),
     };
   }
 }
