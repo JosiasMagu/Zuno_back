@@ -177,17 +177,23 @@ async function seedEquipment() {
     where: { slug: 'transporte' },
     select: { id: true },
   });
+  const catLimpeza = await prisma.category.findUniqueOrThrow({
+    where: { slug: 'limpeza' },
+    select: { id: true },
+  });
 
+  const CL = 'https://res.cloudinary.com/dojumw0as/image/upload';
   const equipment = [
     {
       ownerId: provider1.id,
       categoryId: catConstrucao.id,
-      title: 'Betoneira 300L',
+      title: 'Bomba de Água Periférica INGCO 0.5HP',
+      imageUrl: `${CL}/v1779720991/zuno/equipment/f2a55da0-6446-4340-8043-2b1c038e50fd/j4p5odlvmiev8gmjey0v.jpg`,
       description:
-        'Betoneira eléctrica de 300L em excelente estado. Ideal para pequenas e médias obras. Inclui transporte dentro de Maputo Cidade.',
-      pricePerDay: 1500,
-      pricePerWeek: 8500,
-      depositAmount: 5000,
+        'Bomba de água periférica INGCO de 0.5HP. Ideal para abastecimento doméstico, rega e pequenas obras. Inclui transporte dentro de Maputo Cidade.',
+      pricePerDay: 350,
+      pricePerWeek: 2000,
+      depositAmount: 1500,
       location: 'Maputo, Cidade',
       condition: EquipmentCondition.EXCELLENT,
       deliveryIncluded: true,
@@ -195,51 +201,56 @@ async function seedEquipment() {
     {
       ownerId: provider1.id,
       categoryId: catConstrucao.id,
-      title: 'Andaime Modular 6m',
+      title: 'Bomba de Água Centrífuga INGCO 1HP',
+      imageUrl: `${CL}/v1779715260/zuno/equipment/f7712034-0ec4-4aea-841a-ba21582b4b30/sbe8wiq87u0i2witm0q1.jpg`,
       description:
-        'Conjunto de andaimes modulares com altura ajustável até 6 metros. Material certificado, montagem rápida.',
-      pricePerDay: 800,
-      pricePerWeek: 4500,
-      pricePerMonth: 14000,
-      depositAmount: 3000,
+        'Bomba centrífuga INGCO de 1HP, alto caudal. Ideal para irrigação e transferência de água em estaleiros. Material em excelente estado.',
+      pricePerDay: 450,
+      pricePerWeek: 2600,
+      depositAmount: 2000,
       location: 'Maputo, Matola',
       condition: EquipmentCondition.GOOD,
     },
     {
       ownerId: provider2.id,
-      categoryId: catAgricultura.id,
-      title: 'Tractor John Deere 5050D',
+      categoryId: catConstrucao.id,
+      title: 'Escavadora Hidráulica de Esteiras',
+      imageUrl: `${CL}/v1779709734/zuno/equipment/837b541d-1e2e-4d68-aca3-51bb17bd855d/nyjxcubpuunavv6wh9fh.jpg`,
       description:
-        'Tractor agrícola 50HP. Ideal para preparação de terreno e transporte. Operador disponível mediante pedido.',
-      pricePerDay: 4500,
-      pricePerWeek: 28000,
-      depositAmount: 15000,
+        'Escavadora hidráulica sobre esteiras para movimentação de terras, escavações e demolições. Operador certificado disponível mediante pedido.',
+      pricePerDay: 12000,
+      pricePerWeek: 75000,
+      depositAmount: 40000,
       location: 'Gaza, Chókwè',
       condition: EquipmentCondition.GOOD,
       operatorAvailable: true,
     },
     {
-      ownerId: provider2.id,
-      categoryId: catAgricultura.id,
-      title: 'Arado de Discos (3 corpos)',
+      ownerId: provider1.id,
+      categoryId: catLimpeza.id,
+      title: 'Máquina de Lavar Industrial Miele',
+      imageUrl: `${CL}/v1779706267/zuno/equipment/3f8952b4-dddd-44f9-be95-5d546596ecb7/cyb3f0uwduuejl8xa2nw.jpg`,
       description:
-        'Arado de discos para acoplar a tractor. Profundidade ajustável. Ideal para terras pesadas.',
-      pricePerDay: 1200,
-      pricePerWeek: 7000,
-      depositAmount: 4000,
-      location: 'Gaza, Chókwè',
-      condition: EquipmentCondition.USED,
+        'Máquina de lavar roupa Miele de uso intensivo. Ideal para lavandarias, eventos e alojamentos. Inclui transporte e instalação em Maputo Cidade.',
+      pricePerDay: 600,
+      pricePerWeek: 3500,
+      pricePerMonth: 11000,
+      depositAmount: 3000,
+      location: 'Maputo, Cidade',
+      condition: EquipmentCondition.EXCELLENT,
+      deliveryIncluded: true,
     },
     {
-      ownerId: provider1.id,
-      categoryId: catTransporte.id,
-      title: 'Camião Iveco 3 Toneladas',
+      ownerId: provider2.id,
+      categoryId: catConstrucao.id,
+      title: 'Escavadora CAT 345BL',
+      imageUrl: `${CL}/v1779397012/zuno/equipment/53fa2393-801e-4016-a859-14fc502d1830/cj3gjjd0anbko0oovyh0.jpg`,
       description:
-        'Camião de caixa aberta para transporte de materiais de construção. Combustível por conta do cliente.',
-      pricePerDay: 3500,
-      pricePerWeek: 22000,
-      depositAmount: 10000,
-      location: 'Maputo, Cidade',
+        'Escavadora Caterpillar 345BL de grande porte para obras pesadas, terraplanagem e mineração ligeira. Operador incluído. Combustível por conta do cliente.',
+      pricePerDay: 18000,
+      pricePerWeek: 110000,
+      depositAmount: 60000,
+      location: 'Gaza, Chókwè',
       condition: EquipmentCondition.GOOD,
       operatorAvailable: true,
     },
@@ -251,6 +262,7 @@ async function seedEquipment() {
       select: { id: true },
     });
 
+    let equipmentId: string;
     if (existing) {
       await prisma.equipment.update({
         where: { id: existing.id },
@@ -268,8 +280,9 @@ async function seedEquipment() {
           isAvailable: true,
         },
       });
+      equipmentId = existing.id;
     } else {
-      await prisma.equipment.create({
+      const created = await prisma.equipment.create({
         data: {
           ownerId: eq.ownerId,
           categoryId: eq.categoryId,
@@ -286,8 +299,21 @@ async function seedEquipment() {
           status: EquipmentStatus.ACTIVE,
           isAvailable: true,
         },
+        select: { id: true },
       });
+      equipmentId = created.id;
     }
+
+    // Foto principal (idempotente): remove as existentes e recria
+    await prisma.equipmentPhoto.deleteMany({ where: { equipmentId } });
+    await prisma.equipmentPhoto.create({
+      data: {
+        equipmentId,
+        url: eq.imageUrl,
+        isPrimary: true,
+        order: 0,
+      },
+    });
   }
 
   log('✅', `${equipment.length} equipamentos prontos.`);
