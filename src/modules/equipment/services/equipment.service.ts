@@ -151,6 +151,10 @@ export class EquipmentService {
       };
     }
 
+    if (query.ownerId?.trim()) {
+      where.ownerId = query.ownerId.trim();
+    }
+
     if (query.location?.trim()) {
       where.location = { contains: query.location.trim(), mode: 'insensitive' };
     }

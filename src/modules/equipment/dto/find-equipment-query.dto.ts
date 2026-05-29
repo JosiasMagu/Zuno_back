@@ -65,6 +65,15 @@ export class FindEquipmentQueryDto extends PaginationQueryDto {
   categorySlug?: string;
 
   @ApiPropertyOptional({
+    example: 'b1c4f9d0-1234-5678-90ab-cdef12345678',
+    description: 'ID do proprietário (filtrar apenas itens deste provider)',
+  })
+  @IsOptional()
+  @Transform(({ value }) => toOptionalTrimmedString(value))
+  @IsString()
+  ownerId?: string;
+
+  @ApiPropertyOptional({
     example: 'Maputo',
     description: 'Filtrar por localização (busca parcial)',
   })
