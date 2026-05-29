@@ -31,7 +31,7 @@ import { PaymentsService } from '../services/payments.service';
 @Controller('payments')
 @UseGuards(JwtAuthGuard)
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(private readonly paymentsService: PaymentsService) { }
 
   @Post('booking/:bookingId/initiate')
   @UseGuards(RolesGuard)
@@ -99,7 +99,6 @@ export class PaymentsController {
   }
 
   @Patch(':id/release')
-  @UseGuards(RolesGuard)
   @Roles(UserRole.CLIENT, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({
@@ -133,5 +132,17 @@ export class PaymentsController {
   @ApiResponse({ status: 404, description: 'Pagamento não encontrado.' })
   refund(@CurrentUser() user: { id: string }, @Param('id') id: string) {
     return this.paymentsService.refund(user.id, id);
+  }
+
+  @Post('booking/:bookingId/mock-pay')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Simular pagamento M-Pesa (mock)' })
+  @ApiParam({ name: 'bookingId' })
+  initiateMock(
+    @CurrentUser() user: { id: string },
+    @Param('bookingId') bookingId: string,
+  ) {
+    return this.paymentsService.initiateMock(user.id, bookingId);
   }
 }

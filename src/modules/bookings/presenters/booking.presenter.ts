@@ -59,6 +59,15 @@ type BookingDetailsEntity = BookingBaseEntity & {
     name: string;
     avatarUrl: string | null;
   };
+  payment?: {
+    id: string;
+    status: string;
+    totalCharged: unknown;
+    mpesaReference: string | null;
+    receiptNumber: string;
+    heldAt: Date | null;
+    releasedAt: Date | null;
+  } | null;
 };
 
 function toNumber(value: unknown): number | null {
@@ -145,6 +154,15 @@ export class BookingPresenter {
         name: booking.owner.name,
         avatarUrl: booking.owner.avatarUrl,
       },
+      payment: booking.payment ? {
+        id: booking.payment.id,
+        status: booking.payment.status,
+        totalCharged: Number(booking.payment.totalCharged),
+        mpesaReference: booking.payment.mpesaReference,
+        receiptNumber: booking.payment.receiptNumber,
+        heldAt: booking.payment.heldAt,
+        releasedAt: booking.payment.releasedAt,
+      } : null,
     };
   }
 }

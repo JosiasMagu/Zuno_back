@@ -38,8 +38,9 @@ import { ServicesService } from '../services/services.service';
 export class ServicesController {
   constructor(private readonly servicesService: ServicesService) {}
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
+  // Criar serviço — qualquer utilizador autenticado
+
+  @UseGuards(JwtAuthGuard)
   @Post()
   @ApiBearerAuth('access-token')
   @ApiOperation({
@@ -49,10 +50,12 @@ export class ServicesController {
   @ApiBody({ type: CreateServiceDto })
   @ApiResponse({ status: 201, description: 'Serviço criado com sucesso.' })
   @ApiResponse({ status: 400, description: 'Dados inválidos.' })
-  @ApiResponse({ status: 403, description: 'Sem permissão.' })
+  @ApiResponse({ status: 401, description: 'Não autenticado.' })
   create(@CurrentUser() user: { id: string }, @Body() dto: CreateServiceDto) {
     return this.servicesService.create(user.id, dto);
   }
+
+  // Listar serviços activos (público)
 
   @Get()
   @ApiOperation({
@@ -79,20 +82,22 @@ export class ServicesController {
     return this.servicesService.findAll(query);
   }
 
+  // Listings do utilizador autenticado — qualquer autenticado
+
   @Get('me/listings')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Listar os meus serviços',
-    description:
-      'PROVIDER vê os seus serviços em todos os estados. ADMIN vê todos.',
+    description: 'PROVIDER vê os seus serviços em todos os estados. ADMIN vê todos.',
   })
   @ApiResponse({ status: 200, description: 'Serviços obtidos com sucesso.' })
-  @ApiResponse({ status: 403, description: 'Sem permissão.' })
+  @ApiResponse({ status: 401, description: 'Não autenticado.' })
   findMyListings(@CurrentUser() user: { id: string }) {
     return this.servicesService.findMyListings(user.id);
   }
+
+  // Serviços pendentes de revisão (ADMIN)
 
   @Get('admin/pending')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -100,17 +105,14 @@ export class ServicesController {
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: '[ADMIN] Listar serviços pendentes de aprovação',
-    description:
-      'Devolve todos os serviços em PENDING_REVIEW, ordem de criação (FIFO).',
   })
-  @ApiResponse({
-    status: 200,
-    description: 'Serviços pendentes obtidos com sucesso.',
-  })
+  @ApiResponse({ status: 200, description: 'Serviços pendentes obtidos com sucesso.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   findPending(@CurrentUser() user: { id: string }) {
     return this.servicesService.findPending(user.id);
   }
+
+  // Detalhe público (só ACTIVE)
 
   @Get(':id')
   @ApiOperation({
@@ -124,6 +126,8 @@ export class ServicesController {
     return this.servicesService.findOne(id);
   }
 
+  // Aprovar serviço (ADMIN)
+
   @Patch(':id/approve')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
@@ -131,12 +135,13 @@ export class ServicesController {
   @ApiOperation({ summary: '[ADMIN] Aprovar serviço' })
   @ApiParam({ name: 'id' })
   @ApiResponse({ status: 200, description: 'Serviço aprovado com sucesso.' })
-  @ApiResponse({ status: 400, description: 'Operação inválida.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Serviço não encontrado.' })
   approve(@CurrentUser() user: { id: string }, @Param('id') id: string) {
     return this.servicesService.approve(user.id, id);
   }
+
+  // Rejeitar serviço (ADMIN)
 
   @Patch(':id/reject')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -146,7 +151,6 @@ export class ServicesController {
   @ApiParam({ name: 'id' })
   @ApiBody({ type: RejectServiceDto })
   @ApiResponse({ status: 200, description: 'Serviço rejeitado.' })
-  @ApiResponse({ status: 400, description: 'Operação inválida.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Serviço não encontrado.' })
   reject(
@@ -157,17 +161,14 @@ export class ServicesController {
     return this.servicesService.reject(user.id, id, dto.reason);
   }
 
+  // Alternar disponibilidade — qualquer autenticado, service valida ownership
+
   @Patch(':id/toggle-availability')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Alternar disponibilidade do serviço' })
   @ApiParam({ name: 'id' })
-  @ApiResponse({
-    status: 200,
-    description: 'Disponibilidade alterada com sucesso.',
-  })
-  @ApiResponse({ status: 400, description: 'Operação inválida.' })
+  @ApiResponse({ status: 200, description: 'Disponibilidade alterada com sucesso.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Serviço não encontrado.' })
   toggleAvailability(
@@ -177,15 +178,15 @@ export class ServicesController {
     return this.servicesService.toggleAvailability(user.id, id);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
+  // Actualizar serviço — qualquer autenticado, service valida ownership
+
+  @UseGuards(JwtAuthGuard)
   @Patch(':id')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Actualizar serviço' })
   @ApiParam({ name: 'id' })
   @ApiBody({ type: UpdateServiceDto })
   @ApiResponse({ status: 200, description: 'Serviço atualizado com sucesso.' })
-  @ApiResponse({ status: 400, description: 'Dados inválidos.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Serviço não encontrado.' })
   update(
@@ -196,8 +197,9 @@ export class ServicesController {
     return this.servicesService.update(user.id, id, dto);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
+  // Soft delete — qualquer autenticado, service valida ownership
+
+  @UseGuards(JwtAuthGuard)
   @Delete(':id')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Remover serviço (soft delete)' })

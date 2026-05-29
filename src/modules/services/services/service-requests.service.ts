@@ -50,15 +50,7 @@ export class ServiceRequestsService {
       select: { id: true, role: true },
     });
 
-    if (!user) {
-      throw new NotFoundException('Utilizador não encontrado.');
-    }
-
-    if (user.role !== UserRole.CLIENT) {
-      throw new ForbiddenException(
-        'Apenas clientes podem criar pedidos de serviço.',
-      );
-    }
+    if (!user) throw new NotFoundException('Utilizador não encontrado.');
 
     const serviceId = dto.serviceId.trim();
 
@@ -67,26 +59,18 @@ export class ServiceRequestsService {
       select: SERVICE_SELECT,
     });
 
-    if (!service) {
-      throw new NotFoundException('Serviço não encontrado.');
-    }
+    if (!service) throw new NotFoundException('Serviço não encontrado.');
 
     if (service.status !== ServiceStatus.ACTIVE || !service.isActive) {
-      throw new BadRequestException(
-        'Este serviço não está disponível para pedidos.',
-      );
+      throw new BadRequestException('Este serviço não está disponível para pedidos.');
     }
 
     if (service.providerId === clientId) {
-      throw new BadRequestException(
-        'Não podes solicitar o teu próprio serviço.',
-      );
+      throw new BadRequestException('Não podes solicitar o teu próprio serviço.');
     }
 
     if (dto.isUrgent && !service.acceptsUrgent) {
-      throw new BadRequestException(
-        'Este serviço não aceita pedidos urgentes.',
-      );
+      throw new BadRequestException('Este serviço não aceita pedidos urgentes.');
     }
 
     const expiresAt = dto.expiresAt
@@ -94,9 +78,7 @@ export class ServiceRequestsService {
       : new Date(Date.now() + DEFAULT_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
 
     if (expiresAt.getTime() <= Date.now()) {
-      throw new BadRequestException(
-        'A data de expiração deve estar no futuro.',
-      );
+      throw new BadRequestException('A data de expiração deve estar no futuro.');
     }
 
     const created = await this.prisma.serviceRequest.create({
@@ -138,15 +120,11 @@ export class ServiceRequestsService {
     const skip = (page - 1) * limit;
 
     const where: Prisma.ServiceRequestWhereInput = { clientId };
-    if (query.status) {
-      where.status = query.status;
-    }
+    if (query.status) where.status = query.status;
 
     const [items, total] = await Promise.all([
       this.prisma.serviceRequest.findMany({
-        where,
-        skip,
-        take: limit,
+        where, skip, take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
           service: { select: SERVICE_SELECT },
@@ -160,9 +138,42 @@ export class ServiceRequestsService {
       message: 'Pedidos obtidos com sucesso.',
       data: items.map((item) => ServiceRequestPresenter.toItem(item)),
       meta: {
-        page,
-        limit,
-        total,
+        page, limit, total,
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: page * limit < total,
+        hasPreviousPage: page > 1,
+      },
+    };
+  }
+
+  // Pedidos recebidos nos serviços do provider
+  async findForProvider(providerId: string, query: FindServiceRequestsQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.ServiceRequestWhereInput = {
+      service: { providerId },
+    };
+    if (query.status) where.status = query.status;
+
+    const [items, total] = await Promise.all([
+      this.prisma.serviceRequest.findMany({
+        where, skip, take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          service: { select: SERVICE_SELECT },
+          client: { select: CLIENT_SELECT },
+        },
+      }),
+      this.prisma.serviceRequest.count({ where }),
+    ]);
+
+    return {
+      message: 'Pedidos recebidos obtidos com sucesso.',
+      data: items.map((item) => ServiceRequestPresenter.toItem(item)),
+      meta: {
+        page, limit, total,
         totalPages: Math.ceil(total / limit),
         hasNextPage: page * limit < total,
         hasPreviousPage: page > 1,
@@ -179,27 +190,21 @@ export class ServiceRequestsService {
       },
     });
 
-    if (!request) {
-      throw new NotFoundException('Pedido não encontrado.');
-    }
+    if (!request) throw new NotFoundException('Pedido não encontrado.');
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, role: true },
     });
 
-    if (!user) {
-      throw new NotFoundException('Utilizador não encontrado.');
-    }
+    if (!user) throw new NotFoundException('Utilizador não encontrado.');
 
     const canAccess =
       user.role === UserRole.ADMIN ||
       request.clientId === userId ||
       request.service?.providerId === userId;
 
-    if (!canAccess) {
-      throw new ForbiddenException('Não tens permissão para ver este pedido.');
-    }
+    if (!canAccess) throw new ForbiddenException('Não tens permissão para ver este pedido.');
 
     return {
       message: 'Pedido obtido com sucesso.',
@@ -213,14 +218,10 @@ export class ServiceRequestsService {
       select: { id: true, clientId: true, status: true },
     });
 
-    if (!request) {
-      throw new NotFoundException('Pedido não encontrado.');
-    }
+    if (!request) throw new NotFoundException('Pedido não encontrado.');
 
     if (request.clientId !== userId) {
-      throw new ForbiddenException(
-        'Apenas o cliente do pedido pode cancelá-lo.',
-      );
+      throw new ForbiddenException('Apenas o cliente do pedido pode cancelá-lo.');
     }
 
     if (

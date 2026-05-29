@@ -190,16 +190,23 @@ export class BookingsService {
   }
 
   async findOne(userId: string, bookingId: string) {
-    const booking = await this.prisma.booking.findUnique({
-      where: { id: bookingId },
-      include: {
-        client: { select: { id: true, name: true, avatarUrl: true } },
-        owner: { select: { id: true, name: true, avatarUrl: true } },
-        equipment: {
-          select: { id: true, title: true, description: true, location: true, status: true, pricePerDay: true, depositAmount: true },
-        },
+   const booking = await this.prisma.booking.findUnique({
+  where: { id: bookingId },
+  include: {
+    client: { select: { id: true, name: true, avatarUrl: true } },
+    owner: { select: { id: true, name: true, avatarUrl: true } },
+    equipment: {
+      select: { id: true, title: true, description: true, location: true, status: true, pricePerDay: true, depositAmount: true },
+    },
+    payment: {
+      select: {
+        id: true, status: true, totalCharged: true,
+        mpesaReference: true, receiptNumber: true,
+        heldAt: true, releasedAt: true,
       },
-    });
+    },
+  },
+});
 
     if (!booking) throw new NotFoundException('Reserva não encontrada.');
 

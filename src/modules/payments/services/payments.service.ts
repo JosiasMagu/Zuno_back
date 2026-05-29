@@ -775,4 +775,46 @@ export class PaymentsService {
       .toUpperCase();
     return `ZUNO-${token}`;
   }
+
+  async initiateMock(userId: string, bookingId: string) {
+  // Inicia o pagamento com MPESA
+  const result = await this.initiate(userId, bookingId, { method: 'MPESA' });
+  const paymentId = result.data.id;
+
+  // Simula referência M-Pesa
+  const mpesaReference = `MP${Date.now().toString().slice(-8)}`;
+
+  // Marca automaticamente como HELD (cofre)
+  await this.prisma.payment.update({
+    where: { id: paymentId },
+    data: {
+      status: 'HELD',
+      heldAt: new Date(),
+      mpesaReference,
+    },
+  });
+
+  const payment = await this.prisma.payment.findUnique({
+    where: { id: paymentId },
+    include: {
+      booking: { select: { id: true, startDate: true, endDate: true, status: true } },
+      client: { select: { id: true, name: true, avatarUrl: true } },
+      owner: { select: { id: true, name: true, avatarUrl: true } },
+    },
+  });
+
+  await this.audit.record({
+    action: AuditAction.PAYMENT_MARKED_HELD,
+    actorId: userId,
+    targetType: 'Payment',
+    targetId: paymentId,
+    amount: payment!.totalCharged,
+    metadata: { mock: true, mpesaReference },
+  });
+
+  return {
+    message: 'Pagamento M-Pesa simulado com sucesso. Valor retido no cofre.',
+    data: PaymentPresenter.toListItem(payment!),
+  };
+}
 }
