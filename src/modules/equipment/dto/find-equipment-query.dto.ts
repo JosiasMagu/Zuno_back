@@ -2,6 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
+  IsDateString,
   IsEnum,
   IsNumber,
   IsOptional,
@@ -128,6 +129,24 @@ export class FindEquipmentQueryDto extends PaginationQueryDto {
   @Transform(({ value }) => toOptionalBoolean(value))
   @IsBoolean()
   onlyAvailableNow?: boolean;
+
+  @ApiPropertyOptional({
+    example: '2026-09-15',
+    description:
+      'Início do intervalo desejado (ISO date). Combinado com `availableTo`, filtra equipamentos SEM bookings em conflito nesse intervalo.',
+  })
+  @IsOptional()
+  @IsDateString()
+  availableFrom?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-09-20',
+    description:
+      'Fim do intervalo desejado (ISO date). Exige `availableFrom`.',
+  })
+  @IsOptional()
+  @IsDateString()
+  availableTo?: string;
 
   @ApiPropertyOptional({
     enum: EquipmentCondition,

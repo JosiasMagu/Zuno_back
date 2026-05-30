@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import {
   AuditAction,
+  BookingStatus,
   EquipmentCondition,
   EquipmentStatus,
   Prisma,
@@ -182,6 +183,51 @@ export class EquipmentService {
 
     if (query.onlyAvailableNow !== undefined) {
       where.isAvailable = query.onlyAvailableNow;
+    }
+
+    // Filtro por janela de disponibilidade: exclui equipamentos com
+    // bookings (PENDING/CONFIRMED/ACTIVE) que se sobrepõem ao intervalo
+    // [availableFrom, availableTo]. Overlap: existing.start < requested.end
+    // && existing.end > requested.start.
+    if (query.availableFrom && query.availableTo) {
+      const requestedStart = new Date(query.availableFrom);
+      const requestedEnd = new Date(query.availableTo);
+
+      if (
+        Number.isNaN(requestedStart.getTime()) ||
+        Number.isNaN(requestedEnd.getTime())
+      ) {
+        throw new BadRequestException(
+          'availableFrom/availableTo devem ser datas ISO válidas.',
+        );
+      }
+      if (requestedEnd <= requestedStart) {
+        throw new BadRequestException(
+          'availableTo deve ser posterior a availableFrom.',
+        );
+      }
+
+      where.NOT = {
+        bookings: {
+          some: {
+            status: {
+              in: [
+                BookingStatus.PENDING,
+                BookingStatus.CONFIRMED,
+                BookingStatus.ACTIVE,
+              ],
+            },
+            AND: [
+              { startDate: { lt: requestedEnd } },
+              { endDate: { gt: requestedStart } },
+            ],
+          },
+        },
+      };
+    } else if (query.availableFrom || query.availableTo) {
+      throw new BadRequestException(
+        'availableFrom e availableTo devem ser fornecidos juntos.',
+      );
     }
 
     if (query.condition !== undefined) {
