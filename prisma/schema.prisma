@@ -643,6 +643,31 @@ model VerificationCode {
   @@index([expiresAt])
 }
 
+// Idempotency: garante que retries de pedidos (mesma key + mesmo user
+// + mesmo endpoint) NÃO duplicam a operação. Útil para POST /bookings,
+// POST /payments, PATCH .../release, etc., onde redes flaky podem
+// disparar o mesmo pedido várias vezes.
+//
+//  - responseStatus === 0 → pedido em curso (lock optimista)
+//  - responseStatus > 0   → resposta final cacheada, replay no próximo retry
+//
+// `requestHash` previne abuso: se o cliente reutiliza a key com body
+// diferente, devolvemos CONFLICT (IDEMPOTENCY_KEY_MISMATCH).
+model IdempotencyKey {
+  id             String   @id @default(uuid())
+  key            String
+  userId         String
+  endpoint       String
+  requestHash    String
+  responseStatus Int      @default(0)
+  responseBody   Json?
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+
+  @@unique([key, userId, endpoint])
+  @@index([expiresAt])
+}
+
 model AuditLog {
   id         String      @id @default(uuid())
   action     AuditAction

@@ -18,6 +18,7 @@ import { ServicesModule } from './modules/services/services.module';
 import { UsersModule } from './modules/users/users.module';
 import { AuditModule } from './shared/audit/audit.module';
 import { DatabaseModule } from './shared/db/database.module';
+import { IdempotencyModule } from './common/idempotency/idempotency.module';
 import { LoggerModule } from './shared/logger/logger.module';
 import { NotificationsModule } from './shared/notifications/notifications.module';
 import { SentryModule } from './shared/sentry/sentry.module';
@@ -39,6 +40,7 @@ import { SentryModule } from './shared/sentry/sentry.module';
     ]),
     DatabaseModule,
     AuditModule,
+    IdempotencyModule,
     NotificationsModule,
     HealthModule,
     AuthModule,

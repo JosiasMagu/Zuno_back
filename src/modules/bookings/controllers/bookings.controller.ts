@@ -12,6 +12,7 @@ import { UserRole } from '@prisma/client';
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiHeader,
   ApiOperation,
   ApiParam,
   ApiQuery,
@@ -23,6 +24,7 @@ import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
+import { Idempotent } from '../../../common/idempotency/idempotent.decorator';
 import { CreateBookingDto } from '../dto/create-booking.dto';
 import { FindBookingsQueryDto } from '../dto/find-bookings-query.dto';
 import { UpdateBookingStatusDto } from '../dto/update-booking-status.dto';
@@ -37,13 +39,24 @@ export class BookingsController {
   @Post()
   @UseGuards(RolesGuard)
   @Roles(UserRole.CLIENT, UserRole.PROVIDER, UserRole.ADMIN)
+  @Idempotent()
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Criar reserva' })
+  @ApiOperation({
+    summary: 'Criar reserva',
+    description:
+      'Requer cabeçalho **Idempotency-Key** (UUID v4) para evitar duplicação de reservas em retries de rede. Retries com a mesma key devolvem a reserva original em vez de criarem outra.',
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description: 'UUID único por tentativa de criação (TTL 24h).',
+  })
   @ApiBody({ type: CreateBookingDto })
   @ApiResponse({ status: 201, description: 'Reserva criada com sucesso.' })
-  @ApiResponse({ status: 400, description: 'Dados inválidos.' })
+  @ApiResponse({ status: 400, description: 'Dados inválidos ou Idempotency-Key ausente.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Equipamento não encontrado.' })
+  @ApiResponse({ status: 409, description: 'Idempotency-Key reutilizada com body diferente, ou pedido ainda em curso.' })
   create(@CurrentUser() user: { id: string }, @Body() dto: CreateBookingDto) {
     return this.bookingsService.create(user.id, dto);
   }
