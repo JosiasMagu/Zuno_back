@@ -1,4 +1,4 @@
-import { ValidationPipe } from '@nestjs/common';
+import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
@@ -7,7 +7,7 @@ import cookieParser from 'cookie-parser';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
-import { flushSentry, initSentry } from './shared/sentry/sentry';
+import { initSentry } from './shared/sentry/sentry';
 
 async function bootstrap() {
   initSentry();
@@ -16,9 +16,19 @@ async function bootstrap() {
   const logger = app.get(PinoLogger);
   app.useLogger(logger);
 
+  // enableShutdownHooks() faz com que SIGINT/SIGTERM disparem os
+  // onApplicationShutdown() de todos os providers (incluindo o
+  // SentryShutdownService que descarrega a fila do Sentry).
   app.enableShutdownHooks();
 
-  app.setGlobalPrefix('api/v1');
+  // Health/readiness ficam na raiz (fora de /api/v1), por convenção de
+  // orquestradores (k8s, Railway, Render, Fly).
+  app.setGlobalPrefix('api/v1', {
+    exclude: [
+      { path: 'health', method: RequestMethod.GET },
+      { path: 'ready', method: RequestMethod.GET },
+    ],
+  });
 
   app.use(helmet());
   app.use(compression());
@@ -83,13 +93,5 @@ async function bootstrap() {
   logger.log(`Zuno API a correr em http://localhost:${port}/api/v1`);
   logger.log(`Ambiente: ${process.env.NODE_ENV ?? 'development'}`);
 }
-
-async function shutdown(signal: string) {
-  await flushSentry();
-  process.exit(signal === 'uncaughtException' ? 1 : 0);
-}
-
-process.once('SIGINT', () => void shutdown('SIGINT'));
-process.once('SIGTERM', () => void shutdown('SIGTERM'));
 
 void bootstrap();

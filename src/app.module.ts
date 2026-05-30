@@ -20,6 +20,7 @@ import { AuditModule } from './shared/audit/audit.module';
 import { DatabaseModule } from './shared/db/database.module';
 import { LoggerModule } from './shared/logger/logger.module';
 import { NotificationsModule } from './shared/notifications/notifications.module';
+import { SentryModule } from './shared/sentry/sentry.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { NotificationsModule } from './shared/notifications/notifications.module
       isGlobal: true,
     }),
     LoggerModule,
+    SentryModule,
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([
       {
