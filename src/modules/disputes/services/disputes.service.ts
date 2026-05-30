@@ -30,7 +30,7 @@ const DISPUTE_FULL_INCLUDE = {
       startDate: true,
       endDate: true,
       clientId: true,
-      ownerId: true,
+      providerId: true,
     },
   },
   serviceBooking: {
@@ -112,7 +112,7 @@ export class DisputesService {
       );
     }
 
-    if (booking.clientId !== userId && booking.ownerId !== userId) {
+    if (booking.clientId !== userId && booking.providerId !== userId) {
       throw new ForbiddenException(
         'Não tens permissão para abrir disputa nesta reserva.',
       );
@@ -279,7 +279,7 @@ export class DisputesService {
             OR: [
               { openedBy: userId },
               { booking: { clientId: userId } },
-              { booking: { ownerId: userId } },
+              { booking: { providerId: userId } },
               { serviceBooking: { clientId: userId } },
               { serviceBooking: { providerId: userId } },
             ],
@@ -349,13 +349,13 @@ export class DisputesService {
   }
 
   private disputeParties(dispute: {
-    booking?: { clientId: string; ownerId: string } | null;
+    booking?: { clientId: string; providerId: string } | null;
     serviceBooking?: { clientId: string; providerId: string } | null;
   }): { clientId: string | null; providerId: string | null } {
     if (dispute.booking) {
       return {
         clientId: dispute.booking.clientId,
-        providerId: dispute.booking.ownerId,
+        providerId: dispute.booking.providerId,
       };
     }
     if (dispute.serviceBooking) {
@@ -371,7 +371,7 @@ export class DisputesService {
     const dispute = await this.prisma.dispute.findUnique({
       where: { id: disputeId },
       include: {
-        booking: { select: { ownerId: true } },
+        booking: { select: { providerId: true } },
         serviceBooking: { select: { providerId: true } },
       },
     });
@@ -390,7 +390,7 @@ export class DisputesService {
     }
 
     const providerId =
-      dispute.booking?.ownerId ?? dispute.serviceBooking?.providerId ?? null;
+      dispute.booking?.providerId ?? dispute.serviceBooking?.providerId ?? null;
 
     if (!providerId) {
       throw new BadRequestException('Disputa sem reserva associada.');

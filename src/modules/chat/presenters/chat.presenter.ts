@@ -1,14 +1,15 @@
 type ConversationEntity = {
   id: string;
   clientId: string;
-  ownerId: string;
+  /** Renomeado de ownerId (coluna DB ainda "ownerId"). */
+  providerId: string;
   equipmentId: string | null;
   serviceId?: string | null;
   lastMessage: string | null;
   lastMessageAt: Date | null;
   createdAt: Date;
   client: { id: string; name: string; avatarUrl: string | null };
-  owner: { id: string; name: string; avatarUrl: string | null };
+  provider: { id: string; name: string; avatarUrl: string | null };
   equipment: { id: string; title: string; photos: { url: string }[] } | null;
   service?: { id: string; title: string; photos: { url: string }[] } | null;
   _count?: { messages: number };
@@ -26,7 +27,7 @@ type MessageEntity = {
 
 export class ChatPresenter {
   static toConversation(conv: ConversationEntity, currentUserId: string) {
-    const other = conv.clientId === currentUserId ? conv.owner : conv.client;
+    const other = conv.clientId === currentUserId ? conv.provider : conv.client;
     const subject = conv.equipment ?? conv.service ?? null;
 
     return {

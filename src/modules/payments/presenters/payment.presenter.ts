@@ -3,11 +3,13 @@ type PaymentListEntity = {
   bookingId: string | null;
   serviceBookingId?: string | null;
   clientId: string;
-  ownerId: string;
+  /** Renomeado em código a partir de ownerId (coluna DB ainda "ownerId"). */
+  providerId: string;
   rentalAmount: unknown;
   depositAmount: unknown;
   platformFee: unknown;
   totalCharged: unknown;
+  /** Mantido como ownerPayout — contrato externo (recibos, M-Pesa). */
   ownerPayout: unknown;
   currency: string;
   method: string;
@@ -38,7 +40,7 @@ type PaymentListEntity = {
     name: string;
     avatarUrl: string | null;
   };
-  owner?: {
+  provider?: {
     id: string;
     name: string;
     avatarUrl: string | null;
@@ -111,13 +113,23 @@ export class PaymentPresenter {
             avatarUrl: payment.client.avatarUrl,
           }
         : undefined,
-      owner: payment.owner
+      // Backward compat: expõe ambos owner+provider e ownerId+providerId
+      owner: payment.provider
         ? {
-            id: payment.owner.id,
-            name: payment.owner.name,
-            avatarUrl: payment.owner.avatarUrl,
+            id: payment.provider.id,
+            name: payment.provider.name,
+            avatarUrl: payment.provider.avatarUrl,
           }
         : undefined,
+      provider: payment.provider
+        ? {
+            id: payment.provider.id,
+            name: payment.provider.name,
+            avatarUrl: payment.provider.avatarUrl,
+          }
+        : undefined,
+      ownerId: payment.providerId,
+      providerId: payment.providerId,
     };
   }
 
@@ -168,13 +180,23 @@ export class PaymentPresenter {
             avatarUrl: payment.client.avatarUrl,
           }
         : undefined,
-      owner: payment.owner
+      // Backward compat: expõe ambos owner+provider e ownerId+providerId
+      owner: payment.provider
         ? {
-            id: payment.owner.id,
-            name: payment.owner.name,
-            avatarUrl: payment.owner.avatarUrl,
+            id: payment.provider.id,
+            name: payment.provider.name,
+            avatarUrl: payment.provider.avatarUrl,
           }
         : undefined,
+      provider: payment.provider
+        ? {
+            id: payment.provider.id,
+            name: payment.provider.name,
+            avatarUrl: payment.provider.avatarUrl,
+          }
+        : undefined,
+      ownerId: payment.providerId,
+      providerId: payment.providerId,
       dispute: payment.dispute
         ? {
             id: payment.dispute.id,

@@ -68,7 +68,7 @@ export class ReviewsService {
       select: {
         id: true,
         clientId: true,
-        ownerId: true,
+        providerId: true,
         equipmentId: true,
         status: true,
       },
@@ -86,7 +86,7 @@ export class ReviewsService {
 
     this.assertAuthorRole(userId, dto.authorRole, {
       clientId: booking.clientId,
-      providerId: booking.ownerId,
+      providerId: booking.providerId,
     });
 
     const existing = await this.prisma.review.findFirst({
@@ -119,7 +119,7 @@ export class ReviewsService {
 
       if (dto.authorRole === ReviewAuthorRole.CLIENT) {
         await this.recalculateEquipmentRating(tx, booking.equipmentId);
-        await this.recalculateUserRating(tx, booking.ownerId);
+        await this.recalculateUserRating(tx, booking.providerId);
       } else {
         await this.recalculateUserRating(tx, booking.clientId);
       }
@@ -281,7 +281,7 @@ export class ReviewsService {
   async canReview(userId: string, bookingId: string) {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      select: { id: true, clientId: true, ownerId: true, status: true },
+      select: { id: true, clientId: true, providerId: true, status: true },
     });
 
     if (!booking) {
@@ -292,7 +292,7 @@ export class ReviewsService {
       userId,
       participants: {
         clientId: booking.clientId,
-        providerId: booking.ownerId,
+        providerId: booking.providerId,
       },
       statusAllowed: REVIEWABLE_BOOKING_STATUSES.includes(booking.status),
       existingReviewWhere: { bookingId, authorId: userId },
@@ -502,7 +502,7 @@ export class ReviewsService {
           // (2) Reviews de clientes a equipamentos deste provider
           {
             authorRole: ReviewAuthorRole.CLIENT,
-            booking: { is: { ownerId: userId } },
+            booking: { is: { providerId: userId } },
           },
           // (3) Reviews de clientes a serviços deste provider
           {

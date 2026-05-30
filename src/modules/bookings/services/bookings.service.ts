@@ -86,7 +86,7 @@ export class BookingsService {
             data: {
               clientId,
               equipmentId: equipment.id,
-              ownerId: equipment.ownerId,
+              providerId: equipment.ownerId,
               startDate: normalizedStartDate,
               endDate: normalizedEndDate,
               totalDays,
@@ -100,7 +100,7 @@ export class BookingsService {
             },
             include: {
               client: { select: { id: true, name: true, avatarUrl: true } },
-              owner: { select: { id: true, name: true, avatarUrl: true } },
+              provider: { select: { id: true, name: true, avatarUrl: true } },
               equipment: { select: { id: true, title: true, location: true, status: true } },
             },
           });
@@ -116,7 +116,7 @@ export class BookingsService {
         amount: totalAmount,
         metadata: {
           equipmentId: equipment.id,
-          ownerId: equipment.ownerId,
+          providerId: equipment.ownerId,
           startDate: booking.startDate,
           endDate: booking.endDate,
           totalDays,
@@ -163,7 +163,7 @@ export class BookingsService {
         where, skip, take: limit, orderBy: { createdAt: 'desc' },
         include: {
           equipment: { select: { id: true, title: true, location: true, status: true } },
-          owner: { select: { id: true, name: true, avatarUrl: true } },
+          provider: { select: { id: true, name: true, avatarUrl: true } },
         },
       }),
       this.prisma.booking.count({ where }),
@@ -187,7 +187,7 @@ export class BookingsService {
     const where: Prisma.BookingWhereInput =
       user.role === UserRole.ADMIN
         ? { ...(query.status ? { status: query.status } : {}) }
-        : { ownerId: userId, ...(query.status ? { status: query.status } : {}) };
+        : { providerId: userId, ...(query.status ? { status: query.status } : {}) };
 
     const [items, total] = await Promise.all([
       this.prisma.booking.findMany({
@@ -212,7 +212,7 @@ export class BookingsService {
   where: { id: bookingId },
   include: {
     client: { select: { id: true, name: true, avatarUrl: true } },
-    owner: { select: { id: true, name: true, avatarUrl: true } },
+    provider: { select: { id: true, name: true, avatarUrl: true } },
     equipment: {
       select: { id: true, title: true, description: true, location: true, status: true, pricePerDay: true, depositAmount: true },
     },
@@ -231,7 +231,7 @@ export class BookingsService {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true } });
     if (!user) throw new NotFoundException('Utilizador não encontrado.');
 
-    const canView = user.role === UserRole.ADMIN || booking.clientId === userId || booking.ownerId === userId;
+    const canView = user.role === UserRole.ADMIN || booking.clientId === userId || booking.providerId === userId;
     if (!canView) throw new ForbiddenException('Não tens permissão para ver esta reserva.');
 
     return {
@@ -246,7 +246,7 @@ export class BookingsService {
       include: {
         equipment: { select: { id: true, status: true, isAvailable: true, title: true } },
         client: { select: { id: true, name: true, pushToken: true } },
-        owner: { select: { id: true, name: true } },
+        provider: { select: { id: true, name: true } },
       },
     });
 
@@ -255,7 +255,7 @@ export class BookingsService {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true } });
     if (!user) throw new NotFoundException('Utilizador não encontrado.');
 
-    const canConfirm = user.role === UserRole.ADMIN || booking.ownerId === userId;
+    const canConfirm = user.role === UserRole.ADMIN || booking.providerId === userId;
     if (!canConfirm) throw new ForbiddenException('Não tens permissão para confirmar esta reserva.');
     if (booking.status !== BookingStatus.PENDING) throw new BadRequestException('Apenas reservas pendentes podem ser confirmadas.');
     if (booking.equipment.status !== EquipmentStatus.ACTIVE) throw new BadRequestException('Não é possível confirmar uma reserva de equipamento inativo.');
@@ -278,7 +278,7 @@ export class BookingsService {
         data: { status: BookingStatus.CONFIRMED, confirmedAt: new Date() },
         include: {
           client: { select: { id: true, name: true, avatarUrl: true } },
-          owner: { select: { id: true, name: true, avatarUrl: true } },
+          provider: { select: { id: true, name: true, avatarUrl: true } },
           equipment: { select: { id: true, title: true, location: true, status: true } },
         },
       }),
@@ -307,7 +307,7 @@ export class BookingsService {
       this.push.send({
         to: booking.client.pushToken,
         title: '✅ Reserva confirmada',
-        body: `${booking.owner.name} confirmou a tua reserva de "${booking.equipment.title}"`,
+        body: `${booking.provider.name} confirmou a tua reserva de "${booking.equipment.title}"`,
         data: { type: 'booking', bookingId: booking.id },
       }).catch(() => {});
     }
@@ -324,7 +324,7 @@ export class BookingsService {
       include: {
         equipment: { select: { id: true, title: true, location: true, status: true, isAvailable: true } },
         client: { select: { id: true, name: true, avatarUrl: true, pushToken: true } },
-        owner: { select: { id: true, name: true, avatarUrl: true, pushToken: true } },
+        provider: { select: { id: true, name: true, avatarUrl: true, pushToken: true } },
       },
     });
 
@@ -333,7 +333,7 @@ export class BookingsService {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true } });
     if (!user) throw new NotFoundException('Utilizador não encontrado.');
 
-    const canCancel = user.role === UserRole.ADMIN || booking.clientId === userId || booking.ownerId === userId;
+    const canCancel = user.role === UserRole.ADMIN || booking.clientId === userId || booking.providerId === userId;
     if (!canCancel) throw new ForbiddenException('Não tens permissão para cancelar esta reserva.');
 
     if (booking.status !== BookingStatus.PENDING && booking.status !== BookingStatus.CONFIRMED) {
@@ -350,7 +350,7 @@ export class BookingsService {
         data: { status: BookingStatus.CANCELLED, cancelledAt: new Date(), cancellationReason },
         include: {
           client: { select: { id: true, name: true, avatarUrl: true } },
-          owner: { select: { id: true, name: true, avatarUrl: true } },
+          provider: { select: { id: true, name: true, avatarUrl: true } },
           equipment: { select: { id: true, title: true, location: true, status: true } },
         },
       }),
@@ -377,9 +377,9 @@ export class BookingsService {
     });
 
     // Notifica o outro interveniente
-    if (cancelledByClient && booking.owner.pushToken) {
+    if (cancelledByClient && booking.provider.pushToken) {
       this.push.send({
-        to: booking.owner.pushToken,
+        to: booking.provider.pushToken,
         title: '❌ Reserva cancelada',
         body: `${booking.client.name} cancelou a reserva de "${booking.equipment.title}"`,
         data: { type: 'booking', bookingId: booking.id },
@@ -388,7 +388,7 @@ export class BookingsService {
       this.push.send({
         to: booking.client.pushToken,
         title: '❌ Reserva cancelada',
-        body: `${booking.owner.name} cancelou a tua reserva de "${booking.equipment.title}"`,
+        body: `${booking.provider.name} cancelou a tua reserva de "${booking.equipment.title}"`,
         data: { type: 'booking', bookingId: booking.id },
       }).catch(() => {});
     }
@@ -405,7 +405,7 @@ export class BookingsService {
       include: {
         equipment: { select: { id: true, title: true } },
         client: { select: { id: true, name: true, avatarUrl: true, pushToken: true } },
-        owner: { select: { id: true, name: true, avatarUrl: true } },
+        provider: { select: { id: true, name: true, avatarUrl: true } },
       },
     });
 
@@ -414,7 +414,7 @@ export class BookingsService {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true } });
     if (!user) throw new NotFoundException('Utilizador não encontrado.');
 
-    const canComplete = user.role === UserRole.ADMIN || booking.ownerId === userId;
+    const canComplete = user.role === UserRole.ADMIN || booking.providerId === userId;
     if (!canComplete) throw new ForbiddenException('Não tens permissão para concluir esta reserva.');
     if (booking.status !== BookingStatus.CONFIRMED) throw new BadRequestException('Apenas reservas confirmadas podem ser concluídas.');
 
@@ -424,7 +424,7 @@ export class BookingsService {
         data: { status: BookingStatus.COMPLETED },
         include: {
           client: { select: { id: true, name: true, avatarUrl: true } },
-          owner: { select: { id: true, name: true, avatarUrl: true } },
+          provider: { select: { id: true, name: true, avatarUrl: true } },
           equipment: { select: { id: true, title: true, location: true, status: true } },
         },
       }),

@@ -36,7 +36,7 @@ const SERVICE_SELECT = {
 
 const CONVERSATION_INCLUDE = {
   client: { select: USER_SELECT },
-  owner: { select: USER_SELECT },
+  provider: { select: USER_SELECT },
   equipment: { select: EQUIPMENT_SELECT },
   service: { select: SERVICE_SELECT },
 } as const;
@@ -72,7 +72,7 @@ export class ChatService {
     const existing = await this.prisma.conversation.findFirst({
       where: {
         clientId,
-        ownerId: target.providerId,
+        providerId: target.providerId,
         equipmentId: target.equipmentId,
         serviceId: target.serviceId,
       },
@@ -101,7 +101,7 @@ export class ChatService {
       const conversation = await tx.conversation.create({
         data: {
           clientId,
-          ownerId: target.providerId,
+          providerId: target.providerId,
           equipmentId: target.equipmentId,
           serviceId: target.serviceId,
           lastMessage: dto.firstMessage,
@@ -196,7 +196,7 @@ export class ChatService {
   async findMyConversations(userId: string) {
     const conversations = await this.prisma.conversation.findMany({
       where: {
-        OR: [{ clientId: userId }, { ownerId: userId }],
+        OR: [{ clientId: userId }, { providerId: userId }],
       },
       orderBy: { lastMessageAt: 'desc' },
       include: CONVERSATION_INCLUDE,
@@ -223,7 +223,7 @@ export class ChatService {
     if (!conversation) throw new NotFoundException('Conversa não encontrada.');
 
     const isParticipant =
-      conversation.clientId === userId || conversation.ownerId === userId;
+      conversation.clientId === userId || conversation.providerId === userId;
 
     if (!isParticipant) throw new ForbiddenException('Não tens acesso a esta conversa.');
 
@@ -277,13 +277,13 @@ export class ChatService {
 
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { id: true, clientId: true, ownerId: true },
+      select: { id: true, clientId: true, providerId: true },
     });
 
     if (!conversation) throw new NotFoundException('Conversa não encontrada.');
 
     const isParticipant =
-      conversation.clientId === senderId || conversation.ownerId === senderId;
+      conversation.clientId === senderId || conversation.providerId === senderId;
 
     if (!isParticipant) throw new ForbiddenException('Não tens acesso a esta conversa.');
 
@@ -302,7 +302,7 @@ export class ChatService {
 
     // Notifica o destinatário
     const recipientId = conversation.clientId === senderId
-      ? conversation.ownerId
+      ? conversation.providerId
       : conversation.clientId;
 
     const recipient = await this.prisma.user.findUnique({
@@ -326,7 +326,7 @@ export class ChatService {
     const count = await this.prisma.message.count({
       where: {
         conversation: {
-          OR: [{ clientId: userId }, { ownerId: userId }],
+          OR: [{ clientId: userId }, { providerId: userId }],
         },
         senderId: { not: userId },
         isRead: false,
