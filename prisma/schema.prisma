@@ -131,6 +131,10 @@ model Equipment {
   @@index([isAvailable])
   @@index([condition])
   @@index([operatorAvailable])
+  // Suportam ORDER BY no catalogo (sortBy=newest/lowest_price/highest_price)
+  // e filtros de intervalo de preco. Sem isto, ORDER BY faz full scan.
+  @@index([createdAt])
+  @@index([pricePerDay])
 }
 
 model EquipmentPhoto {
