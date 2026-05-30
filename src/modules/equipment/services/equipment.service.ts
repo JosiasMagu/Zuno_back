@@ -15,6 +15,7 @@ import {
 
 import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { VerificationsService } from '../../verifications/services/verifications.service';
 import { CreateEquipmentDto } from '../dto/create-equipment.dto';
 import {
   EquipmentSortBy,
@@ -55,6 +56,7 @@ export class EquipmentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly verifications: VerificationsService,
   ) { }
 
   // Criar equipamento
@@ -82,10 +84,13 @@ export class EquipmentService {
       throw new BadRequestException('Categoria não encontrada ou inativa.');
     }
 
-    // Flag de dev/staging: AUTO_APPROVE_EQUIPMENT=true publica equipamentos
-    // directamente como ACTIVE, contornando a moderação ADMIN. Em produção,
-    // deixar desligado para preservar o fluxo de revisão.
-    const autoApprove = process.env.AUTO_APPROVE_EQUIPMENT === 'true';
+    // Auto-aprovação acontece em 2 cenários:
+    //   1. Dev/staging com AUTO_APPROVE_EQUIPMENT=true (bypass total)
+    //   2. Producer já KYC-VERIFIED → confiamos nele para publicar directamente
+    //      sem fila de moderação.
+    const envFlag = process.env.AUTO_APPROVE_EQUIPMENT === 'true';
+    const isVerifiedProvider = await this.verifications.isVerified(ownerId);
+    const autoApprove = envFlag || isVerifiedProvider;
 
     const equipment = await this.prisma.equipment.create({
       data: {

@@ -15,7 +15,8 @@ export interface AuditEntry {
     | 'ServiceBooking'
     | 'ServiceRequest'
     | 'ServiceQuote'
-    | 'User';
+    | 'User'
+    | 'UserVerification';
   targetId: string;
   amount?: number | string | Prisma.Decimal | null;
   metadata?: Record<string, unknown>;

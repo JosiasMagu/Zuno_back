@@ -16,6 +16,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { ServicesModule } from './modules/services/services.module';
 import { UsersModule } from './modules/users/users.module';
+import { VerificationsModule } from './modules/verifications/verifications.module';
 import { AuditModule } from './shared/audit/audit.module';
 import { DatabaseModule } from './shared/db/database.module';
 import { IdempotencyModule } from './common/idempotency/idempotency.module';
@@ -54,6 +55,7 @@ import { SentryModule } from './shared/sentry/sentry.module';
     ReviewsModule,
     ChatModule,
     PushModule,
+    VerificationsModule,
   ],
   controllers: [],
   providers: [

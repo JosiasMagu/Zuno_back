@@ -44,6 +44,7 @@ model User {
   providedQuotes          ServiceQuote[]     @relation("ProvidedQuotes")
   clientServiceBookings   ServiceBooking[]   @relation("ClientServiceBookings")
   providerServiceBookings ServiceBooking[]   @relation("ProviderServiceBookings")
+  verification            UserVerification?
 
   @@index([role])
   @@index([isActive])
@@ -584,6 +585,23 @@ enum AuditAction {
   // User moderation (admin)
   USER_SUSPENDED
   USER_REACTIVATED
+
+  // KYC / verificação de identidade
+  USER_KYC_SUBMITTED
+  USER_KYC_APPROVED
+  USER_KYC_REJECTED
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum DocumentType {
+  BI
+  PASSAPORTE
+  CARTA_CONDUCAO
 }
 
 enum CategoryKind {
@@ -691,4 +709,27 @@ model AuditLog {
   @@index([action])
   @@index([targetType, targetId])
   @@index([createdAt])
+}
+
+// KYC / Verificação de identidade do utilizador. Um utilizador pode
+// (ainda) só ter uma submissão activa de cada vez (@unique em userId).
+// Quando aprovada, providers verificados podem ter os equipamentos
+// auto-aprovados sem passar pela moderação manual do admin.
+model UserVerification {
+  id               String             @id @default(uuid())
+  userId           String             @unique
+  status           VerificationStatus @default(PENDING)
+  documentType     DocumentType
+  documentFrontUrl String
+  documentBackUrl  String?
+  selfieUrl        String
+  submittedAt      DateTime           @default(now())
+  reviewedAt       DateTime?
+  reviewedBy       String?
+  rejectionReason  String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([submittedAt])
 }
