@@ -92,6 +92,20 @@ export class EquipmentController {
 
   // Listings do utilizador autenticado — qualquer autenticado
 
+  @Get('me/analytics')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Dashboard analítico do provider',
+    description:
+      'Agregados sobre os equipamentos do utilizador: counts por status, bookings por status, receita acumulada (charged + payout), rating médio.',
+  })
+  @ApiResponse({ status: 200, description: 'Analytics obtidos com sucesso.' })
+  @ApiResponse({ status: 401, description: 'Não autenticado.' })
+  getMyAnalytics(@CurrentUser() user: { id: string }) {
+    return this.equipmentService.getProviderAnalytics(user.id);
+  }
+
   @Get('me/listings')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')

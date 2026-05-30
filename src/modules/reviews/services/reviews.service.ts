@@ -12,6 +12,7 @@ import {
 } from '@prisma/client';
 
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { PushService } from '../../../shared/push/push.service';
 import { CreateReviewDto } from '../dto/create-review.dto';
 import { FindReviewsQueryDto } from '../dto/find-reviews-query.dto';
 import { ReviewPresenter } from '../presenters/review.presenter';
@@ -36,7 +37,31 @@ type TxClient = Prisma.TransactionClient;
 
 @Injectable()
 export class ReviewsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly push: PushService,
+  ) {}
+
+  private async notifyReviewTarget(
+    targetUserId: string,
+    rating: number,
+    reviewId: string,
+  ): Promise<void> {
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { pushToken: true },
+    });
+    if (!target?.pushToken) return;
+    const stars = '⭐'.repeat(Math.min(5, Math.max(1, Math.round(rating))));
+    this.push
+      .send({
+        to: target.pushToken,
+        title: 'Nova avaliação recebida',
+        body: `${stars} ${rating.toFixed(1)} estrelas.`,
+        data: { type: 'review_received', reviewId, rating },
+      })
+      .catch(() => {});
+  }
 
   async create(userId: string, dto: CreateReviewDto) {
     const hasBooking = Boolean(dto.bookingId);
@@ -127,6 +152,13 @@ export class ReviewsService {
       return created;
     });
 
+    // Push: avisa quem foi avaliado
+    const targetUserId =
+      dto.authorRole === ReviewAuthorRole.CLIENT
+        ? booking.providerId
+        : booking.clientId;
+    void this.notifyReviewTarget(targetUserId, dto.rating, review.id);
+
     return {
       message: 'Avaliação submetida com sucesso.',
       data: ReviewPresenter.toItem(review),
@@ -201,6 +233,13 @@ export class ReviewsService {
 
       return created;
     });
+
+    // Push: avisa quem foi avaliado
+    const targetUserId =
+      dto.authorRole === ReviewAuthorRole.CLIENT
+        ? booking.providerId
+        : booking.clientId;
+    void this.notifyReviewTarget(targetUserId, dto.rating, review.id);
 
     return {
       message: 'Avaliação submetida com sucesso.',

@@ -15,6 +15,7 @@ import {
 
 import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { PushService } from '../../../shared/push/push.service';
 import { VerificationsService } from '../../verifications/services/verifications.service';
 import { CreateEquipmentDto } from '../dto/create-equipment.dto';
 import {
@@ -57,6 +58,7 @@ export class EquipmentService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly verifications: VerificationsService,
+    private readonly push: PushService,
   ) { }
 
   // Criar equipamento
@@ -300,6 +302,82 @@ export class EquipmentService {
 
   // Listings do owner / admin
 
+  /**
+   * Dashboard analítico do provider. Agregações sobre os seus equipamentos,
+   * bookings e payouts. Filtra por ownerId (Equipment continua a usar
+   * ownerId; outras tabelas usam providerId após o refactor).
+   */
+  async getProviderAnalytics(userId: string) {
+    const [equipmentByStatus, bookingsByStatus, payouts, ratingAgg] =
+      await Promise.all([
+        this.prisma.equipment.groupBy({
+          by: ['status'],
+          where: { ownerId: userId },
+          _count: { _all: true },
+        }),
+        this.prisma.booking.groupBy({
+          by: ['status'],
+          where: { providerId: userId },
+          _count: { _all: true },
+        }),
+        this.prisma.payment.aggregate({
+          where: { providerId: userId },
+          _sum: { ownerPayout: true, totalCharged: true },
+          _count: { _all: true },
+        }),
+        this.prisma.user.findUnique({
+          where: { id: userId },
+          select: { totalRating: true, totalReviews: true },
+        }),
+      ]);
+
+    const bucketBy = <T extends string>(
+      rows: Array<{ status: T; _count: { _all: number } }>,
+    ): Record<string, number> =>
+      rows.reduce<Record<string, number>>((acc, r) => {
+        acc[r.status] = r._count._all;
+        return acc;
+      }, {});
+
+    const eqBuckets = bucketBy(equipmentByStatus);
+    const bkBuckets = bucketBy(bookingsByStatus);
+    const totalEquipment = Object.values(eqBuckets).reduce((a, b) => a + b, 0);
+    const totalBookings = Object.values(bkBuckets).reduce((a, b) => a + b, 0);
+
+    return {
+      message: 'Analytics obtidos com sucesso.',
+      data: {
+        equipment: {
+          total: totalEquipment,
+          active: eqBuckets.ACTIVE ?? 0,
+          pendingReview: eqBuckets.PENDING_REVIEW ?? 0,
+          paused: eqBuckets.PAUSED ?? 0,
+          rejected: eqBuckets.REJECTED ?? 0,
+          deleted: eqBuckets.DELETED ?? 0,
+        },
+        bookings: {
+          total: totalBookings,
+          pending: bkBuckets.PENDING ?? 0,
+          confirmed: bkBuckets.CONFIRMED ?? 0,
+          active: bkBuckets.ACTIVE ?? 0,
+          completed: bkBuckets.COMPLETED ?? 0,
+          cancelled: bkBuckets.CANCELLED ?? 0,
+          disputed: bkBuckets.DISPUTED ?? 0,
+        },
+        revenue: {
+          currency: 'MZN',
+          totalPayments: payouts._count._all,
+          totalCharged: Number(payouts._sum.totalCharged ?? 0),
+          totalPayout: Number(payouts._sum.ownerPayout ?? 0),
+        },
+        rating: {
+          average: ratingAgg?.totalRating ? Number(ratingAgg.totalRating) : null,
+          totalReviews: ratingAgg?.totalReviews ?? 0,
+        },
+      },
+    };
+  }
+
   async findMyListings(
     userId: string,
     query: { page?: number; limit?: number } = {},
@@ -385,7 +463,9 @@ export class EquipmentService {
         isAvailable: true,
       },
       include: {
-        owner: { select: OWNER_SELECT },
+        owner: {
+          select: { ...OWNER_SELECT, pushToken: true },
+        },
         category: { select: CATEGORY_SELECT },
         photos: { orderBy: PHOTOS_ORDER },
       },
@@ -398,6 +478,18 @@ export class EquipmentService {
       targetId: equipmentId,
       metadata: { previousStatus: equipment.status, title: updated.title },
     });
+
+    // Notifica o provider — equipment publicado
+    if (updated.owner?.pushToken) {
+      this.push
+        .send({
+          to: updated.owner.pushToken,
+          title: '✅ Equipamento aprovado',
+          body: `"${updated.title}" já está visível no catálogo público.`,
+          data: { type: 'equipment_approved', equipmentId },
+        })
+        .catch(() => {});
+    }
 
     return {
       message: 'Equipamento aprovado com sucesso.',
