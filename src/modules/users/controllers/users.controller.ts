@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { UserRole } from '@prisma/client';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -9,9 +10,12 @@ import {
 } from '@nestjs/swagger';
 
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
+import { Roles } from '../../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../auth/guards/roles.guard';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { SavePushTokenDto } from '../dto/save-push-token.dto';
+import { SuspendUserDto } from '../dto/suspend-user.dto';
 import { UsersService } from '../services/users.service';
 
 @ApiTags('Users')
@@ -62,5 +66,47 @@ export class UsersController {
   @ApiResponse({ status: 404, description: 'Utilizador não encontrado.' })
   getPublicProfile(@Param('id') id: string) {
     return this.usersService.getPublicProfile(id);
+  }
+
+  // ─── Moderação de utilizadores (ADMIN) ────────────────────────────────────
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Patch(':id/suspend')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: '[ADMIN] Suspender utilizador',
+    description:
+      'Define isActive=false. O utilizador deixa de poder autenticar e a sua sessão actual é invalidada nas próximas operações. Suspender ADMINs por esta via não é permitido.',
+  })
+  @ApiParam({ name: 'id', description: 'ID do utilizador a suspender' })
+  @ApiBody({ type: SuspendUserDto })
+  @ApiResponse({ status: 200, description: 'Utilizador suspenso com sucesso.' })
+  @ApiResponse({ status: 400, description: 'Já suspenso, conta admin, ou auto-suspensão.' })
+  @ApiResponse({ status: 403, description: 'Sem permissão.' })
+  @ApiResponse({ status: 404, description: 'Utilizador não encontrado.' })
+  suspend(
+    @CurrentUser() admin: { id: string },
+    @Param('id') id: string,
+    @Body() dto: SuspendUserDto,
+  ) {
+    return this.usersService.suspend(admin.id, id, dto.reason);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Patch(':id/reactivate')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: '[ADMIN] Reactivar utilizador suspenso',
+    description: 'Restaura isActive=true.',
+  })
+  @ApiParam({ name: 'id', description: 'ID do utilizador a reactivar' })
+  @ApiResponse({ status: 200, description: 'Utilizador reactivado com sucesso.' })
+  @ApiResponse({ status: 400, description: 'Utilizador já está activo.' })
+  @ApiResponse({ status: 403, description: 'Sem permissão.' })
+  @ApiResponse({ status: 404, description: 'Utilizador não encontrado.' })
+  reactivate(@CurrentUser() admin: { id: string }, @Param('id') id: string) {
+    return this.usersService.reactivate(admin.id, id);
   }
 }

@@ -580,6 +580,10 @@ enum AuditAction {
   SERVICE_BOOKING_STARTED
   SERVICE_BOOKING_COMPLETED
   SERVICE_BOOKING_CANCELLED
+
+  // User moderation (admin)
+  USER_SUSPENDED
+  USER_REACTIVATED
 }
 
 enum CategoryKind {
