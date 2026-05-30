@@ -15,6 +15,7 @@ import {
 import { AuditService } from '../../../shared/audit/audit.service';
 import { calculatePlatformFee } from '../../../shared/constants/fees';
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { MetricsService } from '../../../shared/metrics/metrics.service';
 import { PushService } from '../../../shared/push/push.service';
 import { CreateBookingDto } from '../dto/create-booking.dto';
 import { FindBookingsQueryDto } from '../dto/find-bookings-query.dto';
@@ -27,6 +28,7 @@ export class BookingsService {
     private readonly prisma: PrismaService,
     private readonly push: PushService,
     private readonly audit: AuditService,
+    private readonly metrics: MetricsService,
   ) {}
 
   async create(clientId: string, dto: CreateBookingDto) {
@@ -122,6 +124,8 @@ export class BookingsService {
           totalDays,
         },
       });
+
+      this.metrics.businessEvents.inc({ event: 'booking_created' });
 
       // Notifica o owner — nova reserva
       if (equipment.owner.pushToken) {
@@ -301,6 +305,8 @@ export class BookingsService {
         endDate: booking.endDate,
       },
     });
+
+    this.metrics.businessEvents.inc({ event: 'booking_confirmed' });
 
     // Notifica o cliente — reserva confirmada
     if (booking.client.pushToken) {

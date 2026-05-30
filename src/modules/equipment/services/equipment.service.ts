@@ -15,6 +15,7 @@ import {
 
 import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { MetricsService } from '../../../shared/metrics/metrics.service';
 import { PushService } from '../../../shared/push/push.service';
 import { VerificationsService } from '../../verifications/services/verifications.service';
 import { CreateEquipmentDto } from '../dto/create-equipment.dto';
@@ -59,6 +60,7 @@ export class EquipmentService {
     private readonly audit: AuditService,
     private readonly verifications: VerificationsService,
     private readonly push: PushService,
+    private readonly metrics: MetricsService,
   ) { }
 
   // Criar equipamento
@@ -479,6 +481,8 @@ export class EquipmentService {
       metadata: { previousStatus: equipment.status, title: updated.title },
     });
 
+    this.metrics.businessEvents.inc({ event: 'equipment_approved' });
+
     // Notifica o provider — equipment publicado
     if (updated.owner?.pushToken) {
       this.push
@@ -595,6 +599,19 @@ export class EquipmentService {
         owner: { select: OWNER_SELECT },
         category: { select: CATEGORY_SELECT },
         photos: { orderBy: PHOTOS_ORDER },
+      },
+    });
+
+    await this.audit.record({
+      action: AuditAction.EQUIPMENT_AVAILABILITY_TOGGLED,
+      actorId: userId,
+      targetType: 'Equipment',
+      targetId: equipmentId,
+      metadata: {
+        actorRole: user.role,
+        from: equipment.isAvailable,
+        to: updated.isAvailable,
+        title: updated.title,
       },
     });
 

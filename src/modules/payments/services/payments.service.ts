@@ -15,6 +15,7 @@ import {
 import * as crypto from 'crypto';
 
 import { AuditService } from '../../../shared/audit/audit.service';
+import { MetricsService } from '../../../shared/metrics/metrics.service';
 import { calculateProviderPayout } from '../../../shared/constants/fees';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { InitiatePaymentDto } from '../dto/initiate-payment.dto';
@@ -26,6 +27,7 @@ export class PaymentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly metrics: MetricsService,
   ) {}
 
   async initiate(userId: string, bookingId: string, dto: InitiatePaymentDto) {
@@ -587,6 +589,8 @@ export class PaymentsService {
       targetId: updatedPayment.id,
       amount: updatedPayment.ownerPayout,
     });
+
+    this.metrics.businessEvents.inc({ event: 'payment_released' });
 
     return {
       message: 'Pagamento liberado com sucesso.',

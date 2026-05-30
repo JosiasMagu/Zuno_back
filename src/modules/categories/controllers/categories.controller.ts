@@ -20,6 +20,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
+import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
@@ -41,8 +42,8 @@ export class CategoriesController {
   @ApiResponse({ status: 201, description: 'Categoria criada com sucesso.' })
   @ApiResponse({ status: 400, description: 'Dados inválidos.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
-  create(@Body() dto: CreateCategoryDto) {
-    return this.categoriesService.create(dto);
+  create(@CurrentUser() admin: { id: string }, @Body() dto: CreateCategoryDto) {
+    return this.categoriesService.create(admin.id, dto);
   }
 
   @Get()
@@ -82,8 +83,12 @@ export class CategoriesController {
   @ApiResponse({ status: 400, description: 'Dados inválidos.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Categoria não encontrada.' })
-  update(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
-    return this.categoriesService.update(id, dto);
+  update(
+    @CurrentUser() admin: { id: string },
+    @Param('id') id: string,
+    @Body() dto: UpdateCategoryDto,
+  ) {
+    return this.categoriesService.update(admin.id, id, dto);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -96,7 +101,7 @@ export class CategoriesController {
   @ApiResponse({ status: 400, description: 'Operação inválida.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Categoria não encontrada.' })
-  remove(@Param('id') id: string) {
-    return this.categoriesService.remove(id);
+  remove(@CurrentUser() admin: { id: string }, @Param('id') id: string) {
+    return this.categoriesService.remove(admin.id, id);
   }
 }

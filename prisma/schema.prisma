@@ -590,6 +590,14 @@ enum AuditAction {
   USER_KYC_SUBMITTED
   USER_KYC_APPROVED
   USER_KYC_REJECTED
+
+  // Gaps de cobertura — provider/admin ops menos críticas mas auditáveis
+  EQUIPMENT_AVAILABILITY_TOGGLED
+  SERVICE_REMOVED
+  CATEGORY_CREATED
+  CATEGORY_UPDATED
+  CATEGORY_DEACTIVATED
+  CATEGORY_REACTIVATED
 }
 
 enum VerificationStatus {

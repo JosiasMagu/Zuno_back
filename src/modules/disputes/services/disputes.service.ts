@@ -15,6 +15,7 @@ import {
 } from '@prisma/client';
 
 import { AuditService } from '../../../shared/audit/audit.service';
+import { MetricsService } from '../../../shared/metrics/metrics.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { CreateDisputeDto } from '../dto/create-dispute.dto';
 import { FindDisputesQueryDto } from '../dto/find-disputes-query.dto';
@@ -59,6 +60,7 @@ export class DisputesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly metrics: MetricsService,
   ) {}
 
   async create(userId: string, dto: CreateDisputeDto) {
@@ -150,6 +152,8 @@ export class DisputesService {
       });
     });
 
+    this.metrics.businessEvents.inc({ event: 'dispute_opened' });
+
     await this.audit.record({
       action: AuditAction.DISPUTE_OPENED,
       actorId: userId,
@@ -234,6 +238,8 @@ export class DisputesService {
         include: DISPUTE_FULL_INCLUDE,
       });
     });
+
+    this.metrics.businessEvents.inc({ event: 'dispute_opened' });
 
     await this.audit.record({
       action: AuditAction.DISPUTE_OPENED,

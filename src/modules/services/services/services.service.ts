@@ -562,6 +562,17 @@ export class ServicesService {
       data: { status: ServiceStatus.DELETED, isActive: false },
     });
 
+    await this.audit.record({
+      action: AuditAction.SERVICE_REMOVED,
+      actorId: userId,
+      targetType: 'Service',
+      targetId: id,
+      metadata: {
+        actorRole: user.role,
+        providerWasSelf: existing.providerId === userId,
+      },
+    });
+
     return { message: 'Serviço removido com sucesso.' };
   }
 

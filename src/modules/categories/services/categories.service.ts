@@ -3,17 +3,21 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CategoryKind, Prisma } from '@prisma/client';
+import { AuditAction, CategoryKind, Prisma } from '@prisma/client';
 
+import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { CreateCategoryDto } from '../dto/create-category.dto';
 import { UpdateCategoryDto } from '../dto/update-category.dto';
 
 @Injectable()
 export class CategoriesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
-  async create(dto: CreateCategoryDto) {
+  async create(adminId: string, dto: CreateCategoryDto) {
     const name = dto.name.trim();
     const slug = this.slugify(name);
     const iconUrl = dto.iconUrl?.trim() || null;
@@ -65,6 +69,14 @@ export class CategoriesService {
           },
         },
       },
+    });
+
+    await this.audit.record({
+      action: AuditAction.CATEGORY_CREATED,
+      actorId: adminId,
+      targetType: 'Category',
+      targetId: category.id,
+      metadata: { name: category.name, slug: category.slug, kind: category.kind },
     });
 
     return {
@@ -147,7 +159,7 @@ export class CategoriesService {
     };
   }
 
-  async update(id: string, dto: UpdateCategoryDto) {
+  async update(adminId: string, id: string, dto: UpdateCategoryDto) {
     const existingCategory = await this.prisma.category.findUnique({
       where: { id },
     });
@@ -243,13 +255,25 @@ export class CategoriesService {
       },
     });
 
+    await this.audit.record({
+      action: AuditAction.CATEGORY_UPDATED,
+      actorId: adminId,
+      targetType: 'Category',
+      targetId: category.id,
+      metadata: {
+        name: category.name,
+        slug: category.slug,
+        changedFields: Object.keys(data),
+      },
+    });
+
     return {
       message: 'Categoria atualizada com sucesso.',
       data: category,
     };
   }
 
-  async remove(id: string) {
+  async remove(adminId: string, id: string) {
     const existingCategory = await this.prisma.category.findUnique({
       where: { id },
       include: {
@@ -286,6 +310,14 @@ export class CategoriesService {
       data: {
         isActive: false,
       },
+    });
+
+    await this.audit.record({
+      action: AuditAction.CATEGORY_DEACTIVATED,
+      actorId: adminId,
+      targetType: 'Category',
+      targetId: id,
+      metadata: { name: existingCategory.name, slug: existingCategory.slug },
     });
 
     return {
