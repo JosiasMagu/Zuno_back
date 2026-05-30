@@ -10,6 +10,8 @@ export interface AuditEntry {
     | 'Payment'
     | 'Dispute'
     | 'Booking'
+    | 'Equipment'
+    | 'Service'
     | 'ServiceBooking'
     | 'ServiceRequest'
     | 'ServiceQuote';

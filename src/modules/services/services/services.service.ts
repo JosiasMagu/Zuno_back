@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditAction,
   CategoryKind,
   Prisma,
   ServicePricingType,
@@ -12,6 +13,7 @@ import {
   UserRole,
 } from '@prisma/client';
 
+import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { CreateServiceDto } from '../dto/create-service.dto';
 import {
@@ -49,7 +51,10 @@ const PHOTOS_ORDER = [
 
 @Injectable()
 export class ServicesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   async create(providerId: string, dto: CreateServiceDto) {
     const categoryId = dto.categoryId.trim();
@@ -275,8 +280,6 @@ export class ServicesService {
   }
 
   async approve(adminId: string, serviceId: string) {
-    void adminId;
-
     const service = await this.prisma.service.findUnique({
       where: { id: serviceId },
       select: { id: true, status: true },
@@ -306,6 +309,14 @@ export class ServicesService {
       },
     });
 
+    await this.audit.record({
+      action: AuditAction.SERVICE_APPROVED,
+      actorId: adminId,
+      targetType: 'Service',
+      targetId: serviceId,
+      metadata: { previousStatus: service.status, title: updated.title },
+    });
+
     return {
       message: 'Serviço aprovado com sucesso.',
       data: ServicePresenter.toProviderListingItem(updated),
@@ -313,8 +324,6 @@ export class ServicesService {
   }
 
   async reject(adminId: string, serviceId: string, reason?: string) {
-    void adminId;
-
     const service = await this.prisma.service.findUnique({
       where: { id: serviceId },
       select: { id: true, status: true },
@@ -341,6 +350,18 @@ export class ServicesService {
         provider: { select: PROVIDER_SELECT },
         category: { select: CATEGORY_SELECT },
         photos: { orderBy: PHOTOS_ORDER },
+      },
+    });
+
+    await this.audit.record({
+      action: AuditAction.SERVICE_REJECTED,
+      actorId: adminId,
+      targetType: 'Service',
+      targetId: serviceId,
+      metadata: {
+        previousStatus: service.status,
+        title: updated.title,
+        reason: reason ?? null,
       },
     });
 

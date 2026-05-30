@@ -5,12 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditAction,
   EquipmentCondition,
   EquipmentStatus,
   Prisma,
   UserRole,
 } from '@prisma/client';
 
+import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { CreateEquipmentDto } from '../dto/create-equipment.dto';
 import {
@@ -49,7 +51,10 @@ const PHOTOS_ORDER = [
 
 @Injectable()
 export class EquipmentService {
-  constructor(private readonly prisma: PrismaService) { }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) { }
 
   // Criar equipamento
 
@@ -295,8 +300,6 @@ export class EquipmentService {
   // na assinatura para futura escrita no AuditLog.
 
   async approve(adminId: string, equipmentId: string) {
-    void adminId;
-
     const equipment = await this.prisma.equipment.findUnique({
       where: { id: equipmentId },
       select: { id: true, status: true },
@@ -329,6 +332,14 @@ export class EquipmentService {
       },
     });
 
+    await this.audit.record({
+      action: AuditAction.EQUIPMENT_APPROVED,
+      actorId: adminId,
+      targetType: 'Equipment',
+      targetId: equipmentId,
+      metadata: { previousStatus: equipment.status, title: updated.title },
+    });
+
     return {
       message: 'Equipamento aprovado com sucesso.',
       data: EquipmentPresenter.toOwnerListingItem(updated),
@@ -338,8 +349,6 @@ export class EquipmentService {
   // Rejeitar equipamento (ADMIN)
 
   async reject(adminId: string, equipmentId: string, reason?: string) {
-    void adminId;
-
     const equipment = await this.prisma.equipment.findUnique({
       where: { id: equipmentId },
       select: { id: true, status: true },
@@ -369,6 +378,18 @@ export class EquipmentService {
         owner: { select: OWNER_SELECT },
         category: { select: CATEGORY_SELECT },
         photos: { orderBy: PHOTOS_ORDER },
+      },
+    });
+
+    await this.audit.record({
+      action: AuditAction.EQUIPMENT_REJECTED,
+      actorId: adminId,
+      targetType: 'Equipment',
+      targetId: equipmentId,
+      metadata: {
+        previousStatus: equipment.status,
+        title: updated.title,
+        reason: reason ?? null,
       },
     });
 
@@ -540,6 +561,17 @@ export class EquipmentService {
       data: {
         status: EquipmentStatus.DELETED,
         isAvailable: false,
+      },
+    });
+
+    await this.audit.record({
+      action: AuditAction.EQUIPMENT_REMOVED,
+      actorId: userId,
+      targetType: 'Equipment',
+      targetId: id,
+      metadata: {
+        actorRole: user.role,
+        ownerWasSelf: existingEquipment.ownerId === userId,
       },
     });
 

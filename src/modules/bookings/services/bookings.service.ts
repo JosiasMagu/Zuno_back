@@ -5,12 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditAction,
   BookingStatus,
   EquipmentStatus,
   Prisma,
   UserRole,
 } from '@prisma/client';
 
+import { AuditService } from '../../../shared/audit/audit.service';
 import { calculatePlatformFee } from '../../../shared/constants/fees';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { PushService } from '../../../shared/push/push.service';
@@ -24,6 +26,7 @@ export class BookingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly push: PushService,
+    private readonly audit: AuditService,
   ) {}
 
   async create(clientId: string, dto: CreateBookingDto) {
@@ -104,6 +107,21 @@ export class BookingsService {
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 5000 },
       );
+
+      await this.audit.record({
+        action: AuditAction.BOOKING_CREATED,
+        actorId: clientId,
+        targetType: 'Booking',
+        targetId: booking.id,
+        amount: totalAmount,
+        metadata: {
+          equipmentId: equipment.id,
+          ownerId: equipment.ownerId,
+          startDate: booking.startDate,
+          endDate: booking.endDate,
+          totalDays,
+        },
+      });
 
       // Notifica o owner — nova reserva
       if (equipment.owner.pushToken) {
@@ -270,6 +288,20 @@ export class BookingsService {
       }),
     ]);
 
+    await this.audit.record({
+      action: AuditAction.BOOKING_CONFIRMED,
+      actorId: userId,
+      targetType: 'Booking',
+      targetId: bookingId,
+      metadata: {
+        actorRole: user.role,
+        equipmentId: booking.equipmentId,
+        clientId: booking.clientId,
+        startDate: booking.startDate,
+        endDate: booking.endDate,
+      },
+    });
+
     // Notifica o cliente — reserva confirmada
     if (booking.client.pushToken) {
       this.push.send({
@@ -329,6 +361,20 @@ export class BookingsService {
         }),
       ] : []),
     ]);
+
+    await this.audit.record({
+      action: AuditAction.BOOKING_CANCELLED,
+      actorId: userId,
+      targetType: 'Booking',
+      targetId: bookingId,
+      metadata: {
+        actorRole: user.role,
+        cancelledByClient,
+        wasConfirmed,
+        reason: cancellationReason,
+        equipmentId: booking.equipmentId,
+      },
+    });
 
     // Notifica o outro interveniente
     if (cancelledByClient && booking.owner.pushToken) {
