@@ -98,6 +98,7 @@ describe('Happy Path E2E — equipment rental full flow', () => {
     const createBookingRes = await request(httpServer)
       .post('/api/v1/bookings')
       .set(authHeader(clientAuth.accessToken))
+      .set('Idempotency-Key', 'e2e-happy-path-booking-create')
       .send({
         equipmentId,
         startDate: startDate.toISOString(),

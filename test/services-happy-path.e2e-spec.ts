@@ -240,16 +240,16 @@ describe('Happy Path E2E — service request → booking → escrow → review',
     expect(finalPayment?.serviceBookingId).toBe(serviceBookingId);
     expect(finalPayment?.bookingId).toBeNull();
 
-    // Provider rating é actualizado apenas por reviews com targetId === providerId
-    // (PROVIDER -> CLIENT reviews). O review do CLIENT tem targetId === serviceId,
-    // pelo que o rating do provider permanece null (mesmo comportamento que o
-    // fluxo de equipamento).
+    // Provider rating: actualmente recalculateUserRating agrega tambem reviews
+    // de clientes nos serviços/equipamentos do provider (via serviceBooking.providerId
+    // ou booking.providerId), nao só reviews directos (targetId === providerId).
+    // Isto reflecte a satisfacao total do provider — bug do backlog item 7 corrigido.
     const finalProvider = await prisma.user.findUnique({
       where: { id: seed.provider.id },
       select: { totalRating: true, totalReviews: true },
     });
-    expect(finalProvider?.totalRating).toBeNull();
-    expect(finalProvider?.totalReviews).toBe(0);
+    expect(Number(finalProvider?.totalRating)).toBe(5);
+    expect(finalProvider?.totalReviews).toBe(1);
 
     const finalClient = await prisma.user.findUnique({
       where: { id: seed.client.id },
