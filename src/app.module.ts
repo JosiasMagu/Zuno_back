@@ -21,6 +21,7 @@ import { AuditModule } from './shared/audit/audit.module';
 import { DatabaseModule } from './shared/db/database.module';
 import { IdempotencyModule } from './common/idempotency/idempotency.module';
 import { LoggerModule } from './shared/logger/logger.module';
+import { MetricsModule } from './shared/metrics/metrics.module';
 import { NotificationsModule } from './shared/notifications/notifications.module';
 import { SentryModule } from './shared/sentry/sentry.module';
 
@@ -31,6 +32,7 @@ import { SentryModule } from './shared/sentry/sentry.module';
     }),
     LoggerModule,
     SentryModule,
+    MetricsModule,
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([
       {
