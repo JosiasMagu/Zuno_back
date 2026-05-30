@@ -256,7 +256,7 @@ export class ServicesService {
   }
 
   async findPending(adminId: string) {
-    await this.assertAdmin(adminId);
+    void adminId;
 
     const items = await this.prisma.service.findMany({
       where: { status: ServiceStatus.PENDING_REVIEW },
@@ -275,7 +275,7 @@ export class ServicesService {
   }
 
   async approve(adminId: string, serviceId: string) {
-    await this.assertAdmin(adminId);
+    void adminId;
 
     const service = await this.prisma.service.findUnique({
       where: { id: serviceId },
@@ -313,7 +313,7 @@ export class ServicesService {
   }
 
   async reject(adminId: string, serviceId: string, reason?: string) {
-    await this.assertAdmin(adminId);
+    void adminId;
 
     const service = await this.prisma.service.findUnique({
       where: { id: serviceId },
@@ -535,19 +535,6 @@ export class ServicesService {
     });
 
     return { message: 'Serviço removido com sucesso.' };
-  }
-
-  private async assertAdmin(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, role: true },
-    });
-
-    if (!user || user.role !== UserRole.ADMIN) {
-      throw new ForbiddenException(
-        'Não tens permissão para executar esta operação.',
-      );
-    }
   }
 
   private buildOrderBy(

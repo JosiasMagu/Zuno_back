@@ -236,7 +236,14 @@ export class EquipmentService {
 
   // Listings do owner / admin
 
-  async findMyListings(userId: string) {
+  async findMyListings(
+    userId: string,
+    query: { page?: number; limit?: number } = {},
+  ) {
+    const page = query.page && query.page > 0 ? query.page : 1;
+    const limit = query.limit && query.limit > 0 ? query.limit : 50;
+    const skip = (page - 1) * limit;
+
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, role: true },
@@ -252,26 +259,43 @@ export class EquipmentService {
         ? { status: { not: EquipmentStatus.DELETED } }
         : { ownerId: userId, status: { not: EquipmentStatus.DELETED } };
 
-    const items = await this.prisma.equipment.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        owner: { select: OWNER_SELECT },
-        category: { select: CATEGORY_SELECT },
-        photos: { orderBy: PHOTOS_ORDER },
-      },
-    });
+    const [items, total] = await Promise.all([
+      this.prisma.equipment.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          owner: { select: OWNER_SELECT },
+          category: { select: CATEGORY_SELECT },
+          photos: { orderBy: PHOTOS_ORDER },
+        },
+      }),
+      this.prisma.equipment.count({ where }),
+    ]);
+
+    const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
 
     return {
       message: 'Equipamentos obtidos com sucesso.',
       data: items.map((item) => EquipmentPresenter.toOwnerListingItem(item)),
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+      },
     };
   }
 
   // Aprovar equipamento (ADMIN)
+  // Permissão garantida pelo RolesGuard no controller; `adminId` mantido
+  // na assinatura para futura escrita no AuditLog.
 
   async approve(adminId: string, equipmentId: string) {
-    await this.assertAdmin(adminId);
+    void adminId;
 
     const equipment = await this.prisma.equipment.findUnique({
       where: { id: equipmentId },
@@ -314,7 +338,7 @@ export class EquipmentService {
   // Rejeitar equipamento (ADMIN)
 
   async reject(adminId: string, equipmentId: string, reason?: string) {
-    await this.assertAdmin(adminId);
+    void adminId;
 
     const equipment = await this.prisma.equipment.findUnique({
       where: { id: equipmentId },
@@ -525,7 +549,7 @@ export class EquipmentService {
   }
 
   async findPending(adminId: string) {
-    await this.assertAdmin(adminId);
+    void adminId;
 
     const items = await this.prisma.equipment.findMany({
       where: { status: EquipmentStatus.PENDING_REVIEW },
@@ -541,19 +565,6 @@ export class EquipmentService {
       message: 'Equipamentos pendentes de revisão obtidos com sucesso.',
       data: items.map((item) => EquipmentPresenter.toOwnerListingItem(item)),
     };
-  }
-
-  private async assertAdmin(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, role: true },
-    });
-
-    if (!user || user.role !== UserRole.ADMIN) {
-      throw new ForbiddenException(
-        'Não tens permissão para executar esta operação.',
-      );
-    }
   }
 
   private buildOrderBy(

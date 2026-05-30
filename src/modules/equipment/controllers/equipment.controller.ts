@@ -29,6 +29,7 @@ import {
   EquipmentSortBy,
   FindEquipmentQueryDto,
 } from '../dto/find-equipment-query.dto';
+import { FindMyListingsQueryDto } from '../dto/find-my-listings-query.dto';
 import { UpdateEquipmentDto } from '../dto/update-equipment.dto';
 import { RejectEquipmentDto } from '../dto/reject-equipment.dto';
 import { EquipmentService } from '../services/equipment.service';
@@ -94,12 +95,18 @@ export class EquipmentController {
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Listar os meus equipamentos',
-    description: 'PROVIDER vê os seus. ADMIN vê todos.',
+    description:
+      'PROVIDER vê os seus, ADMIN vê todos. Paginado: defaults page=1, limit=50 (máx 100).',
   })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 50 })
   @ApiResponse({ status: 200, description: 'Equipamentos obtidos com sucesso.' })
   @ApiResponse({ status: 401, description: 'Não autenticado.' })
-  findMyListings(@CurrentUser() user: { id: string }) {
-    return this.equipmentService.findMyListings(user.id);
+  findMyListings(
+    @CurrentUser() user: { id: string },
+    @Query() query: FindMyListingsQueryDto,
+  ) {
+    return this.equipmentService.findMyListings(user.id, query);
   }
 
   // Equipamentos pendentes de revisão (ADMIN)

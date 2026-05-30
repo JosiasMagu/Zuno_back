@@ -474,9 +474,43 @@ export class ReviewsService {
     });
   }
 
+  /**
+   * Recalcula a média de avaliações de um utilizador.
+   *
+   * Um utilizador pode ser avaliado de várias formas:
+   *
+   *  1. **Como cliente** — quando um provider deixa uma review sobre ele
+   *     (`targetId === userId`, `authorRole === OWNER`).
+   *
+   *  2. **Como provider de equipamentos** — clientes deixam reviews onde
+   *     `targetId === equipmentId`. Para refletir a satisfação total do
+   *     provider, agregamos sobre todas as reviews cujo booking tem
+   *     `ownerId === userId`.
+   *
+   *  3. **Como provider de serviços** — análogo, via
+   *     `serviceBooking.providerId === userId`.
+   *
+   * Antes esta função só considerava (1), pelo que o rating do provider
+   * nunca subia no fluxo normal (não há review com `targetId === providerId`).
+   */
   private async recalculateUserRating(tx: TxClient, userId: string) {
     const result = await tx.review.aggregate({
-      where: { targetId: userId },
+      where: {
+        OR: [
+          // (1) Avaliações directas (provider → cliente)
+          { targetId: userId },
+          // (2) Reviews de clientes a equipamentos deste provider
+          {
+            authorRole: ReviewAuthorRole.CLIENT,
+            booking: { is: { ownerId: userId } },
+          },
+          // (3) Reviews de clientes a serviços deste provider
+          {
+            authorRole: ReviewAuthorRole.CLIENT,
+            serviceBooking: { is: { providerId: userId } },
+          },
+        ],
+      },
       _avg: { rating: true },
       _count: { rating: true },
     });
