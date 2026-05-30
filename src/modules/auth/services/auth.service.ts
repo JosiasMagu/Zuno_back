@@ -9,6 +9,8 @@ import { AuthSession, UserRole, VerificationPurpose } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import type { StringValue } from 'ms';
 
+import { ApiErrors } from '../../../common/exceptions/api.exception';
+import { ErrorCode } from '../../../common/exceptions/error-codes';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import {
   ChangePasswordDto,
@@ -222,12 +224,20 @@ export class AuthService {
       where: { phone },
     });
 
+    // Devolvemos o mesmo erro para "utilizador não existe" e "senha errada"
+    // — evita revelar a quem invasores quais números têm conta.
     if (!user) {
-      throw new UnauthorizedException('Credenciais inválidas.');
+      throw ApiErrors.unauthorized(
+        ErrorCode.AUTH_INVALID_CREDENTIALS,
+        'Credenciais inválidas.',
+      );
     }
 
     if (!user.isActive) {
-      throw new UnauthorizedException('Conta desativada.');
+      throw ApiErrors.forbidden(
+        ErrorCode.FORBIDDEN,
+        'Conta desativada.',
+      );
     }
 
     const passwordMatches = await bcrypt.compare(
@@ -236,7 +246,10 @@ export class AuthService {
     );
 
     if (!passwordMatches) {
-      throw new UnauthorizedException('Credenciais inválidas.');
+      throw ApiErrors.unauthorized(
+        ErrorCode.AUTH_INVALID_CREDENTIALS,
+        'Credenciais inválidas.',
+      );
     }
 
     const tokens = await this.generateTokens(user.id, user.phone, user.role);
