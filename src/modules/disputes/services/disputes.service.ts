@@ -66,7 +66,7 @@ export class DisputesService {
   async create(userId: string, dto: CreateDisputeDto) {
     const bookingId = dto.bookingId?.trim();
     const serviceBookingId = dto.serviceBookingId?.trim();
-    const paymentId = dto.paymentId.trim();
+    const paymentId = dto.paymentId!.trim();
 
     if ((!bookingId && !serviceBookingId) || (bookingId && serviceBookingId)) {
       throw new BadRequestException(
@@ -143,8 +143,9 @@ export class DisputesService {
           bookingId: booking.id,
           paymentId: payment.id,
           openedBy: userId,
-          reason: dto.reason,
-          description: dto.description.trim(),
+          reason: dto.reason!,
+          description: dto.description!.trim(),
+          evidenceUrls: dto.evidenceUrls ?? [],
           status: DisputeStatus.AWAITING_OWNER,
           ownerDeadline: this.buildOwnerDeadline(),
         },
@@ -230,8 +231,9 @@ export class DisputesService {
           serviceBookingId: booking.id,
           paymentId: payment.id,
           openedBy: userId,
-          reason: dto.reason,
-          description: dto.description.trim(),
+          reason: dto.reason!,
+          description: dto.description!.trim(),
+          evidenceUrls: dto.evidenceUrls ?? [],
           status: DisputeStatus.AWAITING_OWNER,
           ownerDeadline: this.buildOwnerDeadline(),
         },

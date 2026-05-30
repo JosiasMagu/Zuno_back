@@ -92,4 +92,11 @@ export class CloudinaryService {
       );
     }
   }
+
+  async uploadDisputeEvidence(
+    file: Express.Multer.File,
+    disputeId: string,
+  ): Promise<{ url: string; publicId: string }> {
+    return this.upload(file, `zuno/disputes/${disputeId}`);
+  }
 }

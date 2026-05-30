@@ -148,6 +148,18 @@ export class CreateEquipmentDto {
   operatorAvailable?: boolean;
 
   @ApiPropertyOptional({
+    example: 3,
+    description: 'Número de unidades disponíveis deste equipamento',
+    minimum: 1,
+    default: 1,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  quantity?: number;
+
+  @ApiPropertyOptional({
     enum: EquipmentCondition,
     example: EquipmentCondition.GOOD,
     description: 'Estado de conservação do equipamento',

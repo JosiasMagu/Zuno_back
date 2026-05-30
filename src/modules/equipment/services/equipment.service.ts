@@ -26,7 +26,6 @@ import {
 import { UpdateEquipmentDto } from '../dto/update-equipment.dto';
 import { EquipmentPresenter } from '../presenters/equipment.presenter';
 
-// Selector reutilizado nos includes de owner e category
 const OWNER_SELECT = {
   id: true,
   name: true,
@@ -63,12 +62,8 @@ export class EquipmentService {
     private readonly metrics: MetricsService,
   ) { }
 
-  // Criar equipamento
-
-
   async create(ownerId: string, dto: CreateEquipmentDto) {
     const categoryId = dto.categoryId.trim();
-    // Promove automaticamente CLIENT → PROVIDER ao criar primeiro equipamento
     const owner = await this.prisma.user.findUnique({
       where: { id: ownerId },
       select: { role: true },
@@ -80,6 +75,7 @@ export class EquipmentService {
         data: { role: UserRole.PROVIDER },
       });
     }
+
     const category = await this.prisma.category.findFirst({
       where: { id: categoryId, isActive: true },
     });
@@ -88,13 +84,11 @@ export class EquipmentService {
       throw new BadRequestException('Categoria não encontrada ou inativa.');
     }
 
-    // Auto-aprovação acontece em 2 cenários:
-    //   1. Dev/staging com AUTO_APPROVE_EQUIPMENT=true (bypass total)
-    //   2. Producer já KYC-VERIFIED → confiamos nele para publicar directamente
-    //      sem fila de moderação.
     const envFlag = process.env.AUTO_APPROVE_EQUIPMENT === 'true';
     const isVerifiedProvider = await this.verifications.isVerified(ownerId);
     const autoApprove = envFlag || isVerifiedProvider;
+
+    const quantity = dto.quantity && dto.quantity > 0 ? dto.quantity : 1;
 
     const equipment = await this.prisma.equipment.create({
       data: {
@@ -115,6 +109,9 @@ export class EquipmentService {
         status: autoApprove
           ? EquipmentStatus.ACTIVE
           : EquipmentStatus.PENDING_REVIEW,
+        isAvailable: autoApprove,
+        quantity,
+        availableQuantity: quantity,
       },
       include: {
         owner: { select: OWNER_SELECT },
@@ -130,8 +127,6 @@ export class EquipmentService {
       data: EquipmentPresenter.toOwnerListingItem(equipment),
     };
   }
-
-  // Listar equipamentos (publico, so ACTIVE)
 
   async findAll(query: FindEquipmentQueryDto) {
     const page = query.page ?? 1;
@@ -194,10 +189,6 @@ export class EquipmentService {
       where.isAvailable = query.onlyAvailableNow;
     }
 
-    // Filtro por janela de disponibilidade: exclui equipamentos com
-    // bookings (PENDING/CONFIRMED/ACTIVE) que se sobrepõem ao intervalo
-    // [availableFrom, availableTo]. Overlap: existing.start < requested.end
-    // && existing.end > requested.start.
     if (query.availableFrom && query.availableTo) {
       const requestedStart = new Date(query.availableFrom);
       const requestedEnd = new Date(query.availableTo);
@@ -280,8 +271,6 @@ export class EquipmentService {
     };
   }
 
-  // Detalhe publico (so ACTIVE)
-
   async findOne(id: string) {
     const equipment = await this.prisma.equipment.findFirst({
       where: { id, status: EquipmentStatus.ACTIVE },
@@ -302,13 +291,6 @@ export class EquipmentService {
     };
   }
 
-  // Listings do owner / admin
-
-  /**
-   * Dashboard analítico do provider. Agregações sobre os seus equipamentos,
-   * bookings e payouts. Filtra por ownerId (Equipment continua a usar
-   * ownerId; outras tabelas usam providerId após o refactor).
-   */
   async getProviderAnalytics(userId: string) {
     const [equipmentByStatus, bookingsByStatus, payouts, ratingAgg] =
       await Promise.all([
@@ -319,11 +301,11 @@ export class EquipmentService {
         }),
         this.prisma.booking.groupBy({
           by: ['status'],
-          where: { providerId: userId },
+          where: { ownerId: userId },
           _count: { _all: true },
         }),
         this.prisma.payment.aggregate({
-          where: { providerId: userId },
+          where: { ownerId: userId },
           _sum: { ownerPayout: true, totalCharged: true },
           _count: { _all: true },
         }),
@@ -368,9 +350,9 @@ export class EquipmentService {
         },
         revenue: {
           currency: 'MZN',
-          totalPayments: payouts._count._all,
-          totalCharged: Number(payouts._sum.totalCharged ?? 0),
-          totalPayout: Number(payouts._sum.ownerPayout ?? 0),
+          totalPayments: payouts._count?._all ?? 0,
+          totalCharged: Number(payouts._sum?.totalCharged ?? 0),
+          totalPayout: Number(payouts._sum?.ownerPayout ?? 0),
         },
         rating: {
           average: ratingAgg?.totalRating ? Number(ratingAgg.totalRating) : null,
@@ -397,7 +379,6 @@ export class EquipmentService {
       throw new NotFoundException('Utilizador não encontrado.');
     }
 
-    // ADMIN ve todos; OWNER so ve os seus
     const where: Prisma.EquipmentWhereInput =
       user.role === UserRole.ADMIN
         ? { status: { not: EquipmentStatus.DELETED } }
@@ -434,10 +415,6 @@ export class EquipmentService {
     };
   }
 
-  // Aprovar equipamento (ADMIN)
-  // Permissão garantida pelo RolesGuard no controller; `adminId` mantido
-  // na assinatura para futura escrita no AuditLog.
-
   async approve(adminId: string, equipmentId: string) {
     const equipment = await this.prisma.equipment.findUnique({
       where: { id: equipmentId },
@@ -465,9 +442,7 @@ export class EquipmentService {
         isAvailable: true,
       },
       include: {
-        owner: {
-          select: { ...OWNER_SELECT, pushToken: true },
-        },
+        owner: { select: { ...OWNER_SELECT, pushToken: true } },
         category: { select: CATEGORY_SELECT },
         photos: { orderBy: PHOTOS_ORDER },
       },
@@ -483,16 +458,13 @@ export class EquipmentService {
 
     this.metrics.businessEvents.inc({ event: 'equipment_approved' });
 
-    // Notifica o provider — equipment publicado
     if (updated.owner?.pushToken) {
-      this.push
-        .send({
-          to: updated.owner.pushToken,
-          title: '✅ Equipamento aprovado',
-          body: `"${updated.title}" já está visível no catálogo público.`,
-          data: { type: 'equipment_approved', equipmentId },
-        })
-        .catch(() => {});
+      this.push.send({
+        to: updated.owner.pushToken,
+        title: '✅ Equipamento aprovado',
+        body: `"${updated.title}" já está visível no catálogo público.`,
+        data: { type: 'equipment_approved', equipmentId },
+      }).catch(() => {});
     }
 
     return {
@@ -500,8 +472,6 @@ export class EquipmentService {
       data: EquipmentPresenter.toOwnerListingItem(updated),
     };
   }
-
-  // Rejeitar equipamento (ADMIN)
 
   async reject(adminId: string, equipmentId: string, reason?: string) {
     const equipment = await this.prisma.equipment.findUnique({
@@ -555,8 +525,6 @@ export class EquipmentService {
       data: EquipmentPresenter.toOwnerListingItem(updated),
     };
   }
-
-  // Pausar / reactivar equipamento (OWNER ou ADMIN)
 
   async toggleAvailability(userId: string, equipmentId: string) {
     const equipment = await this.prisma.equipment.findUnique({
@@ -622,8 +590,6 @@ export class EquipmentService {
       data: EquipmentPresenter.toOwnerListingItem(updated),
     };
   }
-
-  // Actualizar equipamento (OWNER ou ADMIN)
 
   async update(userId: string, id: string, dto: UpdateEquipmentDto) {
     const existingEquipment = await this.prisma.equipment.findUnique({
@@ -693,8 +659,6 @@ export class EquipmentService {
       data: EquipmentPresenter.toOwnerListingItem(updatedEquipment),
     };
   }
-
-  // Soft delete (OWNER ou ADMIN)
 
   async remove(userId: string, id: string) {
     const existingEquipment = await this.prisma.equipment.findUnique({

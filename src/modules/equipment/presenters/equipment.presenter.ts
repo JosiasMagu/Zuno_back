@@ -7,6 +7,8 @@ type EquipmentListEntity = {
   deliveryIncluded: boolean;
   operatorAvailable: boolean;
   isAvailable: boolean;
+  quantity?: number;
+  availableQuantity?: number;
   condition: string;
   status: string;
   category: {
@@ -61,6 +63,8 @@ export class EquipmentPresenter {
       location: equipment.location,
       pricePerDay: Number(equipment.pricePerDay),
       isAvailable: equipment.isAvailable,
+      quantity: equipment.quantity,
+      availableQuantity: equipment.availableQuantity,
       deliveryIncluded: equipment.deliveryIncluded,
       operatorAvailable: equipment.operatorAvailable,
       condition: equipment.condition,
@@ -99,6 +103,8 @@ export class EquipmentPresenter {
       latitude: toNumber(equipment.latitude),
       longitude: toNumber(equipment.longitude),
       isAvailable: equipment.isAvailable,
+      quantity: equipment.quantity,
+      availableQuantity: equipment.availableQuantity,
       deliveryIncluded: equipment.deliveryIncluded,
       operatorAvailable: equipment.operatorAvailable,
       condition: equipment.condition,
@@ -151,6 +157,8 @@ export class EquipmentPresenter {
       pricePerMonth: toNumber(equipment.pricePerMonth),
       depositAmount: toNumber(equipment.depositAmount),
       isAvailable: equipment.isAvailable,
+      quantity: equipment.quantity,
+      availableQuantity: equipment.availableQuantity,
       deliveryIncluded: equipment.deliveryIncluded,
       operatorAvailable: equipment.operatorAvailable,
       condition: equipment.condition,

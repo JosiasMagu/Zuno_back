@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { DisputeReason } from '@prisma/client';
 import {
+  IsArray,
   IsEnum,
   IsOptional,
   IsString,
@@ -12,8 +13,7 @@ import {
 
 export class CreateDisputeDto {
   @ApiPropertyOptional({
-    description:
-      'ID da reserva de equipamento. Obrigatório se não fornecer serviceBookingId.',
+    description: 'ID da reserva de equipamento. Obrigatório se não fornecer serviceBookingId.',
   })
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
@@ -21,8 +21,7 @@ export class CreateDisputeDto {
   bookingId?: string;
 
   @ApiPropertyOptional({
-    description:
-      'ID da reserva de serviço. Obrigatório se não fornecer bookingId.',
+    description: 'ID da reserva de serviço. Obrigatório se não fornecer bookingId.',
   })
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
@@ -32,16 +31,25 @@ export class CreateDisputeDto {
   @ApiProperty({ description: 'ID do pagamento associado' })
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsUUID()
-  paymentId: string;
+  paymentId?: string;
 
   @ApiProperty({ enum: DisputeReason, example: DisputeReason.DAMAGED })
   @IsEnum(DisputeReason)
-  reason: DisputeReason;
+  reason?: DisputeReason;
 
   @ApiProperty({ minLength: 5, maxLength: 2000 })
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MinLength(5)
   @MaxLength(2000)
-  description: string;
+  description?: string;
+
+  @ApiPropertyOptional({
+    description: 'URLs das fotos de evidência (já carregadas via POST /disputes/upload-evidence)',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  evidenceUrls?: string[];
 }
