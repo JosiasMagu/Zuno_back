@@ -8,6 +8,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { UserRole } from '@prisma/client';
 import {
   ApiBearerAuth,
@@ -39,6 +40,7 @@ export class BookingsController {
   @Post()
   @UseGuards(RolesGuard)
   @Roles(UserRole.CLIENT, UserRole.PROVIDER, UserRole.ADMIN)
+  @Throttle({ global: { ttl: 60_000, limit: 20 } })
   @Idempotent()
   @ApiBearerAuth('access-token')
   @ApiOperation({

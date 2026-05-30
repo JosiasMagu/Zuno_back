@@ -16,6 +16,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
@@ -32,6 +33,7 @@ export class ReviewsController {
 
   @Post('reviews')
   @UseGuards(JwtAuthGuard)
+  @Throttle({ global: { ttl: 60_000, limit: 10 } })
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Submeter avaliação',

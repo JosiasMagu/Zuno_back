@@ -81,6 +81,11 @@ export class EquipmentService {
       throw new BadRequestException('Categoria não encontrada ou inativa.');
     }
 
+    // Flag de dev/staging: AUTO_APPROVE_EQUIPMENT=true publica equipamentos
+    // directamente como ACTIVE, contornando a moderação ADMIN. Em produção,
+    // deixar desligado para preservar o fluxo de revisão.
+    const autoApprove = process.env.AUTO_APPROVE_EQUIPMENT === 'true';
+
     const equipment = await this.prisma.equipment.create({
       data: {
         ownerId,
@@ -97,7 +102,9 @@ export class EquipmentService {
         deliveryIncluded: dto.deliveryAvailable ?? false,
         operatorAvailable: dto.operatorAvailable ?? false,
         condition: dto.condition ?? EquipmentCondition.GOOD,
-        status: EquipmentStatus.PENDING_REVIEW,
+        status: autoApprove
+          ? EquipmentStatus.ACTIVE
+          : EquipmentStatus.PENDING_REVIEW,
       },
       include: {
         owner: { select: OWNER_SELECT },
@@ -107,8 +114,9 @@ export class EquipmentService {
     });
 
     return {
-      message:
-        'Equipamento criado com sucesso. Aguarda aprovação do administrador.',
+      message: autoApprove
+        ? 'Equipamento criado e publicado com sucesso.'
+        : 'Equipamento criado com sucesso. Aguarda aprovação do administrador.',
       data: EquipmentPresenter.toOwnerListingItem(equipment),
     };
   }

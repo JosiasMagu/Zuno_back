@@ -94,6 +94,9 @@ export class ServicesService {
       );
     }
 
+    // Dev/staging: AUTO_APPROVE_SERVICES=true publica directamente como ACTIVE.
+    const autoApprove = process.env.AUTO_APPROVE_SERVICES === 'true';
+
     const service = await this.prisma.service.create({
       data: {
         providerId,
@@ -108,7 +111,10 @@ export class ServicesService {
         longitude: dto.longitude,
         acceptsUrgent: dto.acceptsUrgent ?? false,
         urgentSurcharge: dto.urgentSurcharge,
-        status: ServiceStatus.PENDING_REVIEW,
+        status: autoApprove
+          ? ServiceStatus.ACTIVE
+          : ServiceStatus.PENDING_REVIEW,
+        isActive: autoApprove,
       },
       include: {
         provider: { select: PROVIDER_SELECT },
@@ -118,8 +124,9 @@ export class ServicesService {
     });
 
     return {
-      message:
-        'Serviço criado com sucesso. Aguarda aprovação do administrador.',
+      message: autoApprove
+        ? 'Serviço criado e publicado com sucesso.'
+        : 'Serviço criado com sucesso. Aguarda aprovação do administrador.',
       data: ServicePresenter.toProviderListingItem(service),
     };
   }

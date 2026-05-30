@@ -19,6 +19,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
@@ -43,6 +44,7 @@ export class EquipmentController {
 
   @UseGuards(JwtAuthGuard)
   @Post()
+  @Throttle({ global: { ttl: 60_000, limit: 10 } })
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Criar equipamento',

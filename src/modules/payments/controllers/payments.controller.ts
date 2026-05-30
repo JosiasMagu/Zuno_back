@@ -18,6 +18,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
@@ -100,6 +101,7 @@ export class PaymentsController {
 
   @Patch(':id/release')
   @Roles(UserRole.CLIENT, UserRole.ADMIN)
+  @Throttle({ global: { ttl: 60_000, limit: 5 } })
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Liberar pagamento retido',
