@@ -31,7 +31,7 @@ const DISPUTE_FULL_INCLUDE = {
       startDate: true,
       endDate: true,
       clientId: true,
-      providerId: true,
+      ownerId: true,
     },
   },
   serviceBooking: {
@@ -114,7 +114,7 @@ export class DisputesService {
       );
     }
 
-    if (booking.clientId !== userId && booking.providerId !== userId) {
+    if (booking.clientId !== userId && booking.ownerId !== userId) {
       throw new ForbiddenException(
         'Não tens permissão para abrir disputa nesta reserva.',
       );
@@ -268,10 +268,7 @@ export class DisputesService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: {
-        id: true,
-        role: true,
-      },
+      select: { id: true, role: true },
     });
 
     if (!user) {
@@ -287,7 +284,7 @@ export class DisputesService {
             OR: [
               { openedBy: userId },
               { booking: { clientId: userId } },
-              { booking: { providerId: userId } },
+              { booking: { ownerId: userId } },
               { serviceBooking: { clientId: userId } },
               { serviceBooking: { providerId: userId } },
             ],
@@ -344,7 +341,7 @@ export class DisputesService {
       user.role === UserRole.ADMIN ||
       dispute.openedBy === userId ||
       parties.clientId === userId ||
-      parties.providerId === userId;
+      parties.ownerId === userId;
 
     if (!canAccess) {
       throw new ForbiddenException('Não tens permissão para ver esta disputa.');
@@ -357,29 +354,29 @@ export class DisputesService {
   }
 
   private disputeParties(dispute: {
-    booking?: { clientId: string; providerId: string } | null;
+    booking?: { clientId: string; ownerId: string } | null;
     serviceBooking?: { clientId: string; providerId: string } | null;
-  }): { clientId: string | null; providerId: string | null } {
+  }): { clientId: string | null; ownerId: string | null } {
     if (dispute.booking) {
       return {
         clientId: dispute.booking.clientId,
-        providerId: dispute.booking.providerId,
+        ownerId: dispute.booking.ownerId,
       };
     }
     if (dispute.serviceBooking) {
       return {
         clientId: dispute.serviceBooking.clientId,
-        providerId: dispute.serviceBooking.providerId,
+        ownerId: dispute.serviceBooking.providerId,
       };
     }
-    return { clientId: null, providerId: null };
+    return { clientId: null, ownerId: null };
   }
 
   async respond(userId: string, disputeId: string, dto: RespondDisputeDto) {
     const dispute = await this.prisma.dispute.findUnique({
       where: { id: disputeId },
       include: {
-        booking: { select: { providerId: true } },
+        booking: { select: { ownerId: true } },
         serviceBooking: { select: { providerId: true } },
       },
     });
@@ -397,14 +394,14 @@ export class DisputesService {
       throw new NotFoundException('Utilizador não encontrado.');
     }
 
-    const providerId =
-      dispute.booking?.providerId ?? dispute.serviceBooking?.providerId ?? null;
+    const ownerId =
+      dispute.booking?.ownerId ?? dispute.serviceBooking?.providerId ?? null;
 
-    if (!providerId) {
+    if (!ownerId) {
       throw new BadRequestException('Disputa sem reserva associada.');
     }
 
-    const canRespond = user.role === UserRole.ADMIN || providerId === userId;
+    const canRespond = user.role === UserRole.ADMIN || ownerId === userId;
 
     if (!canRespond) {
       throw new ForbiddenException(
@@ -754,10 +751,7 @@ export class DisputesService {
   private async assertAdmin(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: {
-        id: true,
-        role: true,
-      },
+      select: { id: true, role: true },
     });
 
     if (!user || user.role !== UserRole.ADMIN) {

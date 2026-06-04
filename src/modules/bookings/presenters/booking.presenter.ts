@@ -1,8 +1,7 @@
 type BookingBaseEntity = {
   id: string;
   clientId: string;
-  /** Renomeado em código a partir de ownerId (coluna DB ainda é "ownerId"). */
-  providerId: string;
+  ownerId: string;
   equipmentId: string;
   startDate: Date;
   endDate: Date;
@@ -33,7 +32,7 @@ type BookingListEntity = BookingBaseEntity & {
     name: string;
     avatarUrl: string | null;
   };
-  provider?: {
+  owner?: {
     id: string;
     name: string;
     avatarUrl: string | null;
@@ -55,7 +54,7 @@ type BookingDetailsEntity = BookingBaseEntity & {
     name: string;
     avatarUrl: string | null;
   };
-  provider: {
+  owner: {
     id: string;
     name: string;
     avatarUrl: string | null;
@@ -76,19 +75,13 @@ function toNumber(value: unknown): number | null {
   return Number(value);
 }
 
-/**
- * Presenters expõem AMBOS `owner`/`ownerId` (legacy) e `provider`/`providerId`
- * (novo) no payload da API. Permite migrar o frontend para o nome semantico
- * sem quebrar clientes antigos. Quando todos os consumidores migrarem,
- * remover os campos legacy num PR isolado.
- */
 export class BookingPresenter {
   static toListItem(booking: BookingListEntity) {
-    const providerPayload = booking.provider
+    const ownerPayload = booking.owner
       ? {
-          id: booking.provider.id,
-          name: booking.provider.name,
-          avatarUrl: booking.provider.avatarUrl,
+          id: booking.owner.id,
+          name: booking.owner.name,
+          avatarUrl: booking.owner.avatarUrl,
         }
       : undefined;
 
@@ -122,19 +115,16 @@ export class BookingPresenter {
             avatarUrl: booking.client.avatarUrl,
           }
         : undefined,
-      // Backward compat: expõe ambos
-      owner: providerPayload,
-      provider: providerPayload,
-      ownerId: booking.providerId,
-      providerId: booking.providerId,
+      owner: ownerPayload,
+      ownerId: booking.ownerId,
     };
   }
 
   static toDetails(booking: BookingDetailsEntity) {
-    const providerPayload = {
-      id: booking.provider.id,
-      name: booking.provider.name,
-      avatarUrl: booking.provider.avatarUrl,
+    const ownerPayload = {
+      id: booking.owner.id,
+      name: booking.owner.name,
+      avatarUrl: booking.owner.avatarUrl,
     };
 
     return {
@@ -168,11 +158,8 @@ export class BookingPresenter {
         name: booking.client.name,
         avatarUrl: booking.client.avatarUrl,
       },
-      // Backward compat: expõe ambos
-      owner: providerPayload,
-      provider: providerPayload,
-      ownerId: booking.providerId,
-      providerId: booking.providerId,
+      owner: ownerPayload,
+      ownerId: booking.ownerId,
       payment: booking.payment ? {
         id: booking.payment.id,
         status: booking.payment.status,

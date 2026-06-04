@@ -344,7 +344,7 @@ export class ServiceQuotesService {
           data: {
             serviceBookingId: booking.id,
             clientId: freshRequest.clientId,
-            providerId: freshQuote.providerId,
+            ownerId: freshQuote.providerId,
             rentalAmount: serviceAmount,
             depositAmount: 0,
             platformFee,

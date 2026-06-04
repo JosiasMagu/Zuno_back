@@ -30,6 +30,7 @@ model User {
 
   sessions                AuthSession[]
   verificationCodes       VerificationCode[]
+  verification    UserVerification?
   equipment               Equipment[]
   clientBookings          Booking[]          @relation("ClientBookings")
   ownerBookings           Booking[]          @relation("OwnerBookings")
@@ -516,6 +517,39 @@ model AuditLog {
   @@index([createdAt])
 }
 
+model IdempotencyKey {
+  id             String   @id @default(uuid())
+  key            String
+  userId         String
+  endpoint       String
+  requestHash    String
+  responseStatus Int      @default(0)
+  responseBody   Json?
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+
+  @@unique([key, userId, endpoint])
+  @@index([expiresAt])
+}
+
+model UserVerification {
+  id               String             @id @default(uuid())
+  userId           String             @unique
+  status           VerificationStatus @default(PENDING)
+  documentType     DocumentType
+  documentFrontUrl String
+  documentBackUrl  String?
+  selfieUrl        String
+  submittedAt      DateTime           @default(now())
+  reviewedAt       DateTime?
+  reviewedBy       String?
+  rejectionReason  String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([submittedAt])
+}
 // ─────────────────────────────────────────────────────────────────────────────
 // ENUMS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -615,6 +649,27 @@ enum AuditAction {
   USER_SUSPENDED
   USER_REACTIVATED
   USER_VERIFIED
+  USER_KYC_SUBMITTED
+  USER_KYC_APPROVED
+  USER_KYC_REJECTED
+  CATEGORY_CREATED
+  CATEGORY_UPDATED
+  CATEGORY_DEACTIVATED
+  SERVICE_APPROVED
+  SERVICE_REJECTED
+  SERVICE_REMOVED
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum DocumentType {
+  BI
+  PASSAPORTE
+  CARTA_CONDUCAO
 }
 
 enum CategoryKind {
@@ -666,3 +721,5 @@ enum VerificationPurpose {
   PHONE_VERIFICATION
   PASSWORD_RESET
 }
+
+

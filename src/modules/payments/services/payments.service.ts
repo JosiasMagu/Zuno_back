@@ -50,7 +50,7 @@ export class PaymentsService {
             avatarUrl: true,
           },
         },
-        provider: {
+        owner: {
           select: {
             id: true,
             name: true,
@@ -101,7 +101,7 @@ export class PaymentsService {
       data: {
         bookingId: booking.id,
         clientId: booking.clientId,
-        providerId: booking.providerId,
+        ownerId: booking.ownerId,
         rentalAmount: booking.rentalAmount,
         depositAmount: booking.depositAmount,
         platformFee: booking.platformFee,
@@ -132,7 +132,7 @@ export class PaymentsService {
             avatarUrl: true,
           },
         },
-        provider: {
+        owner: {
           select: {
             id: true,
             name: true,
@@ -212,7 +212,7 @@ export class PaymentsService {
               scheduledFor: true,
             },
           },
-          provider: {
+          owner: {
             select: {
               id: true,
               name: true,
@@ -274,7 +274,7 @@ export class PaymentsService {
             avatarUrl: true,
           },
         },
-        provider: {
+        owner: {
           select: {
             id: true,
             name: true,
@@ -309,7 +309,7 @@ export class PaymentsService {
     const canView =
       user.role === UserRole.ADMIN ||
       payment.clientId === userId ||
-      payment.providerId === userId;
+      payment.ownerId === userId;
 
     if (!canView) {
       throw new ForbiddenException(
@@ -408,7 +408,7 @@ export class PaymentsService {
             avatarUrl: true,
           },
         },
-        provider: {
+        owner: {
           select: {
             id: true,
             name: true,
@@ -436,7 +436,7 @@ export class PaymentsService {
     const payment = await this.prisma.payment.findUnique({
       where: { id: paymentId },
       include: {
-        booking: { select: { id: true, status: true, providerId: true } },
+        booking: { select: { id: true, status: true, ownerId: true } },
         serviceBooking: {
           select: { id: true, status: true, providerId: true },
         },
@@ -566,7 +566,7 @@ export class PaymentsService {
                 avatarUrl: true,
               },
             },
-            provider: {
+            owner: {
               select: {
                 id: true,
                 name: true,
@@ -702,7 +702,7 @@ export class PaymentsService {
               avatarUrl: true,
             },
           },
-          provider: {
+          owner: {
             select: {
               id: true,
               name: true,
@@ -803,7 +803,7 @@ export class PaymentsService {
     include: {
       booking: { select: { id: true, startDate: true, endDate: true, status: true } },
       client: { select: { id: true, name: true, avatarUrl: true } },
-      provider: { select: { id: true, name: true, avatarUrl: true } },
+      owner: { select: { id: true, name: true, avatarUrl: true } },
     },
   });
 

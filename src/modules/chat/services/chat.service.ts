@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { EquipmentStatus, ServiceStatus, UserRole } from '@prisma/client';
+import { EquipmentStatus, ServiceStatus } from '@prisma/client';
 
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { PushService } from '../../../shared/push/push.service';
@@ -36,7 +36,7 @@ const SERVICE_SELECT = {
 
 const CONVERSATION_INCLUDE = {
   client: { select: USER_SELECT },
-  provider: { select: USER_SELECT },
+  owner: { select: USER_SELECT },
   equipment: { select: EQUIPMENT_SELECT },
   service: { select: SERVICE_SELECT },
 } as const;
@@ -72,7 +72,7 @@ export class ChatService {
     const existing = await this.prisma.conversation.findFirst({
       where: {
         clientId,
-        providerId: target.providerId,
+        ownerId: target.ownerId,
         equipmentId: target.equipmentId,
         serviceId: target.serviceId,
       },
@@ -101,7 +101,7 @@ export class ChatService {
       const conversation = await tx.conversation.create({
         data: {
           clientId,
-          providerId: target.providerId,
+          ownerId: target.ownerId,
           equipmentId: target.equipmentId,
           serviceId: target.serviceId,
           lastMessage: dto.firstMessage,
@@ -122,9 +122,8 @@ export class ChatService {
       return { conversation, msg };
     });
 
-    // Notifica o owner — nova conversa
     const owner = await this.prisma.user.findUnique({
-      where: { id: target.providerId },
+      where: { id: target.ownerId },
       select: USER_SELECT_WITH_TOKEN,
     });
 
@@ -164,7 +163,7 @@ export class ChatService {
     }
 
     return {
-      providerId: equipment.ownerId,
+      ownerId: equipment.ownerId,
       equipmentId: equipment.id,
       serviceId: null,
     };
@@ -187,7 +186,7 @@ export class ChatService {
     }
 
     return {
-      providerId: service.providerId,
+      ownerId: service.providerId,
       equipmentId: null,
       serviceId: service.id,
     };
@@ -196,7 +195,7 @@ export class ChatService {
   async findMyConversations(userId: string) {
     const conversations = await this.prisma.conversation.findMany({
       where: {
-        OR: [{ clientId: userId }, { providerId: userId }],
+        OR: [{ clientId: userId }, { ownerId: userId }],
       },
       orderBy: { lastMessageAt: 'desc' },
       include: CONVERSATION_INCLUDE,
@@ -223,7 +222,7 @@ export class ChatService {
     if (!conversation) throw new NotFoundException('Conversa não encontrada.');
 
     const isParticipant =
-      conversation.clientId === userId || conversation.providerId === userId;
+      conversation.clientId === userId || conversation.ownerId === userId;
 
     if (!isParticipant) throw new ForbiddenException('Não tens acesso a esta conversa.');
 
@@ -277,13 +276,13 @@ export class ChatService {
 
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { id: true, clientId: true, providerId: true },
+      select: { id: true, clientId: true, ownerId: true },
     });
 
     if (!conversation) throw new NotFoundException('Conversa não encontrada.');
 
     const isParticipant =
-      conversation.clientId === senderId || conversation.providerId === senderId;
+      conversation.clientId === senderId || conversation.ownerId === senderId;
 
     if (!isParticipant) throw new ForbiddenException('Não tens acesso a esta conversa.');
 
@@ -300,9 +299,8 @@ export class ChatService {
       }),
     ]);
 
-    // Notifica o destinatário
     const recipientId = conversation.clientId === senderId
-      ? conversation.providerId
+      ? conversation.ownerId
       : conversation.clientId;
 
     const recipient = await this.prisma.user.findUnique({
@@ -326,7 +324,7 @@ export class ChatService {
     const count = await this.prisma.message.count({
       where: {
         conversation: {
-          OR: [{ clientId: userId }, { providerId: userId }],
+          OR: [{ clientId: userId }, { ownerId: userId }],
         },
         senderId: { not: userId },
         isRead: false,

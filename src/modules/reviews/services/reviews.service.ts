@@ -93,7 +93,7 @@ export class ReviewsService {
       select: {
         id: true,
         clientId: true,
-        providerId: true,
+        ownerId: true,
         equipmentId: true,
         status: true,
       },
@@ -111,7 +111,7 @@ export class ReviewsService {
 
     this.assertAuthorRole(userId, dto.authorRole, {
       clientId: booking.clientId,
-      providerId: booking.providerId,
+      providerId: booking.ownerId,
     });
 
     const existing = await this.prisma.review.findFirst({
@@ -144,7 +144,7 @@ export class ReviewsService {
 
       if (dto.authorRole === ReviewAuthorRole.CLIENT) {
         await this.recalculateEquipmentRating(tx, booking.equipmentId);
-        await this.recalculateUserRating(tx, booking.providerId);
+        await this.recalculateUserRating(tx, booking.ownerId);
       } else {
         await this.recalculateUserRating(tx, booking.clientId);
       }
@@ -152,10 +152,9 @@ export class ReviewsService {
       return created;
     });
 
-    // Push: avisa quem foi avaliado
     const targetUserId =
       dto.authorRole === ReviewAuthorRole.CLIENT
-        ? booking.providerId
+        ? booking.ownerId
         : booking.clientId;
     void this.notifyReviewTarget(targetUserId, dto.rating, review.id);
 
@@ -234,7 +233,6 @@ export class ReviewsService {
       return created;
     });
 
-    // Push: avisa quem foi avaliado
     const targetUserId =
       dto.authorRole === ReviewAuthorRole.CLIENT
         ? booking.providerId
@@ -320,7 +318,7 @@ export class ReviewsService {
   async canReview(userId: string, bookingId: string) {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      select: { id: true, clientId: true, providerId: true, status: true },
+      select: { id: true, clientId: true, ownerId: true, status: true },
     });
 
     if (!booking) {
@@ -331,7 +329,7 @@ export class ReviewsService {
       userId,
       participants: {
         clientId: booking.clientId,
-        providerId: booking.providerId,
+        providerId: booking.ownerId,
       },
       statusAllowed: REVIEWABLE_BOOKING_STATUSES.includes(booking.status),
       existingReviewWhere: { bookingId, authorId: userId },
@@ -487,8 +485,8 @@ export class ReviewsService {
     await tx.equipment.update({
       where: { id: equipmentId },
       data: {
-        totalRating: result._avg.rating ?? null,
-        totalReviews: result._count.rating,
+        totalRating: result._avg?.rating ?? null,
+        totalReviews: result._count?.rating ?? 0,
       },
     });
   }
@@ -507,43 +505,21 @@ export class ReviewsService {
     await tx.service.update({
       where: { id: serviceId },
       data: {
-        totalRating: result._avg.rating ?? null,
-        totalReviews: result._count.rating,
+        totalRating: result._avg?.rating ?? null,
+        totalReviews: result._count?.rating ?? 0,
       },
     });
   }
 
-  /**
-   * Recalcula a média de avaliações de um utilizador.
-   *
-   * Um utilizador pode ser avaliado de várias formas:
-   *
-   *  1. **Como cliente** — quando um provider deixa uma review sobre ele
-   *     (`targetId === userId`, `authorRole === OWNER`).
-   *
-   *  2. **Como provider de equipamentos** — clientes deixam reviews onde
-   *     `targetId === equipmentId`. Para refletir a satisfação total do
-   *     provider, agregamos sobre todas as reviews cujo booking tem
-   *     `ownerId === userId`.
-   *
-   *  3. **Como provider de serviços** — análogo, via
-   *     `serviceBooking.providerId === userId`.
-   *
-   * Antes esta função só considerava (1), pelo que o rating do provider
-   * nunca subia no fluxo normal (não há review com `targetId === providerId`).
-   */
   private async recalculateUserRating(tx: TxClient, userId: string) {
     const result = await tx.review.aggregate({
       where: {
         OR: [
-          // (1) Avaliações directas (provider → cliente)
           { targetId: userId },
-          // (2) Reviews de clientes a equipamentos deste provider
           {
             authorRole: ReviewAuthorRole.CLIENT,
-            booking: { is: { providerId: userId } },
+            booking: { is: { ownerId: userId } },
           },
-          // (3) Reviews de clientes a serviços deste provider
           {
             authorRole: ReviewAuthorRole.CLIENT,
             serviceBooking: { is: { providerId: userId } },
@@ -557,8 +533,8 @@ export class ReviewsService {
     await tx.user.update({
       where: { id: userId },
       data: {
-        totalRating: result._avg.rating ?? null,
-        totalReviews: result._count.rating,
+        totalRating: result._avg?.rating ?? null,
+        totalReviews: result._count?.rating ?? 0,
       },
     });
   }
