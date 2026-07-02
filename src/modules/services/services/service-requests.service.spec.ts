@@ -111,11 +111,19 @@ describe('ServiceRequestsService', () => {
       );
     });
 
-    it('rejeita não-cliente (PROVIDER)', async () => {
+    it('permite PROVIDER criar pedido para serviço de terceiros — o papel já não é validado', async () => {
       prisma.user.findUnique.mockResolvedValue(makeProvider());
-      await expect(service.create(PROVIDER_ID, dto)).rejects.toThrow(
-        ForbiddenException,
+      prisma.service.findUnique.mockResolvedValue(
+        makeService({ providerId: 'outro-provider-uuid' }),
       );
+      prisma.serviceRequest.create.mockResolvedValue(
+        makeRequest({ clientId: PROVIDER_ID }),
+      );
+
+      const result = await service.create(PROVIDER_ID, dto);
+
+      expect(result.data.status).toBe(ServiceRequestStatus.OPEN);
+      expect(prisma.serviceRequest.create).toHaveBeenCalledTimes(1);
     });
 
     it('rejeita serviço inexistente', async () => {

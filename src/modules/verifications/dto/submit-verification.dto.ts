@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { DocumentType } from '@prisma/client';
-import { IsEnum, IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
+import { IsEnum, IsOptional, IsUrl, MaxLength } from 'class-validator';
 
 export class SubmitVerificationDto {
   @ApiProperty({
@@ -12,7 +12,8 @@ export class SubmitVerificationDto {
   documentType!: DocumentType;
 
   @ApiProperty({
-    example: 'https://res.cloudinary.com/dojumw0as/image/upload/.../bi-front.jpg',
+    example:
+      'https://res.cloudinary.com/dojumw0as/image/upload/.../bi-front.jpg',
     description: 'URL Cloudinary da foto do FRENTE do documento.',
   })
   @IsUrl()
@@ -20,8 +21,10 @@ export class SubmitVerificationDto {
   documentFrontUrl!: string;
 
   @ApiPropertyOptional({
-    example: 'https://res.cloudinary.com/dojumw0as/image/upload/.../bi-back.jpg',
-    description: 'URL Cloudinary do VERSO do documento (opcional para Passaporte).',
+    example:
+      'https://res.cloudinary.com/dojumw0as/image/upload/.../bi-back.jpg',
+    description:
+      'URL Cloudinary do VERSO do documento (opcional para Passaporte).',
   })
   @IsOptional()
   @IsUrl()

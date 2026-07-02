@@ -11,7 +11,11 @@ import {
   UserRole,
 } from '@prisma/client';
 
+import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { MetricsService } from '../../../shared/metrics/metrics.service';
+import { PushService } from '../../../shared/push/push.service';
+import { VerificationsService } from '../../verifications/services/verifications.service';
 import { EquipmentSortBy } from '../dto/find-equipment-query.dto';
 import { EquipmentService } from './equipment.service';
 
@@ -116,6 +120,19 @@ describe('EquipmentService', () => {
       providers: [
         EquipmentService,
         { provide: PrismaService, useValue: prisma },
+        { provide: AuditService, useValue: { record: jest.fn() } },
+        {
+          provide: VerificationsService,
+          useValue: { isVerified: jest.fn().mockResolvedValue(false) },
+        },
+        {
+          provide: PushService,
+          useValue: { send: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: MetricsService,
+          useValue: { businessEvents: { inc: jest.fn() } },
+        },
       ],
     }).compile();
 
@@ -540,7 +557,7 @@ describe('EquipmentService', () => {
       expect(whereArg).toMatchObject({ ownerId: OWNER_ID });
     });
 
-    it('ADMIN vê todos os equipamentos (sem filtro ownerId)', async () => {
+    it('ADMIN vê todos os equipamentos (sem filtro ownerId, excluindo DELETED)', async () => {
       prisma.user.findUnique.mockResolvedValue(
         makeUser(ADMIN_ID, UserRole.ADMIN),
       );
@@ -553,7 +570,10 @@ describe('EquipmentService', () => {
           where: Record<string, unknown>;
         }
       ).where;
-      expect(whereArg).toEqual({});
+      expect(whereArg).toEqual({
+        status: { not: EquipmentStatus.DELETED },
+      });
+      expect(whereArg).not.toHaveProperty('ownerId');
     });
 
     it('devolve mensagem correcta', async () => {

@@ -21,7 +21,7 @@ export class PushService {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json',
+          Accept: 'application/json',
           'Accept-Encoding': 'gzip, deflate',
         },
         body: JSON.stringify({
@@ -34,10 +34,14 @@ export class PushService {
         }),
       });
 
-      const result = await response.json();
+      const result = (await response.json()) as {
+        data?: { status?: string; message?: string };
+      };
 
       if (result?.data?.status === 'error') {
-        this.logger.warn(`Push falhou para ${payload.to}: ${result.data.message}`);
+        this.logger.warn(
+          `Push falhou para ${payload.to}: ${result.data.message}`,
+        );
       } else {
         this.logger.log(`Push enviado para ${payload.to}: ${payload.title}`);
       }

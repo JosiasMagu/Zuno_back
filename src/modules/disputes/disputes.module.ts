@@ -2,11 +2,12 @@ import { Module } from '@nestjs/common';
 
 import { AuthModule } from '../auth/auth.module';
 import { CloudinaryModule } from '../../shared/cloudinary/cloudinary.module';
+import { PaymentsModule } from '../payments/payments.module';
 import { DisputesController } from './controllers/disputes.controller';
 import { DisputesService } from './services/disputes.service';
 
 @Module({
-  imports: [AuthModule, CloudinaryModule],
+  imports: [AuthModule, CloudinaryModule, PaymentsModule],
   controllers: [DisputesController],
   providers: [DisputesService],
   exports: [DisputesService],

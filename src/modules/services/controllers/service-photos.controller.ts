@@ -44,7 +44,8 @@ export class ServicePhotosController {
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary: 'Upload de uma foto',
-    description: 'Campos: "photo" (ficheiro), "serviceId" (uuid), "isPrimary" (opcional).',
+    description:
+      'Campos: "photo" (ficheiro), "serviceId" (uuid), "isPrimary" (opcional).',
   })
   @ApiBody({
     schema: {
@@ -58,7 +59,10 @@ export class ServicePhotosController {
     },
   })
   @ApiResponse({ status: 201, description: 'Foto adicionada com sucesso.' })
-  @ApiResponse({ status: 400, description: 'Ficheiro inválido ou limite atingido.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Ficheiro inválido ou limite atingido.',
+  })
   @ApiResponse({ status: 401, description: 'Não autenticado.' })
   @ApiResponse({ status: 404, description: 'Serviço não encontrado.' })
   uploadOne(
@@ -114,7 +118,10 @@ export class ServicePhotosController {
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Definir foto como principal' })
   @ApiParam({ name: 'photoId' })
-  @ApiResponse({ status: 200, description: 'Foto principal definida com sucesso.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Foto principal definida com sucesso.',
+  })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Foto não encontrada.' })
   setPrimary(

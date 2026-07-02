@@ -55,10 +55,15 @@ export class UsersService {
       email?: string | null;
       bio?: string | null;
       avatarUrl?: string | null;
+      payoutMsisdn?: string | null;
     } = {};
 
     if (dto.name !== undefined) {
       data.name = dto.name.trim();
+    }
+
+    if (dto.payoutMsisdn !== undefined) {
+      data.payoutMsisdn = dto.payoutMsisdn.trim() || null;
     }
 
     if (dto.bio !== undefined) {

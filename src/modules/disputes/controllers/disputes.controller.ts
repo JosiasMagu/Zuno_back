@@ -28,6 +28,7 @@ import { Roles } from '../../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { CloudinaryService } from '../../../shared/cloudinary/cloudinary.service';
+import { ClaimDepositDto } from '../dto/claim-deposit.dto';
 import { CreateDisputeDto } from '../dto/create-dispute.dto';
 import { FindDisputesQueryDto } from '../dto/find-disputes-query.dto';
 import { ResolvePartialDto } from '../dto/resolve-partial.dto';
@@ -49,8 +50,15 @@ export class DisputesController {
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Upload de foto de evidência para disputa' })
   @ApiConsumes('multipart/form-data')
-  @ApiBody({ schema: { type: 'object', properties: { photo: { type: 'string', format: 'binary' } } } })
-  @UseInterceptors(FileInterceptor('photo'))
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { photo: { type: 'string', format: 'binary' } },
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor('photo', { limits: { fileSize: 5 * 1024 * 1024 } }),
+  )
   async uploadEvidence(
     @CurrentUser() user: { id: string },
     @UploadedFile() file: Express.Multer.File,
@@ -74,6 +82,30 @@ export class DisputesController {
   @ApiResponse({ status: 404, description: 'Reserva não encontrada.' })
   create(@CurrentUser() user: { id: string }, @Body() dto: CreateDisputeDto) {
     return this.disputesService.create(user.id, dto);
+  }
+
+  @Post('deposit-claim')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Reclamar o depósito de uma reserva (provider)',
+    description:
+      'O provider abre uma disputa sobre o depósito quando o equipamento é devolvido danificado. Só possível com a reserva ativa, pagamento liberado e dentro da janela de reclamação após o fim do aluguer. A decisão é do admin.',
+  })
+  @ApiBody({ type: ClaimDepositDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Reclamação do depósito registada.',
+  })
+  @ApiResponse({ status: 400, description: 'Operação inválida.' })
+  @ApiResponse({ status: 403, description: 'Sem permissão.' })
+  @ApiResponse({ status: 404, description: 'Reserva não encontrada.' })
+  claimDeposit(
+    @CurrentUser() user: { id: string },
+    @Body() dto: ClaimDepositDto,
+  ) {
+    return this.disputesService.claimDeposit(user.id, dto);
   }
 
   @Get('me')
@@ -112,7 +144,10 @@ export class DisputesController {
   @ApiOperation({ summary: 'Responder disputa como owner' })
   @ApiParam({ name: 'id', description: 'ID da disputa' })
   @ApiBody({ type: RespondDisputeDto })
-  @ApiResponse({ status: 200, description: 'Resposta da disputa registrada com sucesso.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Resposta da disputa registrada com sucesso.',
+  })
   @ApiResponse({ status: 400, description: 'Operação inválida.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Disputa não encontrada.' })
@@ -130,7 +165,10 @@ export class DisputesController {
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Resolver disputa a favor do cliente' })
   @ApiParam({ name: 'id', description: 'ID da disputa' })
-  @ApiResponse({ status: 200, description: 'Disputa resolvida a favor do cliente.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Disputa resolvida a favor do cliente.',
+  })
   @ApiResponse({ status: 400, description: 'Operação inválida.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Disputa não encontrada.' })
@@ -144,7 +182,10 @@ export class DisputesController {
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Resolver disputa a favor do owner' })
   @ApiParam({ name: 'id', description: 'ID da disputa' })
-  @ApiResponse({ status: 200, description: 'Disputa resolvida a favor do owner.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Disputa resolvida a favor do owner.',
+  })
   @ApiResponse({ status: 400, description: 'Operação inválida.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Disputa não encontrada.' })
@@ -159,7 +200,10 @@ export class DisputesController {
   @ApiOperation({ summary: 'Resolver disputa parcialmente' })
   @ApiParam({ name: 'id', description: 'ID da disputa' })
   @ApiBody({ type: ResolvePartialDto })
-  @ApiResponse({ status: 200, description: 'Disputa resolvida parcialmente com sucesso.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Disputa resolvida parcialmente com sucesso.',
+  })
   @ApiResponse({ status: 400, description: 'Operação inválida.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Disputa não encontrada.' })

@@ -8,6 +8,7 @@ import { BookingStatus, ReviewAuthorRole } from '@prisma/client';
 
 import { ReviewsService } from './reviews.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { PushService } from '../../../shared/push/push.service';
 
 // CONSTANTES
 
@@ -66,6 +67,8 @@ const makePrismaMock = () => {
 
 // SUITE PRINCIPAL
 
+const pushMock = { send: jest.fn().mockResolvedValue(undefined) };
+
 describe('ReviewsService', () => {
   let service: ReviewsService;
   let prisma: ReturnType<typeof makePrismaMock>;
@@ -74,7 +77,11 @@ describe('ReviewsService', () => {
     prisma = makePrismaMock();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ReviewsService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        ReviewsService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: PushService, useValue: pushMock },
+      ],
     }).compile();
 
     service = module.get<ReviewsService>(ReviewsService);

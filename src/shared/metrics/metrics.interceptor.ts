@@ -27,8 +27,9 @@ export class MetricsInterceptor implements NestInterceptor {
       const elapsedNs = Number(process.hrtime.bigint() - start);
       const elapsedSec = elapsedNs / 1e9;
       const method = request.method;
+      const routePath = (request as { route?: { path?: string } }).route?.path;
       const route =
-        (request as any).route?.path ??
+        routePath ??
         // Fallback: usa a URL sem query string para evitar cardinalidade
         request.url.split('?')[0];
       const status = String(response.statusCode);

@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import {
   ApiBearerAuth,
@@ -56,13 +64,16 @@ export class UsersController {
     @CurrentUser() user: { id: string },
     @Body() dto: SavePushTokenDto,
   ) {
-    return (this.usersService as any).savePushToken(user.id, dto.token);
+    return this.usersService.savePushToken(user.id, dto.token);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Obter perfil público de um utilizador por ID' })
   @ApiParam({ name: 'id', description: 'ID do utilizador' })
-  @ApiResponse({ status: 200, description: 'Perfil público obtido com sucesso.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Perfil público obtido com sucesso.',
+  })
   @ApiResponse({ status: 404, description: 'Utilizador não encontrado.' })
   getPublicProfile(@Param('id') id: string) {
     return this.usersService.getPublicProfile(id);
@@ -82,7 +93,10 @@ export class UsersController {
   @ApiParam({ name: 'id', description: 'ID do utilizador a suspender' })
   @ApiBody({ type: SuspendUserDto })
   @ApiResponse({ status: 200, description: 'Utilizador suspenso com sucesso.' })
-  @ApiResponse({ status: 400, description: 'Já suspenso, conta admin, ou auto-suspensão.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Já suspenso, conta admin, ou auto-suspensão.',
+  })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Utilizador não encontrado.' })
   suspend(
@@ -102,7 +116,10 @@ export class UsersController {
     description: 'Restaura isActive=true.',
   })
   @ApiParam({ name: 'id', description: 'ID do utilizador a reactivar' })
-  @ApiResponse({ status: 200, description: 'Utilizador reactivado com sucesso.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Utilizador reactivado com sucesso.',
+  })
   @ApiResponse({ status: 400, description: 'Utilizador já está activo.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Utilizador não encontrado.' })

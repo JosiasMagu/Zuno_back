@@ -12,10 +12,7 @@ import { catchError, tap } from 'rxjs/operators';
 
 import { ApiErrors, ApiException } from '../exceptions/api.exception';
 import { ErrorCode } from '../exceptions/error-codes';
-import {
-  IDEMPOTENT_KEY,
-  type IdempotentOptions,
-} from './idempotent.decorator';
+import { IDEMPOTENT_KEY, type IdempotentOptions } from './idempotent.decorator';
 import { IdempotencyService } from './idempotency.service';
 
 /**
@@ -51,10 +48,14 @@ export class IdempotencyInterceptor implements NestInterceptor {
       return next.handle();
     }
 
-    const request = ctx.switchToHttp().getRequest<Request & { user?: { id: string } }>();
+    const request = ctx
+      .switchToHttp()
+      .getRequest<Request & { user?: { id: string } }>();
     const response = ctx.switchToHttp().getResponse<Response>();
 
-    const key = (request.headers['idempotency-key'] as string | undefined)?.trim();
+    const key = (
+      request.headers['idempotency-key'] as string | undefined
+    )?.trim();
     if (!key) {
       throw ApiErrors.badRequest(
         ErrorCode.BAD_REQUEST,
@@ -70,7 +71,8 @@ export class IdempotencyInterceptor implements NestInterceptor {
       );
     }
 
-    const endpoint = `${request.method} ${(request as any).route?.path ?? request.url}`;
+    const routePath = (request as { route?: { path?: string } }).route?.path;
+    const endpoint = `${request.method} ${routePath ?? request.url}`;
     const requestHash = this.idempotency.hashRequestBody(request.body);
 
     const result = await this.idempotency.tryAcquire({

@@ -17,7 +17,8 @@ export interface AuditEntry {
     | 'ServiceQuote'
     | 'User'
     | 'UserVerification'
-    | 'Category';
+    | 'Category'
+    | 'Payout';
   targetId: string;
   amount?: number | string | Prisma.Decimal | null;
   metadata?: Record<string, unknown>;

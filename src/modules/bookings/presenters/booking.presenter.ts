@@ -160,15 +160,17 @@ export class BookingPresenter {
       },
       owner: ownerPayload,
       ownerId: booking.ownerId,
-      payment: booking.payment ? {
-        id: booking.payment.id,
-        status: booking.payment.status,
-        totalCharged: Number(booking.payment.totalCharged),
-        mpesaReference: booking.payment.mpesaReference,
-        receiptNumber: booking.payment.receiptNumber,
-        heldAt: booking.payment.heldAt,
-        releasedAt: booking.payment.releasedAt,
-      } : null,
+      payment: booking.payment
+        ? {
+            id: booking.payment.id,
+            status: booking.payment.status,
+            totalCharged: Number(booking.payment.totalCharged),
+            mpesaReference: booking.payment.mpesaReference,
+            receiptNumber: booking.payment.receiptNumber,
+            heldAt: booking.payment.heldAt,
+            releasedAt: booking.payment.releasedAt,
+          }
+        : null,
     };
   }
 }

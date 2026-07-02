@@ -141,8 +141,7 @@ export class FindEquipmentQueryDto extends PaginationQueryDto {
 
   @ApiPropertyOptional({
     example: '2026-09-20',
-    description:
-      'Fim do intervalo desejado (ISO date). Exige `availableFrom`.',
+    description: 'Fim do intervalo desejado (ISO date). Exige `availableFrom`.',
   })
   @IsOptional()
   @IsDateString()

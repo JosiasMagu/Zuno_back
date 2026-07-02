@@ -13,6 +13,7 @@ type SafeUserEntity = {
   isActive: boolean;
   avatarUrl: string | null;
   bio: string | null;
+  payoutMsisdn?: string | null;
   totalRating?: unknown;
   totalReviews?: number;
   createdAt: Date;
@@ -42,6 +43,7 @@ export class UserPresenter {
       isActive: user.isActive,
       avatarUrl: user.avatarUrl,
       bio: user.bio,
+      payoutMsisdn: user.payoutMsisdn ?? null,
       totalRating: toNumber(user.totalRating),
       totalReviews: user.totalReviews ?? 0,
       createdAt: user.createdAt,

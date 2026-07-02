@@ -141,7 +141,9 @@ describe('Happy Path E2E — equipment rental full flow', () => {
     expect(markHeldRes.status).toBe(200);
     expect(markHeldRes.body?.data?.status).toBe('HELD');
 
-    // ── Step 7: Client liberta pagamento ───────────────────────────────────
+    // ── Step 7: Client confirma entrega (release — checkpoint 1) ───────────
+    // O release liberta o rental ao provider, mas a reserva fica ACTIVE
+    // (equipamento com o cliente) e o depósito CONTINUA retido.
     const releaseRes = await request(httpServer)
       .patch(`/api/v1/payments/${paymentId}/release`)
       .set(authHeader(clientAuth.accessToken))
@@ -149,8 +151,47 @@ describe('Happy Path E2E — equipment rental full flow', () => {
 
     expect(releaseRes.status).toBe(200);
     expect(releaseRes.body?.data?.status).toBe('RELEASED');
+    expect(releaseRes.body?.data?.booking?.status).toBe('ACTIVE');
 
-    // ── Step 8: Client submete review ──────────────────────────────────────
+    const prisma = getTestPrisma();
+
+    const bookingAfterRelease = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: { status: true, deliveryConfirmedAt: true },
+    });
+    expect(bookingAfterRelease?.status).toBe('ACTIVE');
+    expect(bookingAfterRelease?.deliveryConfirmedAt).not.toBeNull();
+
+    const paymentAfterRelease = await prisma.payment.findUnique({
+      where: { id: paymentId },
+      select: { status: true, depositStatus: true },
+    });
+    expect(paymentAfterRelease?.status).toBe('RELEASED');
+    expect(paymentAfterRelease?.depositStatus).toBe('HELD');
+
+    // Review antes de a reserva estar COMPLETED não é permitida.
+    const earlyReviewRes = await request(httpServer)
+      .post('/api/v1/reviews')
+      .set(authHeader(clientAuth.accessToken))
+      .send({
+        bookingId,
+        authorRole: 'CLIENT',
+        rating: 5,
+        comment: 'Tentativa de review antes da devolução ser confirmada.',
+      });
+
+    expect(earlyReviewRes.status).toBe(400);
+
+    // ── Step 8: Provider confirma devolução (checkpoint 2) ─────────────────
+    const confirmReturnRes = await request(httpServer)
+      .patch(`/api/v1/bookings/${bookingId}/confirm-return`)
+      .set(authHeader(providerAuth.accessToken))
+      .send({});
+
+    expect(confirmReturnRes.status).toBe(200);
+    expect(confirmReturnRes.body?.data?.status).toBe('COMPLETED');
+
+    // ── Step 9: Client submete review (agora permitida) ────────────────────
     const reviewRes = await request(httpServer)
       .post('/api/v1/reviews')
       .set(authHeader(clientAuth.accessToken))
@@ -166,8 +207,6 @@ describe('Happy Path E2E — equipment rental full flow', () => {
     expect(reviewRes.body?.data?.rating).toBe(5);
 
     // ── Verificacao final na BD ────────────────────────────────────────────
-    const prisma = getTestPrisma();
-
     const finalEq = await prisma.equipment.findUnique({
       where: { id: equipmentId },
       select: { status: true },
@@ -176,16 +215,35 @@ describe('Happy Path E2E — equipment rental full flow', () => {
 
     const finalBooking = await prisma.booking.findUnique({
       where: { id: bookingId },
-      select: { status: true },
+      select: { status: true, returnConfirmedAt: true },
     });
     expect(finalBooking?.status).toBe('COMPLETED');
+    expect(finalBooking?.returnConfirmedAt).not.toBeNull();
 
     const finalPayment = await prisma.payment.findUnique({
       where: { id: paymentId },
-      select: { status: true, releasedAt: true },
+      select: {
+        status: true,
+        releasedAt: true,
+        depositStatus: true,
+        depositReleasedAt: true,
+      },
     });
     expect(finalPayment?.status).toBe('RELEASED');
     expect(finalPayment?.releasedAt).not.toBeNull();
+    // Depósito devolvido ao cliente no confirm-return.
+    expect(finalPayment?.depositStatus).toBe('RETURNED');
+    expect(finalPayment?.depositReleasedAt).not.toBeNull();
+
+    // Saídas do escrow: payout do rental ao provider + devolução do depósito.
+    const payouts = await prisma.payout.findMany({
+      where: { paymentId },
+      select: { kind: true, amount: true, status: true },
+    });
+    const payoutKinds = payouts.map((p) => p.kind).sort();
+    expect(payoutKinds).toEqual(['DEPOSIT_RETURN', 'PROVIDER_PAYOUT']);
+    const depositReturn = payouts.find((p) => p.kind === 'DEPOSIT_RETURN');
+    expect(Number(depositReturn?.amount)).toBe(5000);
 
     const finalReviewCount = await prisma.review.count({
       where: { bookingId },

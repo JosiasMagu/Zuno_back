@@ -13,7 +13,8 @@ import {
 
 export class CreateDisputeDto {
   @ApiPropertyOptional({
-    description: 'ID da reserva de equipamento. Obrigatório se não fornecer serviceBookingId.',
+    description:
+      'ID da reserva de equipamento. Obrigatório se não fornecer serviceBookingId.',
   })
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
@@ -21,7 +22,8 @@ export class CreateDisputeDto {
   bookingId?: string;
 
   @ApiPropertyOptional({
-    description: 'ID da reserva de serviço. Obrigatório se não fornecer bookingId.',
+    description:
+      'ID da reserva de serviço. Obrigatório se não fornecer bookingId.',
   })
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
@@ -45,7 +47,8 @@ export class CreateDisputeDto {
   description?: string;
 
   @ApiPropertyOptional({
-    description: 'URLs das fotos de evidência (já carregadas via POST /disputes/upload-evidence)',
+    description:
+      'URLs das fotos de evidência (já carregadas via POST /disputes/upload-evidence)',
     type: [String],
   })
   @IsOptional()

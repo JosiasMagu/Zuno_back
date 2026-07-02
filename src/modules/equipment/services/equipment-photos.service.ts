@@ -24,7 +24,7 @@ export class EquipmentPhotosService {
   async uploadPhoto(
     userId: string,
     equipmentId: string,
-    file: any,
+    file: Express.Multer.File,
     isPrimary: boolean = false,
   ) {
     const equipment = await this.prisma.equipment.findUnique({
@@ -116,7 +116,7 @@ export class EquipmentPhotosService {
   async uploadMultiplePhotos(
     userId: string,
     equipmentId: string,
-    files: any[],
+    files: Express.Multer.File[],
   ) {
     if (!files || files.length === 0) {
       throw new BadRequestException('Nenhum ficheiro enviado.');

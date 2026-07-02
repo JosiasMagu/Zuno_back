@@ -32,7 +32,7 @@ import { PaymentsService } from '../services/payments.service';
 @Controller('payments')
 @UseGuards(JwtAuthGuard)
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) { }
+  constructor(private readonly paymentsService: PaymentsService) {}
 
   @Post('booking/:bookingId/initiate')
   @UseGuards(RolesGuard)
@@ -100,6 +100,7 @@ export class PaymentsController {
   }
 
   @Patch(':id/release')
+  @UseGuards(RolesGuard)
   @Roles(UserRole.CLIENT, UserRole.ADMIN)
   @Throttle({ global: { ttl: 60_000, limit: 5 } })
   @ApiBearerAuth('access-token')

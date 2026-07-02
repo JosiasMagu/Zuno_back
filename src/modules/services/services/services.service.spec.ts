@@ -12,6 +12,7 @@ import {
   UserRole,
 } from '@prisma/client';
 
+import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { ServiceSortBy } from '../dto/find-services-query.dto';
 import { ServicesService } from './services.service';
@@ -85,6 +86,7 @@ describe('ServicesService', () => {
       providers: [
         ServicesService,
         { provide: PrismaService, useValue: prisma },
+        { provide: AuditService, useValue: { record: jest.fn() } },
       ],
     }).compile();
     service = module.get(ServicesService);

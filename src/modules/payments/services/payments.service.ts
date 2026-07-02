@@ -2,12 +2,17 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
   AuditAction,
   BookingStatus,
+  DepositStatus,
+  LedgerDirection,
+  LedgerParty,
   PaymentStatus,
+  PayoutKind,
   Prisma,
   ServiceBookingStatus,
   UserRole,
@@ -17,17 +22,27 @@ import * as crypto from 'crypto';
 import { AuditService } from '../../../shared/audit/audit.service';
 import { MetricsService } from '../../../shared/metrics/metrics.service';
 import { calculateProviderPayout } from '../../../shared/constants/fees';
+import {
+  DELIVERY_AUTO_RELEASE_DAYS,
+  roundMoney,
+} from '../../../shared/constants/policy';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { InitiatePaymentDto } from '../dto/initiate-payment.dto';
 import { FindPaymentsQueryDto } from '../dto/find-payments-query.dto';
 import { PaymentPresenter } from '../presenters/payment.presenter';
+import { LedgerService } from './ledger.service';
+import { PayoutsService } from './payouts.service';
 
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly metrics: MetricsService,
+    private readonly ledger: LedgerService,
+    private readonly payouts: PayoutsService,
   ) {}
 
   async initiate(userId: string, bookingId: string, dto: InitiatePaymentDto) {
@@ -379,44 +394,77 @@ export class PaymentsService {
       );
     }
 
-    const updatedPayment = await this.prisma.payment.update({
-      where: { id: paymentId },
-      data: {
-        status: PaymentStatus.HELD,
-        heldAt: new Date(),
+    const updatedPayment = await this.prisma.$transaction(
+      async (tx) => {
+        const fresh = await tx.payment.findUnique({
+          where: { id: paymentId },
+          select: { status: true, totalCharged: true, depositAmount: true },
+        });
+
+        if (!fresh || fresh.status !== PaymentStatus.PENDING) {
+          throw new BadRequestException(
+            'Apenas pagamentos pendentes podem ser marcados como retidos.',
+          );
+        }
+
+        // Entrada do dinheiro do cliente no escrow.
+        await this.ledger.record(tx, {
+          paymentId,
+          direction: LedgerDirection.INFLOW,
+          party: LedgerParty.CLIENT,
+          amount: Number(fresh.totalCharged),
+          reason: 'Pagamento confirmado e retido no escrow.',
+          actorId: userId,
+        });
+
+        return tx.payment.update({
+          where: { id: paymentId },
+          data: {
+            status: PaymentStatus.HELD,
+            heldAt: new Date(),
+            depositStatus:
+              Number(fresh.depositAmount) > 0
+                ? DepositStatus.HELD
+                : DepositStatus.NONE,
+          },
+          include: {
+            booking: {
+              select: {
+                id: true,
+                startDate: true,
+                endDate: true,
+                status: true,
+              },
+            },
+            serviceBooking: {
+              select: {
+                id: true,
+                status: true,
+                scheduledFor: true,
+              },
+            },
+            client: {
+              select: {
+                id: true,
+                name: true,
+                avatarUrl: true,
+              },
+            },
+            owner: {
+              select: {
+                id: true,
+                name: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        });
       },
-      include: {
-        booking: {
-          select: {
-            id: true,
-            startDate: true,
-            endDate: true,
-            status: true,
-          },
-        },
-        serviceBooking: {
-          select: {
-            id: true,
-            status: true,
-            scheduledFor: true,
-          },
-        },
-        client: {
-          select: {
-            id: true,
-            name: true,
-            avatarUrl: true,
-          },
-        },
-        owner: {
-          select: {
-            id: true,
-            name: true,
-            avatarUrl: true,
-          },
-        },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        timeout: 5000,
       },
-    });
+    );
 
     await this.audit.record({
       action: AuditAction.PAYMENT_MARKED_HELD,
@@ -484,10 +532,9 @@ export class PaymentsService {
     const serviceBookingId = payment.serviceBooking?.id ?? null;
 
     if (payment.booking) {
-      if (
-        payment.booking.status !== BookingStatus.CONFIRMED &&
-        payment.booking.status !== BookingStatus.ACTIVE
-      ) {
+      // Checkpoint 1 (D1): o release acontece quando o cliente confirma a
+      // recepção do equipamento — a reserva tem de estar CONFIRMED.
+      if (payment.booking.status !== BookingStatus.CONFIRMED) {
         throw new BadRequestException(
           'O estado atual da reserva não permite liberação do pagamento.',
         );
@@ -512,7 +559,14 @@ export class PaymentsService {
       async (tx) => {
         const fresh = await tx.payment.findUnique({
           where: { id: paymentId },
-          select: { status: true },
+          select: {
+            status: true,
+            totalCharged: true,
+            depositAmount: true,
+            ownerPayout: true,
+            ownerId: true,
+            dispute: { select: { id: true } },
+          },
         });
 
         if (!fresh || fresh.status !== PaymentStatus.HELD) {
@@ -521,10 +575,21 @@ export class PaymentsService {
           );
         }
 
+        if (fresh.dispute) {
+          throw new BadRequestException(
+            'Não é possível liberar pagamento com disputa associada.',
+          );
+        }
+
         if (bookingId) {
+          // Checkpoint 1: o equipamento está agora com o cliente.
+          // O depósito continua retido até o provider confirmar a devolução.
           await tx.booking.update({
             where: { id: bookingId },
-            data: { status: BookingStatus.COMPLETED },
+            data: {
+              status: BookingStatus.ACTIVE,
+              deliveryConfirmedAt: new Date(),
+            },
           });
         } else if (serviceBookingId) {
           await tx.serviceBooking.update({
@@ -536,12 +601,53 @@ export class PaymentsService {
           });
         }
 
+        const providerPayout = roundMoney(Number(fresh.ownerPayout ?? 0));
+        const depositAmount = roundMoney(Number(fresh.depositAmount ?? 0));
+        const platformTake = roundMoney(
+          Number(fresh.totalCharged) - depositAmount - providerPayout,
+        );
+
+        await this.ledger.record(tx, {
+          paymentId,
+          direction: LedgerDirection.OUTFLOW,
+          party: LedgerParty.PROVIDER,
+          amount: providerPayout,
+          reason: 'Rental liberado ao provider após confirmação de entrega.',
+          actorId: userId,
+        });
+
+        if (platformTake > 0) {
+          await this.ledger.record(tx, {
+            paymentId,
+            direction: LedgerDirection.OUTFLOW,
+            party: LedgerParty.PLATFORM,
+            amount: platformTake,
+            reason: 'Platform fee retida na liberação do pagamento.',
+            actorId: userId,
+          });
+        }
+
+        await this.payouts.createPending(tx, {
+          paymentId,
+          recipientId: fresh.ownerId,
+          kind: PayoutKind.PROVIDER_PAYOUT,
+          amount: providerPayout,
+        });
+
+        const hasDeposit = bookingId !== null && depositAmount > 0;
+
         return tx.payment.update({
           where: { id: paymentId },
           data: {
             status: PaymentStatus.RELEASED,
             releasedAt: new Date(),
-            depositReleasedAt: new Date(),
+            // Sem depósito (ou serviço): nada fica retido após o release.
+            ...(hasDeposit
+              ? {}
+              : {
+                  depositStatus: DepositStatus.NONE,
+                  depositReleasedAt: new Date(),
+                }),
           },
           include: {
             booking: {
@@ -645,95 +751,123 @@ export class PaymentsService {
       throw new BadRequestException('Pagamento sem reserva associada.');
     }
 
-    const operations: Prisma.PrismaPromise<unknown>[] = [];
+    const bookingId = payment.booking?.id ?? null;
+    const serviceBookingId = payment.serviceBooking?.id ?? null;
 
-    if (payment.booking) {
-      operations.push(
-        this.prisma.booking.update({
-          where: { id: payment.booking.id },
-          data: {
-            status: BookingStatus.CANCELLED,
-            cancelledAt: new Date(),
-            cancellationReason: 'Reserva cancelada por reembolso do pagamento.',
+    const updatedPayment = await this.prisma.$transaction(
+      async (tx) => {
+        const fresh = await tx.payment.findUnique({
+          where: { id: paymentId },
+          select: {
+            status: true,
+            totalCharged: true,
+            depositStatus: true,
+            clientId: true,
           },
-        }),
-      );
-    } else if (payment.serviceBooking) {
-      operations.push(
-        this.prisma.serviceBooking.update({
-          where: { id: payment.serviceBooking.id },
-          data: {
-            status: ServiceBookingStatus.CANCELLED,
-            cancelledAt: new Date(),
-            cancellationReason: 'Reserva cancelada por reembolso do pagamento.',
-          },
-        }),
-      );
-    }
+        });
 
-    operations.push(
-      this.prisma.payment.update({
-        where: { id: paymentId },
-        data: {
-          status: PaymentStatus.REFUNDED,
-          refundedAt: new Date(),
-          refundAmount: payment.totalCharged,
-        },
-        include: {
-          booking: {
-            select: {
-              id: true,
-              startDate: true,
-              endDate: true,
-              status: true,
+        if (
+          !fresh ||
+          (fresh.status !== PaymentStatus.PENDING &&
+            fresh.status !== PaymentStatus.HELD)
+        ) {
+          throw new BadRequestException(
+            'Apenas pagamentos pendentes ou retidos podem ser reembolsados.',
+          );
+        }
+
+        if (bookingId) {
+          await tx.booking.update({
+            where: { id: bookingId },
+            data: {
+              status: BookingStatus.CANCELLED,
+              cancelledAt: new Date(),
+              cancellationReason:
+                'Reserva cancelada por reembolso do pagamento.',
+            },
+          });
+        } else if (serviceBookingId) {
+          await tx.serviceBooking.update({
+            where: { id: serviceBookingId },
+            data: {
+              status: ServiceBookingStatus.CANCELLED,
+              cancelledAt: new Date(),
+              cancellationReason:
+                'Reserva cancelada por reembolso do pagamento.',
+            },
+          });
+        }
+
+        // Só há dinheiro para devolver se ele chegou a entrar no escrow.
+        if (fresh.status === PaymentStatus.HELD) {
+          await this.ledger.record(tx, {
+            paymentId,
+            direction: LedgerDirection.OUTFLOW,
+            party: LedgerParty.CLIENT,
+            amount: Number(fresh.totalCharged),
+            reason: 'Reembolso total ao cliente.',
+            actorId: userId,
+          });
+
+          await this.payouts.createPending(tx, {
+            paymentId,
+            recipientId: fresh.clientId,
+            kind: PayoutKind.CLIENT_REFUND,
+            amount: Number(fresh.totalCharged),
+          });
+        }
+
+        return tx.payment.update({
+          where: { id: paymentId },
+          data: {
+            status: PaymentStatus.REFUNDED,
+            refundedAt: new Date(),
+            refundAmount: payment.totalCharged,
+            ...(fresh.depositStatus === DepositStatus.HELD
+              ? {
+                  depositStatus: DepositStatus.RETURNED,
+                  depositReleasedAt: new Date(),
+                }
+              : {}),
+          },
+          include: {
+            booking: {
+              select: {
+                id: true,
+                startDate: true,
+                endDate: true,
+                status: true,
+              },
+            },
+            serviceBooking: {
+              select: {
+                id: true,
+                status: true,
+                scheduledFor: true,
+              },
+            },
+            client: {
+              select: {
+                id: true,
+                name: true,
+                avatarUrl: true,
+              },
+            },
+            owner: {
+              select: {
+                id: true,
+                name: true,
+                avatarUrl: true,
+              },
             },
           },
-          serviceBooking: {
-            select: {
-              id: true,
-              status: true,
-              scheduledFor: true,
-            },
-          },
-          client: {
-            select: {
-              id: true,
-              name: true,
-              avatarUrl: true,
-            },
-          },
-          owner: {
-            select: {
-              id: true,
-              name: true,
-              avatarUrl: true,
-            },
-          },
-        },
-      }),
+        });
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        timeout: 5000,
+      },
     );
-
-    const results = (await this.prisma.$transaction(operations)) as [
-      unknown,
-      Prisma.PaymentGetPayload<{
-        include: {
-          booking: {
-            select: {
-              id: true;
-              startDate: true;
-              endDate: true;
-              status: true;
-            };
-          };
-          serviceBooking: {
-            select: { id: true; status: true; scheduledFor: true };
-          };
-          client: { select: { id: true; name: true; avatarUrl: true } };
-          provider: { select: { id: true; name: true; avatarUrl: true } };
-        };
-      }>,
-    ];
-    const updatedPayment = results[1];
 
     await this.audit.record({
       action: AuditAction.PAYMENT_REFUNDED,
@@ -747,6 +881,53 @@ export class PaymentsService {
       message: 'Pagamento reembolsado com sucesso.',
       data: PaymentPresenter.toListItem(updatedPayment),
     };
+  }
+
+  /**
+   * D1 — auto-release: pagamentos HELD cuja entrega não foi confirmada nem
+   * disputada dentro do prazo são liberados automaticamente em nome do
+   * cliente. Chamado pelo BookingsScheduler.
+   */
+  async autoReleaseDue(): Promise<number> {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - DELIVERY_AUTO_RELEASE_DAYS);
+
+    const due = await this.prisma.payment.findMany({
+      where: {
+        status: PaymentStatus.HELD,
+        dispute: null,
+        booking: {
+          status: BookingStatus.CONFIRMED,
+          startDate: { lte: cutoff },
+        },
+      },
+      select: { id: true, clientId: true },
+      take: 50,
+    });
+
+    let released = 0;
+
+    for (const payment of due) {
+      try {
+        await this.release(payment.clientId, payment.id);
+        await this.audit.record({
+          action: AuditAction.PAYMENT_AUTO_RELEASED,
+          actorId: payment.clientId,
+          targetType: 'Payment',
+          targetId: payment.id,
+          metadata: { system: true, reason: 'auto_release_deadline' },
+        });
+        released += 1;
+      } catch (error) {
+        this.logger.warn(
+          `Auto-release falhou para payment ${payment.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
+    return released;
   }
 
   private calculateOwnerPayout(rentalAmount: number, platformFee: number) {
@@ -781,44 +962,75 @@ export class PaymentsService {
   }
 
   async initiateMock(userId: string, bookingId: string) {
-  // Inicia o pagamento com MPESA
-  const result = await this.initiate(userId, bookingId, { method: 'MPESA' });
-  const paymentId = result.data.id;
+    // GUARDA DE PRODUÇÃO: este endpoint contorna a confirmação real de
+    // pagamento e só pode existir em ambientes de desenvolvimento/teste.
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException(
+        'Pagamentos simulados não estão disponíveis neste ambiente.',
+      );
+    }
 
-  // Simula referência M-Pesa
-  const mpesaReference = `MP${Date.now().toString().slice(-8)}`;
+    // Inicia o pagamento com MPESA
+    const result = await this.initiate(userId, bookingId, { method: 'MPESA' });
+    const paymentId = result.data.id;
 
-  // Marca automaticamente como HELD (cofre)
-  await this.prisma.payment.update({
-    where: { id: paymentId },
-    data: {
-      status: 'HELD',
-      heldAt: new Date(),
-      mpesaReference,
-    },
-  });
+    // Simula referência M-Pesa
+    const mpesaReference = `MP${Date.now().toString().slice(-8)}`;
 
-  const payment = await this.prisma.payment.findUnique({
-    where: { id: paymentId },
-    include: {
-      booking: { select: { id: true, startDate: true, endDate: true, status: true } },
-      client: { select: { id: true, name: true, avatarUrl: true } },
-      owner: { select: { id: true, name: true, avatarUrl: true } },
-    },
-  });
+    // Marca automaticamente como HELD (cofre), com o mesmo registo
+    // contabilístico do fluxo real para manter a invariante do ledger.
+    await this.prisma.$transaction(async (tx) => {
+      const fresh = await tx.payment.findUnique({
+        where: { id: paymentId },
+        select: { totalCharged: true, depositAmount: true },
+      });
 
-  await this.audit.record({
-    action: AuditAction.PAYMENT_MARKED_HELD,
-    actorId: userId,
-    targetType: 'Payment',
-    targetId: paymentId,
-    amount: payment!.totalCharged,
-    metadata: { mock: true, mpesaReference },
-  });
+      await this.ledger.record(tx, {
+        paymentId,
+        direction: LedgerDirection.INFLOW,
+        party: LedgerParty.CLIENT,
+        amount: Number(fresh!.totalCharged),
+        reason: 'Pagamento simulado (mock) retido no escrow.',
+        actorId: userId,
+      });
 
-  return {
-    message: 'Pagamento M-Pesa simulado com sucesso. Valor retido no cofre.',
-    data: PaymentPresenter.toListItem(payment!),
-  };
-}
+      await tx.payment.update({
+        where: { id: paymentId },
+        data: {
+          status: 'HELD',
+          heldAt: new Date(),
+          mpesaReference,
+          depositStatus:
+            Number(fresh!.depositAmount) > 0
+              ? DepositStatus.HELD
+              : DepositStatus.NONE,
+        },
+      });
+    });
+
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: {
+        booking: {
+          select: { id: true, startDate: true, endDate: true, status: true },
+        },
+        client: { select: { id: true, name: true, avatarUrl: true } },
+        owner: { select: { id: true, name: true, avatarUrl: true } },
+      },
+    });
+
+    await this.audit.record({
+      action: AuditAction.PAYMENT_MARKED_HELD,
+      actorId: userId,
+      targetType: 'Payment',
+      targetId: paymentId,
+      amount: payment!.totalCharged,
+      metadata: { mock: true, mpesaReference },
+    });
+
+    return {
+      message: 'Pagamento M-Pesa simulado com sucesso. Valor retido no cofre.',
+      data: PaymentPresenter.toListItem(payment!),
+    };
+  }
 }

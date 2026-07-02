@@ -1,8 +1,20 @@
 import {
-  Body, Controller, Get, Param, Patch, Post, Query, UseGuards,
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
-  ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags,
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
 } from '@nestjs/swagger';
 
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
@@ -23,7 +35,10 @@ export class ServiceRequestsController {
   @ApiBody({ type: CreateServiceRequestDto })
   @ApiResponse({ status: 201, description: 'Pedido criado com sucesso.' })
   @ApiResponse({ status: 404, description: 'Serviço não encontrado.' })
-  create(@CurrentUser() user: { id: string }, @Body() dto: CreateServiceRequestDto) {
+  create(
+    @CurrentUser() user: { id: string },
+    @Body() dto: CreateServiceRequestDto,
+  ) {
     return this.requestsService.create(user.id, dto);
   }
 
@@ -31,7 +46,10 @@ export class ServiceRequestsController {
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Listar os meus pedidos (cliente)' })
   @ApiResponse({ status: 200, description: 'Pedidos obtidos com sucesso.' })
-  findMine(@CurrentUser() user: { id: string }, @Query() query: FindServiceRequestsQueryDto) {
+  findMine(
+    @CurrentUser() user: { id: string },
+    @Query() query: FindServiceRequestsQueryDto,
+  ) {
     return this.requestsService.findMine(user.id, query);
   }
 
@@ -39,7 +57,10 @@ export class ServiceRequestsController {
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Pedidos recebidos nos meus serviços (provider)' })
   @ApiResponse({ status: 200, description: 'Pedidos obtidos com sucesso.' })
-  findForProvider(@CurrentUser() user: { id: string }, @Query() query: FindServiceRequestsQueryDto) {
+  findForProvider(
+    @CurrentUser() user: { id: string },
+    @Query() query: FindServiceRequestsQueryDto,
+  ) {
     return this.requestsService.findForProvider(user.id, query);
   }
 

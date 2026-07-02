@@ -234,10 +234,7 @@ export class AuthService {
     }
 
     if (!user.isActive) {
-      throw ApiErrors.forbidden(
-        ErrorCode.FORBIDDEN,
-        'Conta desativada.',
-      );
+      throw ApiErrors.forbidden(ErrorCode.FORBIDDEN, 'Conta desativada.');
     }
 
     const passwordMatches = await bcrypt.compare(

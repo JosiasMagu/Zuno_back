@@ -5,6 +5,8 @@ import { ConfigService } from '@nestjs/config';
 import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
+import { ApiException } from '../../../common/exceptions/api.exception';
+import { ErrorCode } from '../../../common/exceptions/error-codes';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { AuthService } from './auth.service';
 import { VerificationService } from './verification.service';
@@ -269,32 +271,45 @@ describe('AuthService', () => {
       expect(result.user).not.toHaveProperty('passwordHash');
     });
 
-    it('lança UnauthorizedException se o utilizador não existe', async () => {
+    it('lança ApiException (401) se o utilizador não existe', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.login(dto)).rejects.toThrow(UnauthorizedException);
+      const error = await service.login(dto).catch((e: ApiException) => e);
+      expect(error).toBeInstanceOf(ApiException);
+      expect((error as ApiException).getStatus()).toBe(401);
+      expect((error as ApiException).errorCode).toBe(
+        ErrorCode.AUTH_INVALID_CREDENTIALS,
+      );
       expect(prisma.authSession.create).not.toHaveBeenCalled();
     });
 
-    it('lança UnauthorizedException se a conta está desactivada', async () => {
+    it('lança ApiException (403) se a conta está desactivada', async () => {
       prisma.user.findUnique.mockResolvedValue(makeUser({ isActive: false }));
 
-      await expect(service.login(dto)).rejects.toThrow(UnauthorizedException);
+      const error = await service.login(dto).catch((e: ApiException) => e);
+      expect(error).toBeInstanceOf(ApiException);
+      expect((error as ApiException).getStatus()).toBe(403);
+      expect((error as ApiException).message).toBe('Conta desativada.');
       expect(prisma.authSession.create).not.toHaveBeenCalled();
     });
 
-    it('lança UnauthorizedException se a password está errada', async () => {
+    it('lança ApiException (401) se a password está errada', async () => {
       prisma.user.findUnique.mockResolvedValue(makeUser());
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
 
-      await expect(service.login(dto)).rejects.toThrow(UnauthorizedException);
+      const error = await service.login(dto).catch((e: ApiException) => e);
+      expect(error).toBeInstanceOf(ApiException);
+      expect((error as ApiException).getStatus()).toBe(401);
+      expect((error as ApiException).errorCode).toBe(
+        ErrorCode.AUTH_INVALID_CREDENTIALS,
+      );
       expect(prisma.authSession.create).not.toHaveBeenCalled();
     });
 
     it('a mensagem de erro é genérica — não revela se o utilizador existe ou não', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
 
-      const error = await service.login(dto).catch((e) => e);
+      const error = await service.login(dto).catch((e: ApiException) => e);
       expect(error.message).toBe('Credenciais inválidas.');
     });
 
@@ -302,7 +317,7 @@ describe('AuthService', () => {
       prisma.user.findUnique.mockResolvedValue(makeUser());
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
 
-      const error = await service.login(dto).catch((e) => e);
+      const error = await service.login(dto).catch((e: ApiException) => e);
       expect(error.message).toBe('Credenciais inválidas.');
     });
 

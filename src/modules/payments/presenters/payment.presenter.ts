@@ -17,6 +17,7 @@ type PaymentListEntity = {
   releasedAt: Date | null;
   refundedAt: Date | null;
   refundAmount: unknown;
+  depositStatus?: string;
   depositReleasedAt: Date | null;
   depositHeldAmount: unknown;
   receiptNumber: string;

@@ -4,6 +4,7 @@ type DisputeListEntity = {
   serviceBookingId?: string | null;
   paymentId: string;
   openedBy: string;
+  type?: string;
   reason: string;
   description: string;
   ownerResponse: string | null;
@@ -57,6 +58,7 @@ export class DisputePresenter {
       bookingId: dispute.bookingId,
       paymentId: dispute.paymentId,
       openedBy: dispute.openedBy,
+      type: dispute.type ?? 'PAYMENT',
       reason: dispute.reason,
       description: dispute.description,
       ownerResponse: dispute.ownerResponse,

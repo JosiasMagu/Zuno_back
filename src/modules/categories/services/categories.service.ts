@@ -76,7 +76,11 @@ export class CategoriesService {
       actorId: adminId,
       targetType: 'Category',
       targetId: category.id,
-      metadata: { name: category.name, slug: category.slug, kind: category.kind },
+      metadata: {
+        name: category.name,
+        slug: category.slug,
+        kind: category.kind,
+      },
     });
 
     return {

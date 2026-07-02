@@ -6,6 +6,7 @@ import {
 import { Test, TestingModule } from '@nestjs/testing';
 import { UserRole } from '@prisma/client';
 
+import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { UsersService } from './users.service';
 
@@ -13,6 +14,7 @@ const USER_ID = 'user-uuid-001';
 const OTHER_USER_ID = 'user-uuid-002';
 const PHONE = '+258840000001';
 const EMAIL = 'zuno@zuno.co.mz';
+const PAYOUT_MSISDN = '+258841234567';
 
 const makeUser = (overrides: Record<string, unknown> = {}) => ({
   id: USER_ID,
@@ -25,6 +27,7 @@ const makeUser = (overrides: Record<string, unknown> = {}) => ({
   isActive: true,
   avatarUrl: null,
   bio: null,
+  payoutMsisdn: null,
   totalRating: null,
   totalReviews: 0,
   createdAt: new Date('2024-01-01'),
@@ -52,15 +55,23 @@ const makePrisma = () => ({
   },
 });
 
+const makeAudit = () => ({ record: jest.fn() });
+
 describe('UsersService', () => {
   let service: UsersService;
   let prisma: ReturnType<typeof makePrisma>;
+  let audit: ReturnType<typeof makeAudit>;
 
   beforeEach(async () => {
     prisma = makePrisma();
+    audit = makeAudit();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [UsersService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        UsersService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: AuditService, useValue: audit },
+      ],
     }).compile();
 
     service = module.get<UsersService>(UsersService);
@@ -109,6 +120,24 @@ describe('UsersService', () => {
       const result = await service.getMe(USER_ID);
 
       expect(result.data.totalReviews).toBe(0);
+    });
+
+    it('expõe payoutMsisdn quando preenchido', async () => {
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser({ payoutMsisdn: PAYOUT_MSISDN }),
+      );
+
+      const result = await service.getMe(USER_ID);
+
+      expect(result.data.payoutMsisdn).toBe(PAYOUT_MSISDN);
+    });
+
+    it('expõe payoutMsisdn como null quando não preenchido', async () => {
+      prisma.user.findUnique.mockResolvedValue(makeUser());
+
+      const result = await service.getMe(USER_ID);
+
+      expect(result.data.payoutMsisdn).toBeNull();
     });
 
     it('lança UnauthorizedException se o utilizador não existe', async () => {
@@ -216,6 +245,51 @@ describe('UsersService', () => {
 
       const updateCall = prisma.user.update.mock.calls[0][0];
       expect(updateCall.data.avatarUrl).toBeNull();
+    });
+
+    it('guarda payoutMsisdn (número M-Pesa) com trim()', async () => {
+      prisma.user.findUnique.mockResolvedValue(makeUser());
+      prisma.user.update.mockResolvedValue(
+        makeUser({ payoutMsisdn: PAYOUT_MSISDN }),
+      );
+
+      await service.updateMe(USER_ID, { payoutMsisdn: `  ${PAYOUT_MSISDN}  ` });
+
+      const updateCall = prisma.user.update.mock.calls[0][0];
+      expect(updateCall.data.payoutMsisdn).toBe(PAYOUT_MSISDN);
+    });
+
+    it('guarda payoutMsisdn como null quando string vazia é fornecida', async () => {
+      prisma.user.findUnique.mockResolvedValue(makeUser());
+      prisma.user.update.mockResolvedValue(makeUser({ payoutMsisdn: null }));
+
+      await service.updateMe(USER_ID, { payoutMsisdn: '   ' });
+
+      const updateCall = prisma.user.update.mock.calls[0][0];
+      expect(updateCall.data.payoutMsisdn).toBeNull();
+    });
+
+    it('a resposta do updateMe expõe payoutMsisdn', async () => {
+      prisma.user.findUnique.mockResolvedValue(makeUser());
+      prisma.user.update.mockResolvedValue(
+        makeUser({ payoutMsisdn: PAYOUT_MSISDN }),
+      );
+
+      const result = await service.updateMe(USER_ID, {
+        payoutMsisdn: PAYOUT_MSISDN,
+      });
+
+      expect(result.data.payoutMsisdn).toBe(PAYOUT_MSISDN);
+    });
+
+    it('não inclui payoutMsisdn no data do update quando não fornecido', async () => {
+      prisma.user.findUnique.mockResolvedValue(makeUser());
+      prisma.user.update.mockResolvedValue(makeUser());
+
+      await service.updateMe(USER_ID, { name: 'Zuno' });
+
+      const updateCall = prisma.user.update.mock.calls[0][0];
+      expect(updateCall.data).not.toHaveProperty('payoutMsisdn');
     });
 
     it('actualiza o email para lowercase com trim()', async () => {

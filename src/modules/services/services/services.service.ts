@@ -59,6 +59,21 @@ export class ServicesService {
   async create(providerId: string, dto: CreateServiceDto) {
     const categoryId = dto.categoryId.trim();
 
+    // Política D2: providers suspensos por strikes não publicam listagens.
+    const provider = await this.prisma.user.findUnique({
+      where: { id: providerId },
+      select: { listingsSuspendedUntil: true },
+    });
+
+    if (
+      provider?.listingsSuspendedUntil &&
+      provider.listingsSuspendedUntil > new Date()
+    ) {
+      throw new ForbiddenException(
+        'A tua conta está temporariamente suspensa de publicar listagens devido a cancelamentos de reservas confirmadas.',
+      );
+    }
+
     const category = await this.prisma.category.findFirst({
       where: { id: categoryId, isActive: true },
     });
@@ -268,7 +283,7 @@ export class ServicesService {
   }
 
   async findPending(adminId: string) {
-    void adminId;
+    await this.assertAdmin(adminId);
 
     const items = await this.prisma.service.findMany({
       where: { status: ServiceStatus.PENDING_REVIEW },
@@ -287,6 +302,8 @@ export class ServicesService {
   }
 
   async approve(adminId: string, serviceId: string) {
+    await this.assertAdmin(adminId);
+
     const service = await this.prisma.service.findUnique({
       where: { id: serviceId },
       select: { id: true, status: true },
@@ -331,6 +348,8 @@ export class ServicesService {
   }
 
   async reject(adminId: string, serviceId: string, reason?: string) {
+    await this.assertAdmin(adminId);
+
     const service = await this.prisma.service.findUnique({
       where: { id: serviceId },
       select: { id: true, status: true },
@@ -593,6 +612,21 @@ export class ServicesService {
       case ServiceSortBy.NEWEST:
       default:
         return [{ createdAt: 'desc' }];
+    }
+  }
+
+  // Defesa em profundidade: além do RolesGuard no controller, os métodos
+  // de moderação revalidam o role na base de dados.
+  private async assertAdmin(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true },
+    });
+
+    if (!user || user.role !== UserRole.ADMIN) {
+      throw new ForbiddenException(
+        'Não tens permissão para executar esta operação.',
+      );
     }
   }
 }

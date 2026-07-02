@@ -12,7 +12,12 @@ import { FindMessagesQueryDto, StartConversationDto } from '../dto/chat.dto';
 import { ChatPresenter } from '../presenters/chat.presenter';
 
 const USER_SELECT = { id: true, name: true, avatarUrl: true };
-const USER_SELECT_WITH_TOKEN = { id: true, name: true, avatarUrl: true, pushToken: true };
+const USER_SELECT_WITH_TOKEN = {
+  id: true,
+  name: true,
+  avatarUrl: true,
+  pushToken: true,
+};
 
 const EQUIPMENT_SELECT = {
   id: true,
@@ -128,12 +133,14 @@ export class ChatService {
     });
 
     if (owner?.pushToken) {
-      this.push.send({
-        to: owner.pushToken,
-        title: '💬 Nova mensagem',
-        body: `${msg.sender.name}: ${dto.firstMessage.substring(0, 60)}`,
-        data: { type: 'chat', conversationId: conversation.id },
-      }).catch(() => {});
+      this.push
+        .send({
+          to: owner.pushToken,
+          title: '💬 Nova mensagem',
+          body: `${msg.sender.name}: ${dto.firstMessage.substring(0, 60)}`,
+          data: { type: 'chat', conversationId: conversation.id },
+        })
+        .catch(() => {});
     }
 
     return {
@@ -153,7 +160,9 @@ export class ChatService {
     });
 
     if (!equipment || equipment.status !== EquipmentStatus.ACTIVE) {
-      throw new NotFoundException('Equipamento não encontrado ou indisponível.');
+      throw new NotFoundException(
+        'Equipamento não encontrado ou indisponível.',
+      );
     }
 
     if (equipment.ownerId === clientId) {
@@ -175,7 +184,11 @@ export class ChatService {
       select: { id: true, providerId: true, status: true, isActive: true },
     });
 
-    if (!service || service.status !== ServiceStatus.ACTIVE || !service.isActive) {
+    if (
+      !service ||
+      service.status !== ServiceStatus.ACTIVE ||
+      !service.isActive
+    ) {
       throw new NotFoundException('Serviço não encontrado ou indisponível.');
     }
 
@@ -224,7 +237,8 @@ export class ChatService {
     const isParticipant =
       conversation.clientId === userId || conversation.ownerId === userId;
 
-    if (!isParticipant) throw new ForbiddenException('Não tens acesso a esta conversa.');
+    if (!isParticipant)
+      throw new ForbiddenException('Não tens acesso a esta conversa.');
 
     const page = query.page ?? 1;
     const limit = query.limit ?? 30;
@@ -252,7 +266,9 @@ export class ChatService {
         conversation: ChatPresenter.toConversation(conversation, userId),
         messages: messages.map((m) => ChatPresenter.toMessage(m)),
         meta: {
-          page, limit, total,
+          page,
+          limit,
+          total,
           totalPages: Math.ceil(total / limit),
           hasNextPage: page * limit < total,
           hasPreviousPage: page > 1,
@@ -284,7 +300,8 @@ export class ChatService {
     const isParticipant =
       conversation.clientId === senderId || conversation.ownerId === senderId;
 
-    if (!isParticipant) throw new ForbiddenException('Não tens acesso a esta conversa.');
+    if (!isParticipant)
+      throw new ForbiddenException('Não tens acesso a esta conversa.');
 
     const now = new Date();
 
@@ -299,9 +316,10 @@ export class ChatService {
       }),
     ]);
 
-    const recipientId = conversation.clientId === senderId
-      ? conversation.ownerId
-      : conversation.clientId;
+    const recipientId =
+      conversation.clientId === senderId
+        ? conversation.ownerId
+        : conversation.clientId;
 
     const recipient = await this.prisma.user.findUnique({
       where: { id: recipientId },
@@ -309,12 +327,14 @@ export class ChatService {
     });
 
     if (recipient?.pushToken) {
-      this.push.send({
-        to: recipient.pushToken,
-        title: `💬 ${message.sender.name}`,
-        body: trimmed.substring(0, 100),
-        data: { type: 'chat', conversationId },
-      }).catch(() => {});
+      this.push
+        .send({
+          to: recipient.pushToken,
+          title: `💬 ${message.sender.name}`,
+          body: trimmed.substring(0, 100),
+          data: { type: 'chat', conversationId },
+        })
+        .catch(() => {});
     }
 
     return message;

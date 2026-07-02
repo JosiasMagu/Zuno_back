@@ -35,7 +35,7 @@ import { BookingsService } from '../services/bookings.service';
 @Controller('bookings')
 @UseGuards(JwtAuthGuard)
 export class BookingsController {
-  constructor(private readonly bookingsService: BookingsService) { }
+  constructor(private readonly bookingsService: BookingsService) {}
 
   @Post()
   @UseGuards(RolesGuard)
@@ -55,10 +55,17 @@ export class BookingsController {
   })
   @ApiBody({ type: CreateBookingDto })
   @ApiResponse({ status: 201, description: 'Reserva criada com sucesso.' })
-  @ApiResponse({ status: 400, description: 'Dados inválidos ou Idempotency-Key ausente.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Dados inválidos ou Idempotency-Key ausente.',
+  })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Equipamento não encontrado.' })
-  @ApiResponse({ status: 409, description: 'Idempotency-Key reutilizada com body diferente, ou pedido ainda em curso.' })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Idempotency-Key reutilizada com body diferente, ou pedido ainda em curso.',
+  })
   create(@CurrentUser() user: { id: string }, @Body() dto: CreateBookingDto) {
     return this.bookingsService.create(user.id, dto);
   }
@@ -127,11 +134,33 @@ export class BookingsController {
     return this.bookingsService.confirm(user.id, id);
   }
 
+  @Patch(':id/confirm-return')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Confirmar devolução do equipamento (checkpoint 2 do escrow)',
+    description:
+      'O provider confirma que o equipamento foi devolvido em boas condições: a reserva conclui e o depósito é devolvido ao cliente. Para reclamar o depósito por dano, usar POST /disputes/deposit-claim dentro da janela de reclamação.',
+  })
+  @ApiParam({ name: 'id', description: 'ID da reserva' })
+  @ApiResponse({
+    status: 200,
+    description: 'Devolução confirmada e reserva concluída.',
+  })
+  @ApiResponse({ status: 400, description: 'Operação inválida.' })
+  confirmReturn(@CurrentUser() user: { id: string }, @Param('id') id: string) {
+    return this.bookingsService.complete(user.id, id);
+  }
+
   @Patch(':id/complete')
   @UseGuards(RolesGuard)
   @Roles(UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Marcar reserva como concluída' })
+  @ApiOperation({
+    summary: 'Marcar reserva como concluída (alias de confirm-return)',
+    deprecated: true,
+  })
   @ApiParam({ name: 'id', description: 'ID da reserva' })
   @ApiResponse({ status: 200, description: 'Reserva concluída com sucesso.' })
   complete(@CurrentUser() user: { id: string }, @Param('id') id: string) {

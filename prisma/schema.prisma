@@ -12,21 +12,23 @@ datasource db {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model User {
-  id           String   @id @default(uuid())
-  phone        String   @unique
-  email        String?  @unique
-  name         String
-  passwordHash String
-  role         UserRole @default(CLIENT)
-  isVerified   Boolean  @default(false)
-  isActive     Boolean  @default(true)
-  avatarUrl    String?
-  bio          String?
-  pushToken    String?
-  totalRating  Decimal? @db.Decimal(3, 2)
-  totalReviews Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                    String    @id @default(uuid())
+  phone                 String    @unique
+  email                 String?   @unique
+  name                  String
+  passwordHash          String
+  role                  UserRole  @default(CLIENT)
+  isVerified            Boolean   @default(false)
+  isActive              Boolean   @default(true)
+  avatarUrl             String?
+  bio                   String?
+  pushToken             String?
+  payoutMsisdn          String?
+  listingsSuspendedUntil DateTime?
+  totalRating           Decimal?  @db.Decimal(3, 2)
+  totalReviews          Int       @default(0)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   sessions                AuthSession[]
   verificationCodes       VerificationCode[]
@@ -46,6 +48,8 @@ model User {
   providedQuotes          ServiceQuote[]     @relation("ProvidedQuotes")
   clientServiceBookings   ServiceBooking[]   @relation("ClientServiceBookings")
   providerServiceBookings ServiceBooking[]   @relation("ProviderServiceBookings")
+  receivedPayouts         Payout[]           @relation("PayoutRecipient")
+  strikes                 ProviderStrike[]
 
   @@index([role])
   @@index([isActive])
@@ -169,12 +173,14 @@ model Booking {
   depositAmount      Decimal       @db.Decimal(12, 2)
   platformFee        Decimal       @db.Decimal(12, 2)
   totalAmount        Decimal       @db.Decimal(12, 2)
-  status             BookingStatus @default(PENDING)
-  deliveryAddress    String?
-  clientNote         String?
-  confirmedAt        DateTime?
-  cancelledAt        DateTime?
-  cancellationReason String?
+  status              BookingStatus @default(PENDING)
+  deliveryAddress     String?
+  clientNote          String?
+  confirmedAt         DateTime?
+  deliveryConfirmedAt DateTime?
+  returnConfirmedAt   DateTime?
+  cancelledAt         DateTime?
+  cancellationReason  String?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
@@ -215,6 +221,7 @@ model Payment {
   releasedAt        DateTime?
   refundedAt        DateTime?
   refundAmount      Decimal?      @db.Decimal(12, 2)
+  depositStatus     DepositStatus @default(NONE)
   depositReleasedAt DateTime?
   depositHeldAmount Decimal?      @db.Decimal(12, 2)
   receiptNumber     String        @unique
@@ -226,12 +233,74 @@ model Payment {
   client         User            @relation("ClientPayments", fields: [clientId], references: [id])
   owner          User            @relation("OwnerPayments", fields: [ownerId], references: [id])
   dispute        Dispute?
+  ledgerEntries  LedgerEntry[]
+  payouts        Payout[]
 
   @@index([status])
+  @@index([depositStatus])
   @@index([mpesaReference])
   @@index([clientId])
   @@index([ownerId])
   @@index([serviceBookingId])
+}
+
+// Registo contabilístico imutável (append-only) dos movimentos do escrow.
+// Invariante aplicada pelo LedgerService: SUM(OUTFLOW) nunca excede SUM(INFLOW)
+// por pagamento. Nunca fazer UPDATE ou DELETE nestas linhas.
+model LedgerEntry {
+  id        String          @id @default(uuid())
+  paymentId String
+  direction LedgerDirection
+  party     LedgerParty
+  amount    Decimal         @db.Decimal(12, 2)
+  reason    String
+  actorId   String?
+  createdAt DateTime        @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+
+  @@index([paymentId])
+  @@index([createdAt])
+}
+
+// Transferência de dinheiro para fora do escrow (payout ao provider,
+// reembolso/devolução de depósito ao cliente). Enquanto a execução M-Pesa
+// for manual, o admin marca EXECUTED com a referência da transferência real.
+model Payout {
+  id             String       @id @default(uuid())
+  paymentId      String
+  recipientId    String
+  kind           PayoutKind
+  amount         Decimal      @db.Decimal(12, 2)
+  msisdn         String?
+  status         PayoutStatus @default(PENDING)
+  mpesaReference String?
+  executedById   String?
+  executedAt     DateTime?
+  failReason     String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  payment   Payment @relation(fields: [paymentId], references: [id])
+  recipient User    @relation("PayoutRecipient", fields: [recipientId], references: [id])
+
+  @@index([status])
+  @@index([recipientId])
+  @@index([paymentId])
+}
+
+// Strike aplicado a um provider que cancela reserva confirmada (política D2).
+// 3 strikes em 90 dias => suspensão de listagens.
+model ProviderStrike {
+  id        String   @id @default(uuid())
+  userId    String
+  bookingId String?
+  reason    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -244,6 +313,7 @@ model Dispute {
   serviceBookingId String?       @unique
   paymentId        String        @unique
   openedBy         String
+  type             DisputeType   @default(PAYMENT)
   reason           DisputeReason
   description      String
   evidenceUrls  String[]
@@ -602,6 +672,49 @@ enum PaymentStatus {
   FAILED
 }
 
+// Ciclo de vida do depósito (caução) — independente do PaymentStatus.
+// NONE: pagamento sem depósito. HELD: retido no escrow após confirmação.
+// RETURNED: devolvido ao cliente. CLAIMED: atribuído ao provider (dano).
+// SPLIT: resolução parcial de disputa de depósito.
+enum DepositStatus {
+  NONE
+  HELD
+  RETURNED
+  CLAIMED
+  SPLIT
+}
+
+enum LedgerDirection {
+  INFLOW
+  OUTFLOW
+}
+
+enum LedgerParty {
+  CLIENT
+  PROVIDER
+  PLATFORM
+}
+
+enum PayoutKind {
+  PROVIDER_PAYOUT
+  CLIENT_REFUND
+  DEPOSIT_RETURN
+  DEPOSIT_CLAIM
+}
+
+enum PayoutStatus {
+  PENDING
+  EXECUTED
+  FAILED
+}
+
+// PAYMENT: disputa do cliente sobre o pagamento (antes/durante o aluguer).
+// DEPOSIT: reclamação do provider sobre o depósito (após devolução).
+enum DisputeType {
+  PAYMENT
+  DEPOSIT
+}
+
 enum DisputeReason {
   NOT_DELIVERED
   DAMAGED
@@ -625,8 +738,19 @@ enum AuditAction {
   PAYMENT_INITIATED
   PAYMENT_MARKED_HELD
   PAYMENT_RELEASED
+  PAYMENT_AUTO_RELEASED
   PAYMENT_REFUNDED
   PAYMENT_PARTIALLY_REFUNDED
+  DEPOSIT_RETURNED
+  DEPOSIT_AUTO_RETURNED
+  DEPOSIT_CLAIM_OPENED
+  DEPOSIT_CLAIMED
+  PAYOUT_EXECUTED
+  PAYOUT_FAILED
+  PAYOUT_RETRIED
+  PROVIDER_STRIKE_ISSUED
+  PROVIDER_LISTINGS_SUSPENDED
+  BOOKING_RETURN_CONFIRMED
   DISPUTE_OPENED
   DISPUTE_RESPONDED
   DISPUTE_RESOLVED_CLIENT

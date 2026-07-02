@@ -43,9 +43,15 @@ export class VerificationsController {
       'Faz upload prévio dos documentos para o Cloudinary (mesmo flow das fotos de equipment) e submete aqui as URLs resultantes. Reset após rejeição é permitido.',
   })
   @ApiBody({ type: SubmitVerificationDto })
-  @ApiResponse({ status: 201, description: 'Documentos submetidos. Em revisão.' })
+  @ApiResponse({
+    status: 201,
+    description: 'Documentos submetidos. Em revisão.',
+  })
   @ApiResponse({ status: 400, description: 'Já verificado ou já pendente.' })
-  submit(@CurrentUser() user: { id: string }, @Body() dto: SubmitVerificationDto) {
+  submit(
+    @CurrentUser() user: { id: string },
+    @Body() dto: SubmitVerificationDto,
+  ) {
     return this.verifications.submit(user.id, dto);
   }
 
@@ -53,7 +59,10 @@ export class VerificationsController {
   @Get('users/me/verification')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Estado da minha verificação KYC' })
-  @ApiResponse({ status: 200, description: 'Estado obtido com sucesso (pode ser null).' })
+  @ApiResponse({
+    status: 200,
+    description: 'Estado obtido com sucesso (pode ser null).',
+  })
   getMyStatus(@CurrentUser() user: { id: string }) {
     return this.verifications.getMyStatus(user.id);
   }

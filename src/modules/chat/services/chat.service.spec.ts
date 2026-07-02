@@ -8,6 +8,7 @@ import { EquipmentStatus, UserRole } from '@prisma/client';
 
 import { ChatService } from './chat.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { PushService } from '../../../shared/push/push.service';
 
 const CLIENT_ID = 'client-uuid-001';
 const OWNER_ID = 'owner-uuid-001';
@@ -74,6 +75,8 @@ const makePrismaMock = () => ({
   $transaction: jest.fn(),
 });
 
+const pushMock = { send: jest.fn().mockResolvedValue(undefined) };
+
 describe('ChatService', () => {
   let service: ChatService;
   let prisma: ReturnType<typeof makePrismaMock>;
@@ -82,7 +85,11 @@ describe('ChatService', () => {
     prisma = makePrismaMock();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ChatService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        ChatService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: PushService, useValue: pushMock },
+      ],
     }).compile();
 
     service = module.get<ChatService>(ChatService);
@@ -104,16 +111,17 @@ describe('ChatService', () => {
       ).rejects.toThrow(new NotFoundException('Utilizador não encontrado.'));
     });
 
-    it('lanca ForbiddenException se quem inicia nao e CLIENT', async () => {
+    it('permite que um PROVIDER inicie conversa (regra so-CLIENT foi removida)', async () => {
+      // Qualquer utilizador pode reservar equipamento de outro, logo pode
+      // iniciar conversa; o fluxo prossegue ate a validacao do equipamento.
       prisma.user.findUnique.mockResolvedValue(
         makeUser(OWNER_ID, UserRole.PROVIDER),
       );
+      prisma.equipment.findUnique.mockResolvedValue(null);
 
       await expect(
         service.startConversation(OWNER_ID, validDto),
-      ).rejects.toThrow(
-        new ForbiddenException('Só clientes podem iniciar conversas.'),
-      );
+      ).rejects.toThrow('Equipamento não encontrado ou indisponível.');
     });
 
     it('lanca NotFoundException se equipment nao existe', async () => {

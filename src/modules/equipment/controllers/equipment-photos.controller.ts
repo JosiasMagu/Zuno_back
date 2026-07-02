@@ -11,8 +11,6 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
-import type { Express } from 'express';
-import { UserRole } from '@prisma/client';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -76,13 +74,16 @@ export class EquipmentPhotosController {
     },
   })
   @ApiResponse({ status: 201, description: 'Foto adicionada com sucesso.' })
-  @ApiResponse({ status: 400, description: 'Ficheiro inválido ou limite atingido.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Ficheiro inválido ou limite atingido.',
+  })
   @ApiResponse({ status: 401, description: 'Não autenticado.' })
   @ApiResponse({ status: 404, description: 'Equipamento não encontrado.' })
   uploadOne(
     @CurrentUser() user: { id: string },
     @Param('equipmentId') equipmentId: string,
-    @UploadedFile() file: any[],
+    @UploadedFile() file: Express.Multer.File,
   ) {
     return this.photosService.uploadPhoto(user.id, equipmentId, file);
   }
@@ -118,13 +119,16 @@ export class EquipmentPhotosController {
     },
   })
   @ApiResponse({ status: 201, description: 'Fotos adicionadas com sucesso.' })
-  @ApiResponse({ status: 400, description: 'Ficheiros inválidos ou limite atingido.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Ficheiros inválidos ou limite atingido.',
+  })
   @ApiResponse({ status: 401, description: 'Não autenticado.' })
   @ApiResponse({ status: 404, description: 'Equipamento não encontrado.' })
   uploadMultiple(
     @CurrentUser() user: { id: string },
     @Param('equipmentId') equipmentId: string,
-    @UploadedFiles() files: any[],
+    @UploadedFiles() files: Express.Multer.File[],
   ) {
     return this.photosService.uploadMultiplePhotos(user.id, equipmentId, files);
   }
@@ -135,13 +139,20 @@ export class EquipmentPhotosController {
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Definir foto como principal',
-    description: 'A foto principal aparece como capa do equipamento no catálogo.',
+    description:
+      'A foto principal aparece como capa do equipamento no catálogo.',
   })
   @ApiParam({ name: 'equipmentId', description: 'ID do equipamento' })
   @ApiParam({ name: 'photoId', description: 'ID da foto' })
-  @ApiResponse({ status: 200, description: 'Foto principal definida com sucesso.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Foto principal definida com sucesso.',
+  })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
-  @ApiResponse({ status: 404, description: 'Foto ou equipamento não encontrado.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Foto ou equipamento não encontrado.',
+  })
   setPrimary(
     @CurrentUser() user: { id: string },
     @Param('equipmentId') equipmentId: string,
@@ -164,7 +175,10 @@ export class EquipmentPhotosController {
   @ApiParam({ name: 'photoId', description: 'ID da foto' })
   @ApiResponse({ status: 200, description: 'Foto removida com sucesso.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
-  @ApiResponse({ status: 404, description: 'Foto ou equipamento não encontrado.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Foto ou equipamento não encontrado.',
+  })
   deletePhoto(
     @CurrentUser() user: { id: string },
     @Param('equipmentId') equipmentId: string,

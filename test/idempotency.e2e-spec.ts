@@ -4,10 +4,7 @@ import request from 'supertest';
 
 import { AppModule } from '../src/app.module';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
-import {
-  truncateAllTables,
-  disconnectTestPrisma,
-} from './helpers/db';
+import { truncateAllTables, disconnectTestPrisma } from './helpers/db';
 import {
   seedMinimalTestData,
   TEST_PASSWORD,
@@ -87,7 +84,9 @@ describe('Idempotency E2E — POST /bookings', () => {
     await disconnectTestPrisma();
   });
 
-  function bookingBody(extra: Partial<{ startDate: string; endDate: string }> = {}) {
+  function bookingBody(
+    extra: Partial<{ startDate: string; endDate: string }> = {},
+  ) {
     const today = new Date();
     const startDate = new Date(today);
     startDate.setDate(startDate.getDate() + 7);

@@ -91,7 +91,8 @@ export class ServicesController {
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Listar os meus serviços',
-    description: 'PROVIDER vê os seus serviços em todos os estados. ADMIN vê todos.',
+    description:
+      'PROVIDER vê os seus serviços em todos os estados. ADMIN vê todos.',
   })
   @ApiResponse({ status: 200, description: 'Serviços obtidos com sucesso.' })
   @ApiResponse({ status: 401, description: 'Não autenticado.' })
@@ -108,7 +109,10 @@ export class ServicesController {
   @ApiOperation({
     summary: '[ADMIN] Listar serviços pendentes de aprovação',
   })
-  @ApiResponse({ status: 200, description: 'Serviços pendentes obtidos com sucesso.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Serviços pendentes obtidos com sucesso.',
+  })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   findPending(@CurrentUser() user: { id: string }) {
     return this.servicesService.findPending(user.id);
@@ -170,7 +174,10 @@ export class ServicesController {
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Alternar disponibilidade do serviço' })
   @ApiParam({ name: 'id' })
-  @ApiResponse({ status: 200, description: 'Disponibilidade alterada com sucesso.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Disponibilidade alterada com sucesso.',
+  })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
   @ApiResponse({ status: 404, description: 'Serviço não encontrado.' })
   toggleAvailability(

@@ -24,8 +24,12 @@ export class SentryShutdownService implements OnApplicationShutdown {
     );
     try {
       await flushSentry();
-    } catch (err) {
-      this.logger.error({ err }, 'Falha ao descarregar Sentry no shutdown');
+    } catch (err: unknown) {
+      this.logger.error(
+        `Falha ao descarregar Sentry no shutdown: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
     }
   }
 }

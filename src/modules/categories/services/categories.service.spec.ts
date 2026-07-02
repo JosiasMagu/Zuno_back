@@ -1,6 +1,8 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { AuditAction, CategoryKind } from '@prisma/client';
 
+import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { CategoriesService } from './categories.service';
 
@@ -9,6 +11,7 @@ import { CategoriesService } from './categories.service';
 const CAT_ID = 'cat-uuid-001';
 const PARENT_ID = 'cat-uuid-parent';
 const OTHER_CAT_ID = 'cat-uuid-other';
+const ADMIN_ID = 'admin-uuid-001';
 
 // FACTORIES
 
@@ -19,6 +22,7 @@ const makeCategory = (overrides: Record<string, unknown> = {}) => ({
   iconUrl: undefined,
   parentId: undefined,
   isActive: true,
+  kind: CategoryKind.EQUIPMENT,
   createdAt: new Date(),
   updatedAt: new Date(),
   parent: null,
@@ -27,6 +31,10 @@ const makeCategory = (overrides: Record<string, unknown> = {}) => ({
   services: [],
   ...overrides,
 });
+
+// MOCK DO AUDIT
+
+const auditMock = { record: jest.fn() };
 
 // MOCK DO PRISMA
 
@@ -52,6 +60,7 @@ describe('CategoriesService', () => {
       providers: [
         CategoriesService,
         { provide: PrismaService, useValue: prisma },
+        { provide: AuditService, useValue: auditMock },
       ],
     }).compile();
 
@@ -69,7 +78,7 @@ describe('CategoriesService', () => {
       prisma.category.findUnique.mockResolvedValue(null);
       prisma.category.create.mockResolvedValue(makeCategory());
 
-      const result = await service.create(dto);
+      const result = await service.create(ADMIN_ID, dto);
 
       expect(result.message).toBe('Categoria criada com sucesso.');
       expect(result.data.id).toBe(CAT_ID);
@@ -80,7 +89,7 @@ describe('CategoriesService', () => {
       prisma.category.findUnique.mockResolvedValue(null);
       prisma.category.create.mockResolvedValue(makeCategory());
 
-      await service.create({
+      await service.create(ADMIN_ID, {
         name: 'Construção Civil',
         iconUrl: undefined,
         parentId: undefined,
@@ -96,7 +105,7 @@ describe('CategoriesService', () => {
       prisma.category.findUnique.mockResolvedValue(null);
       prisma.category.create.mockResolvedValue(makeCategory());
 
-      await service.create({
+      await service.create(ADMIN_ID, {
         name: '  Agricultura  ',
         iconUrl: undefined,
         parentId: undefined,
@@ -113,7 +122,7 @@ describe('CategoriesService', () => {
       prisma.category.findUnique.mockResolvedValue(null);
       prisma.category.create.mockResolvedValue(makeCategory());
 
-      await service.create(dto);
+      await service.create(ADMIN_ID, dto);
 
       const createCall = prisma.category.create.mock.calls[0][0] as {
         data: Record<string, unknown>;
@@ -125,7 +134,7 @@ describe('CategoriesService', () => {
       prisma.category.findUnique.mockResolvedValue(null);
       prisma.category.create.mockResolvedValue(makeCategory());
 
-      await service.create({
+      await service.create(ADMIN_ID, {
         name: 'Construção',
         iconUrl: undefined,
         parentId: undefined,
@@ -143,7 +152,7 @@ describe('CategoriesService', () => {
         makeCategory({ iconUrl: 'https://cdn.zuno.co.mz/icon.svg' }),
       );
 
-      await service.create({
+      await service.create(ADMIN_ID, {
         name: 'Construção',
         iconUrl: 'https://cdn.zuno.co.mz/icon.svg',
         parentId: undefined,
@@ -157,7 +166,7 @@ describe('CategoriesService', () => {
 
     it('lança BadRequestException se nome gera slug vazio (ex: só caracteres especiais)', async () => {
       await expect(
-        service.create({
+        service.create(ADMIN_ID, {
           name: '!!!',
           iconUrl: undefined,
           parentId: undefined,
@@ -169,7 +178,7 @@ describe('CategoriesService', () => {
     it('lança BadRequestException se já existe categoria com o mesmo slug', async () => {
       prisma.category.findUnique.mockResolvedValue(makeCategory());
 
-      await expect(service.create(dto)).rejects.toThrow(
+      await expect(service.create(ADMIN_ID, dto)).rejects.toThrow(
         new BadRequestException('Já existe uma categoria com esse nome.'),
       );
       expect(prisma.category.create).not.toHaveBeenCalled();
@@ -192,7 +201,7 @@ describe('CategoriesService', () => {
         makeCategory({ parentId: PARENT_ID }),
       );
 
-      const result = await service.create({
+      const result = await service.create(ADMIN_ID, {
         name: 'Construção',
         iconUrl: undefined,
         parentId: PARENT_ID,
@@ -206,7 +215,7 @@ describe('CategoriesService', () => {
         .mockResolvedValueOnce(null); // parent não encontrado
 
       await expect(
-        service.create({
+        service.create(ADMIN_ID, {
           name: 'Construção',
           iconUrl: undefined,
           parentId: 'pai-inexistente',
@@ -224,7 +233,7 @@ describe('CategoriesService', () => {
         );
 
       await expect(
-        service.create({
+        service.create(ADMIN_ID, {
           name: 'Construção',
           iconUrl: undefined,
           parentId: PARENT_ID,
@@ -234,6 +243,32 @@ describe('CategoriesService', () => {
           'Não é permitido vincular a uma categoria pai inativa.',
         ),
       );
+    });
+
+    it('regista auditoria CATEGORY_CREATED com o actorId do admin', async () => {
+      prisma.category.findUnique.mockResolvedValue(null);
+      prisma.category.create.mockResolvedValue(makeCategory());
+
+      await service.create(ADMIN_ID, dto);
+
+      expect(auditMock.record).toHaveBeenCalledTimes(1);
+      expect(auditMock.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: AuditAction.CATEGORY_CREATED,
+          actorId: ADMIN_ID,
+          targetType: 'Category',
+          targetId: CAT_ID,
+        }),
+      );
+    });
+
+    it('não regista auditoria quando a criação falha', async () => {
+      prisma.category.findUnique.mockResolvedValue(makeCategory());
+
+      await expect(service.create(ADMIN_ID, dto)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(auditMock.record).not.toHaveBeenCalled();
     });
   });
 
@@ -285,6 +320,34 @@ describe('CategoriesService', () => {
 
       const result = await service.findAll();
       expect(result.data).toHaveLength(0);
+    });
+
+    it('filtro kind=EQUIPMENT inclui categorias EQUIPMENT e BOTH', async () => {
+      prisma.category.findMany.mockResolvedValue([]);
+
+      await service.findAll({ kind: CategoryKind.EQUIPMENT });
+
+      const whereArg = (
+        prisma.category.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
+      expect(whereArg.kind).toEqual({
+        in: [CategoryKind.EQUIPMENT, CategoryKind.BOTH],
+      });
+    });
+
+    it('filtro kind=BOTH devolve apenas categorias BOTH', async () => {
+      prisma.category.findMany.mockResolvedValue([]);
+
+      await service.findAll({ kind: CategoryKind.BOTH });
+
+      const whereArg = (
+        prisma.category.findMany.mock.calls[0][0] as {
+          where: Record<string, unknown>;
+        }
+      ).where;
+      expect(whereArg.kind).toBe(CategoryKind.BOTH);
     });
   });
 
@@ -343,7 +406,9 @@ describe('CategoriesService', () => {
         makeCategory({ name: 'Agricultura', slug: 'agricultura' }),
       );
 
-      const result = await service.update(CAT_ID, { name: 'Agricultura' });
+      const result = await service.update(ADMIN_ID, CAT_ID, {
+        name: 'Agricultura',
+      });
 
       expect(result.message).toBe('Categoria atualizada com sucesso.');
       const updateCall = prisma.category.update.mock.calls[0][0] as {
@@ -359,7 +424,7 @@ describe('CategoriesService', () => {
 
       prisma.category.update.mockResolvedValue(makeCategory());
 
-      await service.update(CAT_ID, { name: '  Logística  ' });
+      await service.update(ADMIN_ID, CAT_ID, { name: '  Logística  ' });
 
       const updateCall = prisma.category.update.mock.calls[0][0] as {
         data: Record<string, unknown>;
@@ -370,9 +435,9 @@ describe('CategoriesService', () => {
     it('lança BadRequestException se novo nome gera slug vazio', async () => {
       prisma.category.findUnique.mockResolvedValue(makeCategory());
 
-      await expect(service.update(CAT_ID, { name: '!!!' })).rejects.toThrow(
-        new BadRequestException('Nome de categoria inválido.'),
-      );
+      await expect(
+        service.update(ADMIN_ID, CAT_ID, { name: '!!!' }),
+      ).rejects.toThrow(new BadRequestException('Nome de categoria inválido.'));
       expect(prisma.category.update).not.toHaveBeenCalled();
     });
 
@@ -384,7 +449,7 @@ describe('CategoriesService', () => {
         .mockResolvedValueOnce(outra); // slug em uso por outra
 
       await expect(
-        service.update(CAT_ID, { name: 'Agricultura' }),
+        service.update(ADMIN_ID, CAT_ID, { name: 'Agricultura' }),
       ).rejects.toThrow(
         new BadRequestException('Já existe uma categoria com esse nome.'),
       );
@@ -399,16 +464,18 @@ describe('CategoriesService', () => {
 
       prisma.category.update.mockResolvedValue(makeCategory());
 
-      const result = await service.update(CAT_ID, { name: 'Construção' });
+      const result = await service.update(ADMIN_ID, CAT_ID, {
+        name: 'Construção',
+      });
       expect(result.message).toBe('Categoria atualizada com sucesso.');
     });
 
     it('lança NotFoundException se categoria não existe', async () => {
       prisma.category.findUnique.mockResolvedValue(null);
 
-      await expect(service.update(CAT_ID, { name: 'Novo' })).rejects.toThrow(
-        new NotFoundException('Categoria não encontrada.'),
-      );
+      await expect(
+        service.update(ADMIN_ID, CAT_ID, { name: 'Novo' }),
+      ).rejects.toThrow(new NotFoundException('Categoria não encontrada.'));
       expect(prisma.category.update).not.toHaveBeenCalled();
     });
 
@@ -417,16 +484,16 @@ describe('CategoriesService', () => {
         makeCategory({ isActive: false }),
       );
 
-      await expect(service.update(CAT_ID, { name: 'Novo' })).rejects.toThrow(
-        new NotFoundException('Categoria não encontrada.'),
-      );
+      await expect(
+        service.update(ADMIN_ID, CAT_ID, { name: 'Novo' }),
+      ).rejects.toThrow(new NotFoundException('Categoria não encontrada.'));
     });
 
     it('lança BadRequestException se parentId é o próprio id da categoria', async () => {
       prisma.category.findUnique.mockResolvedValue(makeCategory());
 
       await expect(
-        service.update(CAT_ID, { parentId: CAT_ID }),
+        service.update(ADMIN_ID, CAT_ID, { parentId: CAT_ID }),
       ).rejects.toThrow(
         new BadRequestException('Uma categoria não pode ser pai dela mesma.'),
       );
@@ -438,7 +505,7 @@ describe('CategoriesService', () => {
         .mockResolvedValueOnce(null); // parent não encontrado
 
       await expect(
-        service.update(CAT_ID, { parentId: 'pai-invalido' }),
+        service.update(ADMIN_ID, CAT_ID, { parentId: 'pai-invalido' }),
       ).rejects.toThrow(
         new BadRequestException('Categoria pai não encontrada.'),
       );
@@ -452,7 +519,7 @@ describe('CategoriesService', () => {
         );
 
       await expect(
-        service.update(CAT_ID, { parentId: PARENT_ID }),
+        service.update(ADMIN_ID, CAT_ID, { parentId: PARENT_ID }),
       ).rejects.toThrow(
         new BadRequestException(
           'Não é permitido vincular a uma categoria pai inativa.',
@@ -466,7 +533,7 @@ describe('CategoriesService', () => {
         makeCategory({ iconUrl: undefined }),
       );
 
-      await service.update(CAT_ID, { iconUrl: '   ' });
+      await service.update(ADMIN_ID, CAT_ID, { iconUrl: '   ' });
 
       const updateCall = prisma.category.update.mock.calls[0][0] as {
         data: Record<string, unknown>;
@@ -478,7 +545,7 @@ describe('CategoriesService', () => {
       prisma.category.findUnique.mockResolvedValue(makeCategory());
       prisma.category.update.mockResolvedValue(makeCategory());
 
-      await service.update(CAT_ID, {}); // dto vazio
+      await service.update(ADMIN_ID, CAT_ID, {}); // dto vazio
 
       const updateCall = prisma.category.update.mock.calls[0][0] as {
         data: Record<string, unknown>;
@@ -499,7 +566,7 @@ describe('CategoriesService', () => {
       );
       prisma.category.update.mockResolvedValue({});
 
-      const result = await service.remove(CAT_ID);
+      const result = await service.remove(ADMIN_ID, CAT_ID);
 
       expect(result.message).toBe('Categoria removida com sucesso.');
       expect(prisma.category.update).toHaveBeenCalledWith(
@@ -513,7 +580,7 @@ describe('CategoriesService', () => {
       );
       prisma.category.update.mockResolvedValue({});
 
-      await service.remove(CAT_ID);
+      await service.remove(ADMIN_ID, CAT_ID);
 
       // Se delete fosse chamado, o mock sem delete rebentaria.
       // Confirmamos que update foi chamado em vez disso.
@@ -523,7 +590,7 @@ describe('CategoriesService', () => {
     it('lança NotFoundException se categoria não existe', async () => {
       prisma.category.findUnique.mockResolvedValue(null);
 
-      await expect(service.remove(CAT_ID)).rejects.toThrow(
+      await expect(service.remove(ADMIN_ID, CAT_ID)).rejects.toThrow(
         new NotFoundException('Categoria não encontrada.'),
       );
       expect(prisma.category.update).not.toHaveBeenCalled();
@@ -534,7 +601,7 @@ describe('CategoriesService', () => {
         makeCategory({ isActive: false }),
       );
 
-      await expect(service.remove(CAT_ID)).rejects.toThrow(
+      await expect(service.remove(ADMIN_ID, CAT_ID)).rejects.toThrow(
         new NotFoundException('Categoria não encontrada.'),
       );
     });
@@ -549,7 +616,7 @@ describe('CategoriesService', () => {
         }),
       );
 
-      await expect(service.remove(CAT_ID)).rejects.toThrow(
+      await expect(service.remove(ADMIN_ID, CAT_ID)).rejects.toThrow(
         new BadRequestException(
           'Não é possível remover uma categoria que possui subcategorias ativas.',
         ),
@@ -565,12 +632,46 @@ describe('CategoriesService', () => {
         }),
       );
 
-      await expect(service.remove(CAT_ID)).rejects.toThrow(
+      await expect(service.remove(ADMIN_ID, CAT_ID)).rejects.toThrow(
         new BadRequestException(
           'Não é possível remover uma categoria que possui equipamentos vinculados.',
         ),
       );
       expect(prisma.category.update).not.toHaveBeenCalled();
+    });
+
+    it('lança BadRequestException se categoria tem serviços vinculados', async () => {
+      prisma.category.findUnique.mockResolvedValue(
+        makeCategory({
+          children: [],
+          equipment: [],
+          services: [{ id: 'service-1', status: 'ACTIVE' }],
+        }),
+      );
+
+      await expect(service.remove(ADMIN_ID, CAT_ID)).rejects.toThrow(
+        new BadRequestException(
+          'Não é possível remover uma categoria que possui serviços vinculados.',
+        ),
+      );
+      expect(prisma.category.update).not.toHaveBeenCalled();
+    });
+
+    it('regista auditoria CATEGORY_DEACTIVATED com o actorId do admin', async () => {
+      prisma.category.findUnique.mockResolvedValue(makeCategory());
+      prisma.category.update.mockResolvedValue({});
+
+      await service.remove(ADMIN_ID, CAT_ID);
+
+      expect(auditMock.record).toHaveBeenCalledTimes(1);
+      expect(auditMock.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: AuditAction.CATEGORY_DEACTIVATED,
+          actorId: ADMIN_ID,
+          targetType: 'Category',
+          targetId: CAT_ID,
+        }),
+      );
     });
   });
 });

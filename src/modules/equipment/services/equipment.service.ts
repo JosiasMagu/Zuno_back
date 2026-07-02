@@ -60,14 +60,25 @@ export class EquipmentService {
     private readonly verifications: VerificationsService,
     private readonly push: PushService,
     private readonly metrics: MetricsService,
-  ) { }
+  ) {}
 
   async create(ownerId: string, dto: CreateEquipmentDto) {
     const categoryId = dto.categoryId.trim();
     const owner = await this.prisma.user.findUnique({
       where: { id: ownerId },
-      select: { role: true },
+      select: { role: true, listingsSuspendedUntil: true },
     });
+
+    // Política D2: providers com strikes acumulados ficam suspensos de
+    // publicar novas listagens durante o período de suspensão.
+    if (
+      owner?.listingsSuspendedUntil &&
+      owner.listingsSuspendedUntil > new Date()
+    ) {
+      throw new ForbiddenException(
+        'A tua conta está temporariamente suspensa de publicar listagens devido a cancelamentos de reservas confirmadas.',
+      );
+    }
 
     if (owner?.role === UserRole.CLIENT) {
       await this.prisma.user.update({
@@ -355,7 +366,9 @@ export class EquipmentService {
           totalPayout: Number(payouts._sum?.ownerPayout ?? 0),
         },
         rating: {
-          average: ratingAgg?.totalRating ? Number(ratingAgg.totalRating) : null,
+          average: ratingAgg?.totalRating
+            ? Number(ratingAgg.totalRating)
+            : null,
           totalReviews: ratingAgg?.totalReviews ?? 0,
         },
       },
@@ -416,6 +429,8 @@ export class EquipmentService {
   }
 
   async approve(adminId: string, equipmentId: string) {
+    await this.assertAdmin(adminId);
+
     const equipment = await this.prisma.equipment.findUnique({
       where: { id: equipmentId },
       select: { id: true, status: true },
@@ -459,12 +474,14 @@ export class EquipmentService {
     this.metrics.businessEvents.inc({ event: 'equipment_approved' });
 
     if (updated.owner?.pushToken) {
-      this.push.send({
-        to: updated.owner.pushToken,
-        title: '✅ Equipamento aprovado',
-        body: `"${updated.title}" já está visível no catálogo público.`,
-        data: { type: 'equipment_approved', equipmentId },
-      }).catch(() => {});
+      this.push
+        .send({
+          to: updated.owner.pushToken,
+          title: '✅ Equipamento aprovado',
+          body: `"${updated.title}" já está visível no catálogo público.`,
+          data: { type: 'equipment_approved', equipmentId },
+        })
+        .catch(() => {});
     }
 
     return {
@@ -474,6 +491,8 @@ export class EquipmentService {
   }
 
   async reject(adminId: string, equipmentId: string, reason?: string) {
+    await this.assertAdmin(adminId);
+
     const equipment = await this.prisma.equipment.findUnique({
       where: { id: equipmentId },
       select: { id: true, status: true },
@@ -713,7 +732,7 @@ export class EquipmentService {
   }
 
   async findPending(adminId: string) {
-    void adminId;
+    await this.assertAdmin(adminId);
 
     const items = await this.prisma.equipment.findMany({
       where: { status: EquipmentStatus.PENDING_REVIEW },
@@ -729,6 +748,21 @@ export class EquipmentService {
       message: 'Equipamentos pendentes de revisão obtidos com sucesso.',
       data: items.map((item) => EquipmentPresenter.toOwnerListingItem(item)),
     };
+  }
+
+  // Defesa em profundidade: além do RolesGuard no controller, os métodos
+  // de moderação revalidam o role na base de dados.
+  private async assertAdmin(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true },
+    });
+
+    if (!user || user.role !== UserRole.ADMIN) {
+      throw new ForbiddenException(
+        'Não tens permissão para executar esta operação.',
+      );
+    }
   }
 
   private buildOrderBy(
