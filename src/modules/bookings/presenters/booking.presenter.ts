@@ -63,6 +63,7 @@ type BookingDetailsEntity = BookingBaseEntity & {
     id: string;
     status: string;
     totalCharged: unknown;
+    depositStatus?: string;
     mpesaReference: string | null;
     receiptNumber: string;
     heldAt: Date | null;
@@ -165,6 +166,7 @@ export class BookingPresenter {
             id: booking.payment.id,
             status: booking.payment.status,
             totalCharged: Number(booking.payment.totalCharged),
+            depositStatus: booking.payment.depositStatus,
             mpesaReference: booking.payment.mpesaReference,
             receiptNumber: booking.payment.receiptNumber,
             heldAt: booking.payment.heldAt,

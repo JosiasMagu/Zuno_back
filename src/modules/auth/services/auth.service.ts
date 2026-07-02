@@ -484,6 +484,7 @@ export class AuthService {
     isActive: boolean;
     avatarUrl: string | null;
     bio: string | null;
+    payoutMsisdn?: string | null;
     createdAt: Date;
     updatedAt?: Date;
   }) {
@@ -497,6 +498,7 @@ export class AuthService {
       isActive: user.isActive,
       avatarUrl: user.avatarUrl,
       bio: user.bio,
+      payoutMsisdn: user.payoutMsisdn ?? null,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };

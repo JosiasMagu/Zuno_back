@@ -311,6 +311,7 @@ export class BookingsService {
             id: true,
             status: true,
             totalCharged: true,
+            depositStatus: true,
             mpesaReference: true,
             receiptNumber: true,
             heldAt: true,
