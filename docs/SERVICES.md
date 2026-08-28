@@ -366,4 +366,4 @@ Em `NODE_ENV=test` o cron é no-op (não interfere com E2E).
 
 ## Backlog
 
-Ver secção "O que está em falta" em `CLAUDE.md`.
+Ver a lista de pendentes em `docs/RUNBOOK.md`.

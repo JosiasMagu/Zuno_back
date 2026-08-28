@@ -8,7 +8,10 @@ import {
 import { PrismaPg } from '@prisma/adapter-pg';
 import * as bcrypt from 'bcrypt';
 
-const SEED_PASSWORD = 'Zuno@2026!';
+if (process.env.NODE_ENV === 'production' && !process.env.SEED_PASSWORD) {
+  throw new Error('Define SEED_PASSWORD antes de correr o seed em producao.');
+}
+const SEED_PASSWORD = process.env.SEED_PASSWORD ?? 'dev-only-password';
 const BCRYPT_ROUNDS = 10;
 
 function buildPrisma(): PrismaClient {

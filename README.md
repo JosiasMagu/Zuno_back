@@ -155,7 +155,7 @@ test/
   setup-e2e.ts    valida DATABASE_URL_TEST e forca NODE_ENV=test
 ```
 
-Ver `CLAUDE.md` para regras de negocio criticas (escrow, fluxo de disputas,
+Ver `docs/RUNBOOK.md` e `docs/SERVICES.md` para regras de negocio criticas (escrow, fluxo de disputas,
 restricoes de role) e decisoes tecnicas nao obvias.
 
 ---

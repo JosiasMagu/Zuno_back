@@ -184,7 +184,7 @@ export class PaymentsService {
             ...(query.status ? { status: query.status } : {}),
           }
         : {
-            OR: [{ clientId: userId }, { providerId: userId }],
+            OR: [{ clientId: userId }, { ownerId: userId }],
             ...(query.status ? { status: query.status } : {}),
           };
 
