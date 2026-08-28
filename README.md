@@ -168,3 +168,15 @@ restricoes de role) e decisoes tecnicas nao obvias.
 - `getOrThrow` para variaveis de ambiente obrigatorias, `get` com default para opcionais.
 - Mensagens de erro user-facing em portugues correcto (com acentos).
 - Comentarios internos sem acentos.
+
+---
+
+## Equipa e creditos
+
+Projecto desenvolvido em equipa (2026):
+
+- **Josias Fernando Magumba** ([@JosiasMagu](https://github.com/JosiasMagu)) - backend principal: bookings, escrow/pagamentos, chat em tempo real, autenticacao, testes.
+- [@luzartecompany-stack](https://github.com/luzartecompany-stack) - arquitectura, auditoria e metricas de negocio.
+- [@biemosfm](https://github.com/biemosfm) - administracao e gestao de equipamentos.
+
+Codigo publico para fins de portefolio e aprendizagem.
