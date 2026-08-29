@@ -1,9 +1,14 @@
 # Zuno Backend
 
 Marketplace de aluguer de equipamentos para o mercado mocambicano.
-Conecta proprietarios de equipamentos (PROVIDER) com clientes (CLIENT). Pagamento
-via M-Pesa com sistema de escrow (cofre digital): o dinheiro fica retido na
-plataforma ate o cliente confirmar a entrega.
+Conecta proprietarios de equipamentos (PROVIDER) com clientes (CLIENT), com
+sistema de escrow (cofre digital): o valor fica retido na plataforma ate o
+cliente confirmar a entrega.
+
+Estado actual: a integracao com o M-Pesa ainda nao esta feita. Nesta fase a
+confirmacao do pagamento e marcada manualmente por um administrador (ver
+`docs/RUNBOOK.md`). A logica do escrow, disputas e reembolsos esta implementada
+e coberta por testes.
 
 **Stack:** NestJS 11 + Prisma 7 + PostgreSQL + Socket.IO + Cloudinary
 **Moeda:** MZN (Meticais)
