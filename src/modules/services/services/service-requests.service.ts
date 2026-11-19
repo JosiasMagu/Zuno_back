@@ -27,6 +27,7 @@ const SERVICE_SELECT = {
   acceptsUrgent: true,
   status: true,
   isActive: true,
+  provider: { select: { isActive: true } },
 } as const;
 
 const CLIENT_SELECT = {
@@ -61,7 +62,13 @@ export class ServiceRequestsService {
 
     if (!service) throw new NotFoundException('Serviço não encontrado.');
 
-    if (service.status !== ServiceStatus.ACTIVE || !service.isActive) {
+    // O catálogo já esconde os anúncios de uma conta suspensa. Quem guardou
+    // o link também não faz o pedido.
+    if (
+      service.status !== ServiceStatus.ACTIVE ||
+      !service.isActive ||
+      !service.provider.isActive
+    ) {
       throw new BadRequestException(
         'Este serviço não está disponível para pedidos.',
       );

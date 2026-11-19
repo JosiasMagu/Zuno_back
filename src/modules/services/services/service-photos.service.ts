@@ -4,18 +4,23 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
+import { ServiceStatus, UserRole } from '@prisma/client';
 
 import { CloudinaryService } from '../../../shared/cloudinary/cloudinary.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { ServicesService } from './services.service';
 
 const MAX_PHOTOS_PER_SERVICE = 10;
+
+const BACK_TO_REVIEW =
+  ' Como as fotos mudaram, o anúncio volta à revisão antes de ficar público.';
 
 @Injectable()
 export class ServicePhotosService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryService,
+    private readonly services: ServicesService,
   ) {}
 
   async uploadPhoto(
@@ -34,7 +39,7 @@ export class ServicePhotosService {
       },
     });
 
-    if (!service) {
+    if (!service || service.status === ServiceStatus.DELETED) {
       throw new NotFoundException('Serviço não encontrado.');
     }
 
@@ -91,8 +96,15 @@ export class ServicePhotosService {
       },
     });
 
+    const backToReview = await this.services.reviewAfterPhotoChange({
+      actorId: userId,
+      actorRole: user.role,
+      service,
+      addedPhotos: true,
+    });
+
     return {
-      message: 'Foto adicionada com sucesso.',
+      message: `Foto adicionada com sucesso.${backToReview ? BACK_TO_REVIEW : ''}`,
       data: {
         id: photo.id,
         url: photo.url,
@@ -122,11 +134,12 @@ export class ServicePhotosService {
       select: {
         id: true,
         providerId: true,
+        status: true,
         photos: { select: { id: true, order: true } },
       },
     });
 
-    if (!service) {
+    if (!service || service.status === ServiceStatus.DELETED) {
       throw new NotFoundException('Serviço não encontrado.');
     }
 
@@ -180,8 +193,15 @@ export class ServicePhotosService {
       ),
     );
 
+    const backToReview = await this.services.reviewAfterPhotoChange({
+      actorId: userId,
+      actorRole: user.role,
+      service,
+      addedPhotos: true,
+    });
+
     return {
-      message: `${photos.length} foto(s) adicionada(s) com sucesso.`,
+      message: `${photos.length} foto(s) adicionada(s) com sucesso.${backToReview ? BACK_TO_REVIEW : ''}`,
       data: photos.map((photo) => ({
         id: photo.id,
         url: photo.url,
@@ -203,10 +223,10 @@ export class ServicePhotosService {
 
     const service = await this.prisma.service.findUnique({
       where: { id: photo.serviceId },
-      select: { id: true, providerId: true },
+      select: { id: true, providerId: true, status: true },
     });
 
-    if (!service) {
+    if (!service || service.status === ServiceStatus.DELETED) {
       throw new NotFoundException('Serviço não encontrado.');
     }
 
@@ -254,10 +274,10 @@ export class ServicePhotosService {
 
     const service = await this.prisma.service.findUnique({
       where: { id: photo.serviceId },
-      select: { id: true, providerId: true },
+      select: { id: true, providerId: true, status: true },
     });
 
-    if (!service) {
+    if (!service || service.status === ServiceStatus.DELETED) {
       throw new NotFoundException('Serviço não encontrado.');
     }
 
@@ -298,6 +318,19 @@ export class ServicePhotosService {
       }
     }
 
-    return { message: 'Foto removida com sucesso.' };
+    // Tirar uma foto não mostra nada de novo, mas num anúncio rejeitado é
+    // uma correcção e pede nova revisão.
+    const backToReview = await this.services.reviewAfterPhotoChange({
+      actorId: userId,
+      actorRole: user.role,
+      service,
+      addedPhotos: false,
+    });
+
+    return {
+      message: backToReview
+        ? 'Foto removida. O anúncio foi enviado de novo para revisão.'
+        : 'Foto removida com sucesso.',
+    };
   }
 }

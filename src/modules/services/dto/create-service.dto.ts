@@ -15,6 +15,9 @@ import {
   MinLength,
 } from 'class-validator';
 
+import { toOptionalBoolean } from '../../../common/dto/transforms';
+import { MAX_LISTING_PRICE } from '../../../shared/constants/policy';
+
 export class CreateServiceDto {
   @ApiProperty({
     example: 'Reparação eléctrica residencial',
@@ -48,6 +51,7 @@ export class CreateServiceDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0.01)
+  @Max(MAX_LISTING_PRICE)
   basePrice: number;
 
   @ApiPropertyOptional({
@@ -98,7 +102,7 @@ export class CreateServiceDto {
     default: false,
   })
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(({ value }: { value: unknown }) => toOptionalBoolean(value))
   @IsBoolean()
   acceptsUrgent?: boolean;
 

@@ -5,11 +5,13 @@ import { PaymentsService } from '../../payments/services/payments.service';
 import { BookingsService } from '../services/bookings.service';
 
 /**
- * Relógio do ciclo de vida do aluguer (D1):
- * - auto-release: entrega não confirmada nem disputada dentro do prazo
- *   → liberta o pagamento ao provider.
- * - auto-devolução: janela de reclamação do depósito expirada
- *   → conclui a reserva e devolve o depósito ao cliente.
+ * Relógio do ciclo de vida do aluguer (decisão D1 em docs/DECISOES-FASE-0.md):
+ * - auto-release: se a entrega não for confirmada nem disputada dentro do
+ *   prazo, liberta o pagamento ao provider.
+ * - auto-devolução: quando a janela de reclamação do depósito expira,
+ *   conclui a reserva e devolve o depósito ao cliente.
+ * - expiração: a reserva que não foi paga dentro do prazo expira e deixa de
+ *   ocupar as datas (decisão D5).
  *
  * Idempotente (as queries filtram por estado); seguro re-executar.
  * Desactivado em NODE_ENV=test, como o ServicesScheduler.
@@ -22,6 +24,22 @@ export class BookingsScheduler {
     private readonly paymentsService: PaymentsService,
     private readonly bookingsService: BookingsService,
   ) {}
+
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async expireUnpaidBookings() {
+    if (process.env.NODE_ENV === 'test') return;
+
+    try {
+      const expired = await this.bookingsService.expireUnpaidBookings();
+      if (expired > 0) {
+        this.logger.log(`Expiração: ${expired} reserva(s) por pagar.`);
+      }
+    } catch (error) {
+      this.logger.error(
+        `Expiração de reservas falhou: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 
   @Cron(CronExpression.EVERY_HOUR)
   async handleLifecycleDeadlines() {

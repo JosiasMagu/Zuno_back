@@ -1,16 +1,15 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { DisputeReason } from '@prisma/client';
 import {
-  ArrayMaxSize,
-  IsArray,
   IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
-  IsUrl,
   MaxLength,
   MinLength,
 } from 'class-validator';
+
+import { IsEvidenceUrls } from './evidence-urls';
 
 export class ClaimDepositDto {
   @ApiProperty({ description: 'ID da reserva de equipamento (ACTIVE).' })
@@ -40,9 +39,6 @@ export class ClaimDepositDto {
     description: 'URLs de fotos que evidenciam o dano.',
     type: [String],
   })
-  @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(10)
-  @IsUrl({}, { each: true, message: 'Cada evidência deve ser um URL válido.' })
+  @IsEvidenceUrls()
   evidenceUrls?: string[];
 }

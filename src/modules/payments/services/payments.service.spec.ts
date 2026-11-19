@@ -19,10 +19,15 @@ import {
   UserRole,
 } from '@prisma/client';
 
+import { ApiException } from '../../../common/exceptions/api.exception';
+import { ErrorCode } from '../../../common/exceptions/error-codes';
 import { AuditService } from '../../../shared/audit/audit.service';
 import { MetricsService } from '../../../shared/metrics/metrics.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { CollectionsService } from './collections.service';
+import { EscrowRefundService } from './escrow-refund.service';
 import { LedgerService } from './ledger.service';
+import { PaymentNotifier } from './payment-notifier.service';
 import { PaymentsService } from './payments.service';
 import { PayoutsService } from './payouts.service';
 
@@ -34,6 +39,15 @@ const ledgerMock = {
   balance: jest.fn(),
 };
 const payoutsMock = { createPending: jest.fn() };
+const notifierMock = {
+  held: jest.fn(),
+  released: jest.fn(),
+  autoReleaseReminder: jest.fn(),
+};
+const collectionsMock = {
+  confirmByAdmin: jest.fn(),
+  confirmSimulated: jest.fn(),
+};
 
 const CLIENT_ID = 'client-uuid-001';
 const OWNER_ID = 'owner-uuid-001';
@@ -43,6 +57,13 @@ const BOOKING_ID = 'booking-uuid-001';
 const SERVICE_BOOKING_ID = 'service-booking-uuid-001';
 const PAYMENT_ID = 'payment-uuid-001';
 const DISPUTE_ID = 'dispute-uuid-001';
+
+// O que o admin lê no extracto M-Pesa. O valor é o total de makePayment().
+const HELD_RECEIPT = {
+  mpesaReference: 'CHK7H3ABCD',
+  receivedAmount: 2700,
+  payerMsisdn: '+258840000002',
+};
 
 const makeUser = (id: string, role: UserRole) => ({
   id,
@@ -91,7 +112,7 @@ const makeBooking = (overrides: Record<string, unknown> = {}) => ({
   client: { id: CLIENT_ID, name: 'Cliente', avatarUrl: null },
   owner: { id: OWNER_ID, name: 'Proprietário', avatarUrl: null },
   payment: null,
-  dispute: null,
+  disputes: [],
   ...overrides,
 });
 
@@ -130,7 +151,7 @@ const makePayment = (overrides: Record<string, unknown> = {}) => ({
   serviceBooking: null,
   client: { id: CLIENT_ID, name: 'Cliente', avatarUrl: null },
   owner: { id: OWNER_ID, name: 'Proprietário', avatarUrl: null },
-  dispute: null,
+  disputes: [],
   ...overrides,
 });
 
@@ -143,10 +164,13 @@ const makePrisma = () => ({
     update: jest.fn(),
   },
   serviceBooking: {
+    findUnique: jest.fn(),
     update: jest.fn(),
   },
   payment: {
     findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
+    findFirst: jest.fn(),
     findMany: jest.fn(),
     count: jest.fn(),
     create: jest.fn(),
@@ -172,11 +196,14 @@ describe('PaymentsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
+        EscrowRefundService,
         { provide: PrismaService, useValue: prisma },
         { provide: AuditService, useValue: auditMock },
         { provide: MetricsService, useValue: metricsMock },
         { provide: LedgerService, useValue: ledgerMock },
         { provide: PayoutsService, useValue: payoutsMock },
+        { provide: PaymentNotifier, useValue: notifierMock },
+        { provide: CollectionsService, useValue: collectionsMock },
       ],
     }).compile();
 
@@ -250,7 +277,7 @@ describe('PaymentsService', () => {
     it('lança BadRequestException se a reserva tem disputa associada', async () => {
       prisma.booking.findUnique.mockResolvedValue(
         makeBooking({
-          dispute: { id: DISPUTE_ID, status: DisputeStatus.OPEN },
+          disputes: [{ id: DISPUTE_ID, status: DisputeStatus.OPEN }],
         }),
       );
 
@@ -444,109 +471,90 @@ describe('PaymentsService', () => {
   // markHeld()
 
   describe('markHeld()', () => {
-    // Re-leitura feita DENTRO da transacção (select reduzido).
-    const freshPending = (overrides: Record<string, unknown> = {}) => ({
-      status: PaymentStatus.PENDING,
-      totalCharged: new Prisma.Decimal(2700),
-      depositAmount: new Prisma.Decimal(500),
-      ...overrides,
-    });
-
-    const heldPayment = () =>
+    // A entrada do dinheiro em si (ledger, depósito, valor, referência) vive
+    // no CollectionsService e é testada em collections.service.spec.ts. Aqui
+    // fica o que o PaymentsService decide antes e depois dela.
+    const pendingPayment = (overrides: Record<string, unknown> = {}) =>
       makePayment({
-        status: PaymentStatus.HELD,
-        depositStatus: DepositStatus.HELD,
-        heldAt: new Date(),
+        status: PaymentStatus.PENDING,
+        booking: { id: BOOKING_ID, status: BookingStatus.CONFIRMED },
+        disputes: [],
+        ...overrides,
       });
 
-    const setupHappyPath = (fresh = freshPending()) => {
+    const setupAdmin = (payment = pendingPayment()) => {
       prisma.user.findUnique.mockResolvedValue(
         makeUser(ADMIN_ID, UserRole.ADMIN),
       );
-      prisma.payment.findUnique
-        .mockResolvedValueOnce(makePayment()) // pré-check (include)
-        .mockResolvedValueOnce(fresh); // re-leitura na transacção (select)
-      prisma.payment.update.mockResolvedValue(heldPayment());
-      runTransaction();
+      prisma.payment.findUnique.mockResolvedValue(payment);
+      prisma.payment.findUniqueOrThrow.mockResolvedValue(
+        makePayment({
+          status: PaymentStatus.HELD,
+          depositStatus: DepositStatus.HELD,
+          heldAt: new Date(),
+        }),
+      );
+      collectionsMock.confirmByAdmin.mockResolvedValue({
+        held: true,
+        excess: 0,
+      });
     };
 
-    it('ADMIN marca pagamento PENDING como HELD com sucesso', async () => {
-      setupHappyPath();
+    const markHeldError = async (): Promise<ApiException> => {
+      try {
+        await service.markHeld(ADMIN_ID, PAYMENT_ID, HELD_RECEIPT);
+      } catch (error) {
+        return error as ApiException;
+      }
+      throw new Error('O mark-held devia ter sido recusado.');
+    };
 
-      const result = await service.markHeld(ADMIN_ID, PAYMENT_ID);
+    it('ADMIN confirma pelo caminho único das cobranças, com o que leu no extracto', async () => {
+      setupAdmin();
+
+      const result = await service.markHeld(ADMIN_ID, PAYMENT_ID, HELD_RECEIPT);
 
       expect(result.message).toBe('Pagamento marcado como retido com sucesso.');
-      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-      // Duas leituras: pré-check fora + re-leitura dentro da transacção.
-      expect(prisma.payment.findUnique).toHaveBeenCalledTimes(2);
-      expect(prisma.payment.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ status: PaymentStatus.HELD }),
-        }),
+      expect(result.data.status).toBe(PaymentStatus.HELD);
+      expect(collectionsMock.confirmByAdmin).toHaveBeenCalledWith(
+        ADMIN_ID,
+        PAYMENT_ID,
+        HELD_RECEIPT,
       );
     });
 
-    it('grava heldAt na actualização', async () => {
-      setupHappyPath();
+    it('avisa as duas partes de que o pagamento foi confirmado', async () => {
+      setupAdmin();
 
-      await service.markHeld(ADMIN_ID, PAYMENT_ID);
+      await service.markHeld(ADMIN_ID, PAYMENT_ID, HELD_RECEIPT);
 
-      const updateCall = prisma.payment.update.mock.calls[0][0];
-      expect(updateCall.data.heldAt).toBeInstanceOf(Date);
+      expect(notifierMock.held).toHaveBeenCalledWith(PAYMENT_ID);
     });
 
-    // CRÍTICO: todo movimento de dinheiro escreve LedgerEntry na mesma transacção.
-    it('regista INFLOW do CLIENT no ledger com o totalCharged dentro da transacção', async () => {
-      setupHappyPath();
-
-      await service.markHeld(ADMIN_ID, PAYMENT_ID);
-
-      expect(ledgerMock.record).toHaveBeenCalledTimes(1);
-      expect(ledgerMock.record).toHaveBeenCalledWith(
-        prisma, // o tx passado ao callback da transacção
-        expect.objectContaining({
-          paymentId: PAYMENT_ID,
-          direction: LedgerDirection.INFLOW,
-          party: LedgerParty.CLIENT,
-          amount: 2700,
-          actorId: ADMIN_ID,
-        }),
-      );
-    });
-
-    it('marca depositStatus como HELD quando há depósito (> 0)', async () => {
-      setupHappyPath();
-
-      await service.markHeld(ADMIN_ID, PAYMENT_ID);
-
-      const updateCall = prisma.payment.update.mock.calls[0][0];
-      expect(updateCall.data.depositStatus).toBe(DepositStatus.HELD);
-    });
-
-    it('marca depositStatus como NONE quando não há depósito', async () => {
-      setupHappyPath(freshPending({ depositAmount: new Prisma.Decimal(0) }));
-
-      await service.markHeld(ADMIN_ID, PAYMENT_ID);
-
-      const updateCall = prisma.payment.update.mock.calls[0][0];
-      expect(updateCall.data.depositStatus).toBe(DepositStatus.NONE);
-    });
-
-    it('a re-leitura dentro da transacção detecta corrida: pagamento já não PENDING', async () => {
-      prisma.user.findUnique.mockResolvedValue(
-        makeUser(ADMIN_ID, UserRole.ADMIN),
-      );
-      prisma.payment.findUnique
-        .mockResolvedValueOnce(makePayment())
-        .mockResolvedValueOnce(freshPending({ status: PaymentStatus.HELD }));
-      runTransaction();
-
-      await expect(service.markHeld(ADMIN_ID, PAYMENT_ID)).rejects.toThrow(
-        BadRequestException,
+    it('não avisa ninguém quando a confirmação é recusada', async () => {
+      setupAdmin();
+      collectionsMock.confirmByAdmin.mockRejectedValue(
+        new BadRequestException('Valor a menos.'),
       );
 
-      expect(ledgerMock.record).not.toHaveBeenCalled();
-      expect(prisma.payment.update).not.toHaveBeenCalled();
+      await expect(
+        service.markHeld(ADMIN_ID, PAYMENT_ID, HELD_RECEIPT),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(notifierMock.held).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['cliente', { clientId: ADMIN_ID }],
+      ['dono', { ownerId: ADMIN_ID }],
+    ])('recusa a um admin que é o %s da reserva', async (_role, parties) => {
+      setupAdmin(pendingPayment(parties));
+
+      const error = await markHeldError();
+
+      expect(error.getStatus()).toBe(403);
+      expect(error.errorCode).toBe(ErrorCode.MONEY_CONTROL_VIOLATION);
+      expect(collectionsMock.confirmByAdmin).not.toHaveBeenCalled();
     });
 
     it('CLIENT não pode marcar como retido — recebe ForbiddenException', async () => {
@@ -554,9 +562,10 @@ describe('PaymentsService', () => {
         makeUser(CLIENT_ID, UserRole.CLIENT),
       );
 
-      await expect(service.markHeld(CLIENT_ID, PAYMENT_ID)).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        service.markHeld(CLIENT_ID, PAYMENT_ID, HELD_RECEIPT),
+      ).rejects.toThrow(ForbiddenException);
+      expect(collectionsMock.confirmByAdmin).not.toHaveBeenCalled();
     });
 
     it('OWNER não pode marcar como retido — recebe ForbiddenException', async () => {
@@ -564,74 +573,62 @@ describe('PaymentsService', () => {
         makeUser(OWNER_ID, UserRole.PROVIDER),
       );
 
-      await expect(service.markHeld(OWNER_ID, PAYMENT_ID)).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        service.markHeld(OWNER_ID, PAYMENT_ID, HELD_RECEIPT),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('utilizador inexistente recebe ForbiddenException', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.markHeld(CLIENT_ID, PAYMENT_ID)).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        service.markHeld(CLIENT_ID, PAYMENT_ID, HELD_RECEIPT),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('lança NotFoundException se o pagamento não existe', async () => {
-      prisma.user.findUnique.mockResolvedValue(
-        makeUser(ADMIN_ID, UserRole.ADMIN),
-      );
+      setupAdmin();
       prisma.payment.findUnique.mockResolvedValue(null);
 
-      await expect(service.markHeld(ADMIN_ID, PAYMENT_ID)).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.markHeld(ADMIN_ID, PAYMENT_ID, HELD_RECEIPT),
+      ).rejects.toThrow(NotFoundException);
+      expect(collectionsMock.confirmByAdmin).not.toHaveBeenCalled();
     });
 
     it('lança BadRequestException se o pagamento já não está PENDING', async () => {
-      prisma.user.findUnique.mockResolvedValue(
-        makeUser(ADMIN_ID, UserRole.ADMIN),
-      );
-      prisma.payment.findUnique.mockResolvedValue(
-        makePayment({ status: PaymentStatus.HELD }),
-      );
+      setupAdmin(pendingPayment({ status: PaymentStatus.HELD }));
 
-      await expect(service.markHeld(ADMIN_ID, PAYMENT_ID)).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        service.markHeld(ADMIN_ID, PAYMENT_ID, HELD_RECEIPT),
+      ).rejects.toThrow(BadRequestException);
+      expect(collectionsMock.confirmByAdmin).not.toHaveBeenCalled();
     });
 
     it('lança BadRequestException se a reserva está CANCELLED', async () => {
-      prisma.user.findUnique.mockResolvedValue(
-        makeUser(ADMIN_ID, UserRole.ADMIN),
-      );
-      prisma.payment.findUnique.mockResolvedValue(
-        makePayment({
-          booking: {
-            id: BOOKING_ID,
-            status: BookingStatus.CANCELLED,
-          },
+      setupAdmin(
+        pendingPayment({
+          booking: { id: BOOKING_ID, status: BookingStatus.CANCELLED },
         }),
       );
 
-      await expect(service.markHeld(ADMIN_ID, PAYMENT_ID)).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        service.markHeld(ADMIN_ID, PAYMENT_ID, HELD_RECEIPT),
+      ).rejects.toThrow(BadRequestException);
+      expect(collectionsMock.confirmByAdmin).not.toHaveBeenCalled();
     });
 
     it('lança BadRequestException se há disputa associada', async () => {
-      prisma.user.findUnique.mockResolvedValue(
-        makeUser(ADMIN_ID, UserRole.ADMIN),
-      );
-      prisma.payment.findUnique.mockResolvedValue(
-        makePayment({
-          dispute: { id: DISPUTE_ID, status: DisputeStatus.OPEN },
+      setupAdmin(
+        pendingPayment({
+          disputes: [{ id: DISPUTE_ID, status: DisputeStatus.OPEN }],
         }),
       );
 
-      await expect(service.markHeld(ADMIN_ID, PAYMENT_ID)).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        service.markHeld(ADMIN_ID, PAYMENT_ID, HELD_RECEIPT),
+      ).rejects.toThrow(BadRequestException);
+      expect(collectionsMock.confirmByAdmin).not.toHaveBeenCalled();
     });
   });
 
@@ -657,7 +654,7 @@ describe('PaymentsService', () => {
       depositAmount: new Prisma.Decimal(500),
       ownerPayout: new Prisma.Decimal(1800),
       ownerId: OWNER_ID,
-      dispute: null,
+      disputes: [],
       ...overrides,
     });
 
@@ -846,6 +843,10 @@ describe('PaymentsService', () => {
           totalCharged: new Prisma.Decimal(2200),
         }),
       });
+      prisma.serviceBooking.findUnique.mockResolvedValue({
+        status: ServiceBookingStatus.IN_PROGRESS,
+        completedAt: null,
+      });
 
       await service.release(CLIENT_ID, PAYMENT_ID);
 
@@ -856,6 +857,58 @@ describe('PaymentsService', () => {
 
       const updateCall = prisma.payment.update.mock.calls[0][0];
       expect(updateCall.data.depositStatus).toBe(DepositStatus.NONE);
+    });
+
+    it('em serviços: fica a data em que o provider deu o serviço por concluído', async () => {
+      const completedAt = new Date('2030-06-01T10:00:00.000Z');
+      setupHappyPath({
+        payment: makePayment({
+          status: PaymentStatus.HELD,
+          booking: null,
+          serviceBooking: {
+            id: SERVICE_BOOKING_ID,
+            status: ServiceBookingStatus.COMPLETED,
+            providerId: OWNER_ID,
+          },
+        }),
+        fresh: freshHeld({ depositAmount: new Prisma.Decimal(0) }),
+      });
+      prisma.serviceBooking.findUnique.mockResolvedValue({
+        status: ServiceBookingStatus.COMPLETED,
+        completedAt,
+      });
+
+      await service.release(CLIENT_ID, PAYMENT_ID);
+
+      expect(prisma.serviceBooking.update).toHaveBeenCalledWith({
+        where: { id: SERVICE_BOOKING_ID },
+        data: { status: ServiceBookingStatus.COMPLETED, completedAt },
+      });
+    });
+
+    it('em serviços: recusa se a reserva foi cancelada entretanto, relida dentro da transacção', async () => {
+      setupHappyPath({
+        payment: makePayment({
+          status: PaymentStatus.HELD,
+          booking: null,
+          serviceBooking: {
+            id: SERVICE_BOOKING_ID,
+            status: ServiceBookingStatus.IN_PROGRESS,
+            providerId: OWNER_ID,
+          },
+        }),
+        fresh: freshHeld({ depositAmount: new Prisma.Decimal(0) }),
+      });
+      prisma.serviceBooking.findUnique.mockResolvedValue({
+        status: ServiceBookingStatus.CANCELLED,
+        completedAt: null,
+      });
+
+      await expect(service.release(CLIENT_ID, PAYMENT_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+
+      expect(ledgerMock.record).not.toHaveBeenCalled();
     });
 
     // REGRA CENTRAL DO ESCROW
@@ -995,7 +1048,7 @@ describe('PaymentsService', () => {
     it('lança BadRequestException se existe disputa associada ao pagamento', async () => {
       prisma.payment.findUnique.mockResolvedValue(
         heldPayment({
-          dispute: { id: DISPUTE_ID, status: DisputeStatus.OPEN },
+          disputes: [{ id: DISPUTE_ID, status: DisputeStatus.OPEN }],
         }),
       );
       prisma.user.findUnique.mockResolvedValue(
@@ -1025,7 +1078,7 @@ describe('PaymentsService', () => {
 
     it('a re-leitura dentro da transacção detecta disputa criada entretanto', async () => {
       setupHappyPath({
-        fresh: freshHeld({ dispute: { id: DISPUTE_ID } }),
+        fresh: freshHeld({ disputes: [{ id: DISPUTE_ID }] }),
       });
 
       await expect(service.release(CLIENT_ID, PAYMENT_ID)).rejects.toThrow(
@@ -1045,7 +1098,7 @@ describe('PaymentsService', () => {
         status: PaymentStatus.HELD,
         depositStatus: DepositStatus.HELD,
         booking: { id: BOOKING_ID, status: BookingStatus.CONFIRMED },
-        dispute: null,
+        disputes: [],
       });
 
     // Re-leitura feita DENTRO da transacção (select reduzido).
@@ -1083,6 +1136,8 @@ describe('PaymentsService', () => {
       prisma.booking.update.mockResolvedValue({});
       prisma.serviceBooking.update.mockResolvedValue({});
       prisma.payment.update.mockResolvedValue(refundedPayment());
+      // O que o refund devolve é o pagamento relido depois da devolução.
+      prisma.payment.findUniqueOrThrow.mockResolvedValue(refundedPayment());
       runTransaction();
     };
 
@@ -1130,32 +1185,62 @@ describe('PaymentsService', () => {
       expect(updateCall.data.depositReleasedAt).toBeInstanceOf(Date);
     });
 
-    it('ADMIN reembolsa pagamento PENDING sem gerar ledger nem payout (dinheiro nunca entrou)', async () => {
-      setupHappyPath(
-        makePayment({
-          status: PaymentStatus.PENDING,
-          booking: { id: BOOKING_ID, status: BookingStatus.CONFIRMED },
-          dispute: null,
-        }),
-        freshRefundable({
-          status: PaymentStatus.PENDING,
-          depositStatus: DepositStatus.NONE,
-        }),
-      );
+    describe('quando o dinheiro nunca entrou (pagamento PENDING)', () => {
+      beforeEach(() => {
+        setupHappyPath(
+          makePayment({
+            status: PaymentStatus.PENDING,
+            booking: { id: BOOKING_ID, status: BookingStatus.CONFIRMED },
+            disputes: [],
+          }),
+          freshRefundable({
+            status: PaymentStatus.PENDING,
+            depositStatus: DepositStatus.NONE,
+          }),
+        );
+        prisma.payment.update.mockResolvedValue(
+          makePayment({ status: PaymentStatus.FAILED, refundAmount: null }),
+        );
+      });
 
-      const result = await service.refund(ADMIN_ID, PAYMENT_ID);
+      it('anula o pagamento e cancela a reserva, sem ledger nem payout', async () => {
+        const result = await service.refund(ADMIN_ID, PAYMENT_ID);
 
-      expect(result.message).toBe('Pagamento reembolsado com sucesso.');
-      expect(ledgerMock.record).not.toHaveBeenCalled();
-      expect(payoutsMock.createPending).not.toHaveBeenCalled();
+        expect(result.message).toContain('Pagamento anulado.');
+        expect(prisma.booking.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ status: BookingStatus.CANCELLED }),
+          }),
+        );
+        expect(ledgerMock.record).not.toHaveBeenCalled();
+        expect(payoutsMock.createPending).not.toHaveBeenCalled();
+      });
 
-      const updateCall = prisma.payment.update.mock.calls[0][0];
-      expect(updateCall.data).not.toHaveProperty('depositStatus');
+      it('deixa o pagamento FAILED, sem valor nem data de reembolso', async () => {
+        await service.refund(ADMIN_ID, PAYMENT_ID);
+
+        const updateCall = prisma.payment.update.mock.calls[0][0];
+        expect(updateCall.data).toEqual({ status: PaymentStatus.FAILED });
+      });
+
+      it('regista em auditoria que não havia dinheiro a devolver', async () => {
+        await service.refund(ADMIN_ID, PAYMENT_ID);
+
+        expect(auditMock.record).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: 'PAYMENT_REFUNDED',
+            amount: null,
+            metadata: { moneyWasHeld: false },
+          }),
+        );
+      });
     });
 
-    it('a transacção cancela a reserva e regista refundAmount = totalCharged', async () => {
-      const payment = heldPayment();
-      setupHappyPath(payment);
+    it('a transacção cancela a reserva e regista o valor relido dentro dela', async () => {
+      setupHappyPath(
+        heldPayment(),
+        freshRefundable({ totalCharged: new Prisma.Decimal(3100) }),
+      );
 
       await service.refund(ADMIN_ID, PAYMENT_ID);
 
@@ -1168,7 +1253,7 @@ describe('PaymentsService', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             status: PaymentStatus.REFUNDED,
-            refundAmount: payment.totalCharged,
+            refundAmount: 3100,
           }),
         }),
       );
@@ -1235,7 +1320,7 @@ describe('PaymentsService', () => {
         makePayment({
           status: PaymentStatus.RELEASED,
           booking: { id: BOOKING_ID, status: BookingStatus.COMPLETED },
-          dispute: null,
+          disputes: [],
         }),
       );
 
@@ -1252,7 +1337,7 @@ describe('PaymentsService', () => {
         makePayment({
           status: PaymentStatus.REFUNDED,
           booking: { id: BOOKING_ID, status: BookingStatus.CANCELLED },
-          dispute: null,
+          disputes: [],
         }),
       );
 
@@ -1269,7 +1354,7 @@ describe('PaymentsService', () => {
         makePayment({
           status: PaymentStatus.HELD,
           booking: { id: BOOKING_ID, status: BookingStatus.CONFIRMED },
-          dispute: { id: DISPUTE_ID, status: DisputeStatus.OPEN },
+          disputes: [{ id: DISPUTE_ID, status: DisputeStatus.OPEN }],
         }),
       );
 
@@ -1278,12 +1363,13 @@ describe('PaymentsService', () => {
       );
     });
 
-    it('permite reembolso quando a disputa foi RESOLVED_CLIENT', async () => {
+    it('permite reembolso quando as disputas da reserva já estão fechadas', async () => {
       setupHappyPath(
         makePayment({
           status: PaymentStatus.HELD,
           booking: { id: BOOKING_ID, status: BookingStatus.CONFIRMED },
-          dispute: { id: DISPUTE_ID, status: DisputeStatus.RESOLVED_CLIENT },
+          // A consulta só traz disputas abertas: uma já resolvida não conta.
+          disputes: [],
         }),
       );
 
@@ -1312,135 +1398,213 @@ describe('PaymentsService', () => {
       }
     });
 
-    it('fluxo normal: inicia o pagamento, regista INFLOW no ledger dentro da transacção e marca HELD', async () => {
+    it('fluxo normal: inicia o pagamento e dá-o como recebido pelo caminho das cobranças', async () => {
       prisma.booking.findUnique.mockResolvedValue(makeBooking());
-      prisma.payment.findUnique
-        .mockResolvedValueOnce(null) // receiptNumber único
-        .mockResolvedValueOnce({
-          // re-leitura dentro da transacção (select)
-          totalCharged: new Prisma.Decimal(2700),
-          depositAmount: new Prisma.Decimal(500),
-        })
-        .mockResolvedValueOnce(
-          // leitura final (include) para o presenter
-          makePayment({
-            status: PaymentStatus.HELD,
-            depositStatus: DepositStatus.HELD,
-            heldAt: new Date(),
-            mpesaReference: 'MP12345678',
-          }),
-        );
+      prisma.payment.findUnique.mockResolvedValueOnce(null); // receiptNumber único
       prisma.payment.create.mockResolvedValue(makePayment());
-      prisma.payment.update.mockResolvedValue({});
-      runTransaction();
+      prisma.payment.findUniqueOrThrow.mockResolvedValue(
+        makePayment({
+          status: PaymentStatus.HELD,
+          depositStatus: DepositStatus.HELD,
+          heldAt: new Date(),
+        }),
+      );
+      collectionsMock.confirmSimulated.mockResolvedValue({
+        held: true,
+        excess: 0,
+      });
 
       const result = await service.initiateMock(CLIENT_ID, BOOKING_ID);
 
       expect(result.message).toBe(
         'Pagamento M-Pesa simulado com sucesso. Valor retido no cofre.',
       );
-      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-
-      expect(ledgerMock.record).toHaveBeenCalledTimes(1);
-      expect(ledgerMock.record).toHaveBeenCalledWith(
-        prisma,
-        expect.objectContaining({
-          paymentId: PAYMENT_ID,
-          direction: LedgerDirection.INFLOW,
-          party: LedgerParty.CLIENT,
-          amount: 2700,
-          actorId: CLIENT_ID,
-        }),
+      expect(result.data.status).toBe(PaymentStatus.HELD);
+      expect(collectionsMock.confirmSimulated).toHaveBeenCalledWith(
+        CLIENT_ID,
+        PAYMENT_ID,
       );
-
-      const updateCall = prisma.payment.update.mock.calls[0][0];
-      expect(updateCall.data.status).toBe('HELD');
-      expect(updateCall.data.depositStatus).toBe(DepositStatus.HELD);
-      expect(updateCall.data.mpesaReference).toMatch(/^MP\d{8}$/);
-
-      expect(auditMock.record).toHaveBeenCalledWith(
-        expect.objectContaining({
-          action: AuditAction.PAYMENT_MARKED_HELD,
-          metadata: expect.objectContaining({ mock: true }),
-        }),
-      );
+      expect(notifierMock.held).toHaveBeenCalledWith(PAYMENT_ID);
     });
   });
 
   // autoReleaseDue()
 
   describe('autoReleaseDue()', () => {
-    it('procura pagamentos HELD sem disputa com reserva CONFIRMED até ao cutoff', async () => {
+    const duePayment = (id: string) => ({
+      id,
+      bookingId: `booking-of-${id}`,
+      serviceBookingId: null,
+    });
+
+    /** O que cada pagamento devido mostra ao ser relido dentro da transacção. */
+    const freshHeld = (overrides: Record<string, unknown> = {}) => ({
+      status: PaymentStatus.HELD,
+      totalCharged: new Prisma.Decimal(2700),
+      depositAmount: new Prisma.Decimal(500),
+      ownerPayout: new Prisma.Decimal(1800),
+      ownerId: OWNER_ID,
+      disputes: [],
+      ...overrides,
+    });
+
+    const setupDue = (ids: string[]) => {
+      prisma.payment.findMany
+        .mockResolvedValueOnce(ids.map(duePayment))
+        .mockResolvedValue([]);
+      prisma.payment.findUnique.mockResolvedValue(freshHeld());
+      prisma.booking.update.mockResolvedValue({});
+      prisma.payment.update.mockResolvedValue(
+        makePayment({
+          status: PaymentStatus.RELEASED,
+          ownerPayout: new Prisma.Decimal(1800),
+        }),
+      );
+      runTransaction();
+    };
+
+    it('procura pagamentos retidos, sem disputa, com o prazo vencido a contar do início e da entrada do dinheiro', async () => {
       prisma.payment.findMany.mockResolvedValue([]);
 
       const released = await service.autoReleaseDue();
 
       expect(released).toBe(0);
-      const findManyArg = prisma.payment.findMany.mock.calls[0][0];
-      expect(findManyArg.where.status).toBe(PaymentStatus.HELD);
-      expect(findManyArg.where).toHaveProperty('dispute', null);
-      expect(findManyArg.where.booking.status).toBe(BookingStatus.CONFIRMED);
-      expect(findManyArg.where.booking.startDate.lte).toBeInstanceOf(Date);
-      // O cutoff tem de estar no passado (startDate <= agora − prazo).
-      expect(findManyArg.where.booking.startDate.lte.getTime()).toBeLessThan(
-        Date.now(),
+      const { where, orderBy } = prisma.payment.findMany.mock.calls[0][0];
+      expect(where.status).toBe(PaymentStatus.HELD);
+      const [rental] = where.OR;
+      // Nem disputa aberta, nem uma retirada dentro do prazo.
+      expect(rental.disputes.none.OR).toEqual([
+        {
+          status: {
+            in: [
+              DisputeStatus.OPEN,
+              DisputeStatus.AWAITING_OWNER,
+              DisputeStatus.UNDER_REVIEW,
+            ],
+          },
+        },
+        {
+          status: DisputeStatus.WITHDRAWN,
+          closedAt: { gt: rental.heldAt.lte },
+        },
+      ]);
+      expect(rental.booking.status).toBe(BookingStatus.CONFIRMED);
+      expect(rental.heldAt.lte.getTime()).toBeLessThan(Date.now());
+      expect(rental.booking.startDate.lte).toEqual(rental.heldAt.lte);
+      expect(orderBy).toEqual({ heldAt: 'asc' });
+    });
+
+    it('procura também serviços que o provider concluiu há mais de 3 dias', async () => {
+      prisma.payment.findMany.mockResolvedValue([]);
+
+      await service.autoReleaseDue();
+
+      const { where } = prisma.payment.findMany.mock.calls[0][0];
+      const [, concluded] = where.OR;
+      expect(concluded.serviceBooking.status).toBe(
+        ServiceBookingStatus.COMPLETED,
+      );
+      const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+      const deadline = concluded.serviceBooking.completedAt.lte.getTime();
+      expect(Date.now() - deadline).toBeGreaterThanOrEqual(
+        threeDaysMs - 60_000,
+      );
+      expect(Date.now() - deadline).toBeLessThan(
+        threeDaysMs + 2 * 60 * 60 * 1000,
       );
     });
 
-    it('liberta cada pagamento devido em nome do cliente e regista auditoria', async () => {
-      prisma.payment.findMany.mockResolvedValue([
-        { id: 'payment-uuid-a', clientId: 'client-uuid-a' },
-        { id: 'payment-uuid-b', clientId: 'client-uuid-b' },
-      ]);
-      const releaseSpy = jest.spyOn(service, 'release').mockResolvedValue({
-        message: 'Pagamento liberado com sucesso.',
-        data: {},
-      } as never);
-
-      const released = await service.autoReleaseDue();
-
-      expect(released).toBe(2);
-      expect(releaseSpy).toHaveBeenCalledTimes(2);
-      expect(releaseSpy).toHaveBeenCalledWith(
-        'client-uuid-a',
-        'payment-uuid-a',
+    it('libera o pagamento de um serviço concluído sem mexer na data de conclusão', async () => {
+      const completedAt = new Date('2030-06-01T10:00:00.000Z');
+      prisma.payment.findMany
+        .mockResolvedValueOnce([
+          {
+            id: 'payment-uuid-s',
+            bookingId: null,
+            serviceBookingId: SERVICE_BOOKING_ID,
+          },
+        ])
+        .mockResolvedValue([]);
+      prisma.payment.findUnique.mockResolvedValue(
+        freshHeld({ depositAmount: new Prisma.Decimal(0) }),
       );
-      expect(releaseSpy).toHaveBeenCalledWith(
-        'client-uuid-b',
-        'payment-uuid-b',
-      );
-
-      expect(auditMock.record).toHaveBeenCalledTimes(2);
-      expect(auditMock.record).toHaveBeenCalledWith(
-        expect.objectContaining({
-          action: AuditAction.PAYMENT_AUTO_RELEASED,
-          actorId: 'client-uuid-a',
-          targetId: 'payment-uuid-a',
-          metadata: expect.objectContaining({ system: true }),
+      prisma.serviceBooking.findUnique.mockResolvedValue({
+        status: ServiceBookingStatus.COMPLETED,
+        completedAt,
+      });
+      prisma.payment.update.mockResolvedValue(
+        makePayment({
+          status: PaymentStatus.RELEASED,
+          ownerPayout: new Prisma.Decimal(1800),
         }),
       );
-    });
-
-    it('uma falha num item não trava os restantes — conta só os sucessos', async () => {
-      prisma.payment.findMany.mockResolvedValue([
-        { id: 'payment-uuid-a', clientId: 'client-uuid-a' },
-        { id: 'payment-uuid-b', clientId: 'client-uuid-b' },
-      ]);
-      const releaseSpy = jest
-        .spyOn(service, 'release')
-        .mockRejectedValueOnce(
-          new BadRequestException('Disputa criada entretanto.'),
-        )
-        .mockResolvedValueOnce({
-          message: 'Pagamento liberado com sucesso.',
-          data: {},
-        } as never);
+      runTransaction();
 
       const released = await service.autoReleaseDue();
 
       expect(released).toBe(1);
-      expect(releaseSpy).toHaveBeenCalledTimes(2);
-      // O item falhado não gera auditoria de auto-release.
+      expect(prisma.serviceBooking.update).toHaveBeenCalledWith({
+        where: { id: SERVICE_BOOKING_ID },
+        data: { status: ServiceBookingStatus.COMPLETED, completedAt },
+      });
+      expect(auditMock.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: AuditAction.PAYMENT_AUTO_RELEASED,
+          actorId: 'system',
+          targetId: 'payment-uuid-s',
+          metadata: { reason: 'service_confirmation_window_expired' },
+        }),
+      );
+    });
+
+    it('libera cada pagamento devido e põe a reserva ACTIVE', async () => {
+      setupDue(['payment-uuid-a', 'payment-uuid-b']);
+
+      const released = await service.autoReleaseDue();
+
+      expect(released).toBe(2);
+      expect(prisma.booking.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'booking-of-payment-uuid-a' },
+          data: expect.objectContaining({ status: BookingStatus.ACTIVE }),
+        }),
+      );
+      expect(prisma.payment.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'payment-uuid-b' },
+          data: expect.objectContaining({ status: PaymentStatus.RELEASED }),
+        }),
+      );
+    });
+
+    it('fica registado como acção do sistema, e não do cliente', async () => {
+      setupDue(['payment-uuid-a']);
+
+      await service.autoReleaseDue();
+
+      expect(ledgerMock.record).toHaveBeenCalledWith(
+        prisma,
+        expect.objectContaining({ paymentId: 'payment-uuid-a', actorId: null }),
+      );
+      expect(auditMock.record).toHaveBeenCalledTimes(1);
+      expect(auditMock.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: AuditAction.PAYMENT_AUTO_RELEASED,
+          actorId: 'system',
+          targetId: 'payment-uuid-a',
+        }),
+      );
+    });
+
+    it('uma falha num item não trava os restantes nem fica em auditoria', async () => {
+      setupDue(['payment-uuid-a', 'payment-uuid-b']);
+      prisma.payment.findUnique
+        .mockResolvedValueOnce(freshHeld({ disputes: [{ id: DISPUTE_ID }] }))
+        .mockResolvedValueOnce(freshHeld());
+
+      const released = await service.autoReleaseDue();
+
+      expect(released).toBe(1);
       expect(auditMock.record).toHaveBeenCalledTimes(1);
       expect(auditMock.record).toHaveBeenCalledWith(
         expect.objectContaining({

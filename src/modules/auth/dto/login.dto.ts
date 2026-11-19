@@ -1,21 +1,25 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, MinLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
+
+import { toE164WhenPossible } from './account-fields';
 
 export class LoginDto {
+  // Não se exige aqui um telemóvel válido: uma conta antiga cujo telefone não
+  // se consiga normalizar continua a poder entrar com o que tem gravado.
   @ApiProperty({
     example: '841234567',
-    description: 'Número de telefone do utilizador',
+    description: 'Telemóvel da conta, com ou sem o indicativo +258',
   })
+  @Transform(({ value }) => toE164WhenPossible(value))
   @IsString()
   @IsNotEmpty()
+  @MaxLength(32)
   phone: string;
 
-  @ApiProperty({
-    example: '123456',
-    description: 'Palavra-passe do utilizador',
-    minLength: 6,
-  })
+  @ApiProperty({ description: 'Palavra-passe da conta' })
   @IsString()
-  @MinLength(6)
+  @IsNotEmpty()
+  @MaxLength(128)
   password: string;
 }

@@ -1,36 +1,21 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { VerificationPurpose } from '@prisma/client';
+import { Inject, Injectable } from '@nestjs/common';
 
-export interface VerificationCodeNotification {
-  userId: string;
-  phone: string;
-  email?: string | null;
-  code: string;
-  purpose: VerificationPurpose;
-  expiresAt: Date;
-}
+import { VERIFICATION_CODE_SENDER } from './verification-code-sender';
+import type {
+  VerificationCodeMessage,
+  VerificationCodeSender,
+} from './verification-code-sender';
 
+/** Envio de mensagens para fora da aplicação, pelo canal configurado. */
 @Injectable()
 export class NotificationsService {
-  private readonly logger = new Logger(NotificationsService.name);
+  constructor(
+    @Inject(VERIFICATION_CODE_SENDER)
+    private readonly codeSender: VerificationCodeSender,
+  ) {}
 
-  sendVerificationCode(payload: VerificationCodeNotification): Promise<void> {
-    const driver = process.env.NOTIFICATIONS_DRIVER ?? 'log';
-
-    if (driver !== 'silent') {
-      this.logger.warn(
-        {
-          userId: payload.userId,
-          phone: payload.phone,
-          email: payload.email,
-          purpose: payload.purpose,
-          code: payload.code,
-          expiresAt: payload.expiresAt,
-        },
-        'Verification code generated. Configure NOTIFICATIONS_DRIVER to dispatch via SMS or email.',
-      );
-    }
-
-    return Promise.resolve();
+  /** Rejeita quando o canal não aceita a mensagem. */
+  sendVerificationCode(message: VerificationCodeMessage): Promise<void> {
+    return this.codeSender.send(message);
   }
 }

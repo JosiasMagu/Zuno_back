@@ -14,6 +14,10 @@ type BookingBaseEntity = {
   deliveryAddress: string | null;
   clientNote: string | null;
   confirmedAt: Date | null;
+  deliveryConfirmedAt: Date | null;
+  returnConfirmedAt: Date | null;
+  /** Até quando a reserva pode ser paga. Null depois de o pagamento entrar. */
+  expiresAt: Date | null;
   cancelledAt: Date | null;
   cancellationReason: string | null;
   createdAt: Date;
@@ -99,6 +103,9 @@ export class BookingPresenter {
       deliveryAddress: booking.deliveryAddress,
       clientNote: booking.clientNote,
       confirmedAt: booking.confirmedAt,
+      deliveryConfirmedAt: booking.deliveryConfirmedAt,
+      returnConfirmedAt: booking.returnConfirmedAt,
+      expiresAt: booking.expiresAt,
       cancelledAt: booking.cancelledAt,
       cancellationReason: booking.cancellationReason,
       createdAt: booking.createdAt,
@@ -141,6 +148,9 @@ export class BookingPresenter {
       deliveryAddress: booking.deliveryAddress,
       clientNote: booking.clientNote,
       confirmedAt: booking.confirmedAt,
+      deliveryConfirmedAt: booking.deliveryConfirmedAt,
+      returnConfirmedAt: booking.returnConfirmedAt,
+      expiresAt: booking.expiresAt,
       cancelledAt: booking.cancelledAt,
       cancellationReason: booking.cancellationReason,
       createdAt: booking.createdAt,

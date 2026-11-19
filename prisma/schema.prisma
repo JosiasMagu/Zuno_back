@@ -25,8 +25,13 @@ model User {
   pushToken             String?
   payoutMsisdn          String?
   listingsSuspendedUntil DateTime?
-  totalRating           Decimal?  @db.Decimal(3, 2)
-  totalReviews          Int       @default(0)
+  /// A nota da conta como provider: o que os clientes disseram dos alugueres
+  /// e dos serviços dela. Na base, as colunas mantêm o nome antigo.
+  providerRating        Decimal?  @map("totalRating") @db.Decimal(3, 2)
+  providerReviews       Int       @default(0) @map("totalReviews")
+  /// A nota da conta como cliente: o que os providers disseram dela.
+  clientRating          Decimal?  @db.Decimal(3, 2)
+  clientReviews         Int       @default(0)
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -55,15 +60,29 @@ model User {
   @@index([isActive])
 }
 
+// Falhas de login por número de telefone. Conta-se pelo número, exista ou
+// não a conta, para a resposta não revelar que números estão registados.
+model LoginThrottle {
+  phone           String    @id
+  failedAttempts  Int       @default(0)
+  windowStartedAt DateTime  @default(now())
+  lockedUntil     DateTime?
+}
+
+// Uma sessão por login. O refresh token é opaco e só o seu SHA-256 fica na
+// base. Cada renovação troca o token: o hash anterior passa para
+// previousTokenHash, para se reconhecer um token já usado.
 model AuthSession {
-  id               String    @id @default(uuid())
-  userId           String
-  refreshTokenHash String
-  userAgent        String?
-  ipAddress        String?
-  expiresAt        DateTime
-  revokedAt        DateTime?
-  createdAt        DateTime  @default(now())
+  id                String    @id @default(uuid())
+  userId            String
+  refreshTokenHash  String
+  previousTokenHash String?
+  rotatedAt         DateTime?
+  userAgent         String?
+  ipAddress         String?
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  createdAt         DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -117,6 +136,9 @@ model Equipment {
   operatorAvailable Boolean            @default(false)
   isAvailable       Boolean            @default(true)
   quantity          Int                @default(1)
+  /// Deixou de ser lida e escrita pelas reservas: as unidades livres
+  /// calculam-se pelas datas (src/modules/bookings/booking-occupancy.ts).
+  /// Fica até à migração que a remover.
   availableQuantity Int                @default(1)
   condition         EquipmentCondition @default(GOOD)
   status            EquipmentStatus    @default(PENDING_REVIEW)
@@ -124,6 +146,9 @@ model Equipment {
   totalRating       Decimal?           @db.Decimal(3, 2)
   totalReviews      Int                @default(0)
   totalBookings     Int                @default(0)
+  /// Porque é que um admin rejeitou o anúncio, para o dono o corrigir.
+  rejectionReason   String?
+  rejectedAt        DateTime?
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
 
@@ -141,6 +166,8 @@ model Equipment {
   @@index([operatorAvailable])
   @@index([createdAt])
   @@index([pricePerDay])
+  @@index([status, createdAt])
+  @@index([status, pricePerDay])
 }
 
 model EquipmentPhoto {
@@ -181,6 +208,8 @@ model Booking {
   returnConfirmedAt   DateTime?
   cancelledAt         DateTime?
   cancellationReason  String?
+  /// Até quando a reserva pode ser paga. Passa a null quando o pagamento entra.
+  expiresAt           DateTime?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
@@ -188,7 +217,7 @@ model Booking {
   owner     User      @relation("OwnerBookings", fields: [ownerId], references: [id])
   equipment Equipment @relation(fields: [equipmentId], references: [id])
   payment   Payment?
-  dispute   Dispute?
+  disputes  Dispute[]
   reviews   Review[]
 
   @@index([clientId])
@@ -196,6 +225,7 @@ model Booking {
   @@index([equipmentId])
   @@index([status])
   @@index([startDate, endDate])
+  @@index([expiresAt])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -215,7 +245,19 @@ model Payment {
   ownerPayout       Decimal?      @db.Decimal(12, 2)
   currency          String        @default("MZN")
   method            PaymentMethod
-  mpesaReference    String?
+  /// Referência da transacção M-Pesa com que o dinheiro entrou. Uma
+  /// transferência só pode fechar um pagamento.
+  mpesaReference    String?       @unique
+  /// Número de onde veio o dinheiro, como o admin o leu no extracto.
+  payerMsisdn       String?
+  /// Valor que entrou de facto. O mark-held só o aceita igual ao totalCharged.
+  receivedAmount    Decimal?      @db.Decimal(12, 2)
+  /// O que o cliente declarou depois de pagar. Não prova nada: serve para o
+  /// admin saber a que pagamento pertence uma linha do extracto, e para a
+  /// reserva não expirar enquanto ele a confirma.
+  declaredReference   String?
+  declaredPayerMsisdn String?
+  declaredAt          DateTime?
   status            PaymentStatus @default(PENDING)
   heldAt            DateTime?
   releasedAt        DateTime?
@@ -224,6 +266,11 @@ model Payment {
   depositStatus     DepositStatus @default(NONE)
   depositReleasedAt DateTime?
   depositHeldAmount Decimal?      @db.Decimal(12, 2)
+  /// Quem deu o dinheiro como entrado: um admin, ou 'system' quando foi o
+  /// fornecedor a confirmar.
+  heldById          String?
+  /// Quando o cliente foi avisado de que a libertação automática se aproxima.
+  autoReleaseReminderAt DateTime?
   receiptNumber     String        @unique
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
@@ -232,13 +279,14 @@ model Payment {
   serviceBooking ServiceBooking? @relation(fields: [serviceBookingId], references: [id])
   client         User            @relation("ClientPayments", fields: [clientId], references: [id])
   owner          User            @relation("OwnerPayments", fields: [ownerId], references: [id])
-  dispute        Dispute?
+  disputes       Dispute[]
   ledgerEntries  LedgerEntry[]
   payouts        Payout[]
+  providerOperations ProviderOperation[]
+  unallocatedFunds   UnallocatedFunds[]
 
   @@index([status])
   @@index([depositStatus])
-  @@index([mpesaReference])
   @@index([clientId])
   @@index([ownerId])
   @@index([serviceBookingId])
@@ -274,19 +322,109 @@ model Payout {
   amount         Decimal      @db.Decimal(12, 2)
   msisdn         String?
   status         PayoutStatus @default(PENDING)
-  mpesaReference String?
+  /// Referência da transferência M-Pesa. Uma transferência só fecha um payout.
+  mpesaReference String?      @unique
   executedById   String?
   executedAt     DateTime?
   failReason     String?
+  /// Quem aprovou um payout acima do valor que sai sozinho.
+  approvedById   String?
+  approvedAt     DateTime?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
   payment   Payment @relation(fields: [paymentId], references: [id])
   recipient User    @relation("PayoutRecipient", fields: [recipientId], references: [id])
+  providerOperations ProviderOperation[]
 
   @@index([status])
   @@index([recipientId])
   @@index([paymentId])
+}
+
+// Uma cobrança, um envio ou uma devolução junto do fornecedor de pagamentos.
+// `reference` é a nossa, enviada ao fornecedor: é a chave de idempotência
+// dele, por isso repetir um pedido com ela nunca cobra nem envia duas vezes.
+model ProviderOperation {
+  id                String                  @id @default(uuid())
+  provider          String
+  kind              ProviderOperationKind
+  reference         String                  @unique
+  providerReference String?
+  paymentId         String?
+  payoutId          String?
+  unallocatedId     String?
+  amount            Decimal                 @db.Decimal(12, 2)
+  msisdn            String?
+  status            ProviderOperationStatus @default(REQUESTED)
+  failureCode       String?
+  failureReason     String?
+  /// O que o fornecedor cobrou pela operação, quando o diz.
+  feeAmount         Decimal?                @db.Decimal(12, 2)
+  /// Quantas vezes se perguntou ao fornecedor pelo estado.
+  checks            Int                     @default(0)
+  lastCheckedAt     DateTime?
+  confirmedAt       DateTime?
+  /// A última resposta do fornecedor, sem segredos.
+  response          Json?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  payment     Payment?          @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  payout      Payout?           @relation(fields: [payoutId], references: [id], onDelete: Restrict)
+  unallocated UnallocatedFunds? @relation(fields: [unallocatedId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, providerReference], where: raw("(\"providerReference\" IS NOT NULL)"))
+  @@unique([paymentId], map: "ProviderOperation_one_active_collection", where: raw("((kind = 'COLLECTION'::\"ProviderOperationKind\") AND (status = ANY (ARRAY['REQUESTED'::\"ProviderOperationStatus\", 'PENDING'::\"ProviderOperationStatus\", 'UNKNOWN'::\"ProviderOperationStatus\"])))"))
+  @@unique([payoutId], map: "ProviderOperation_one_active_payout", where: raw("((kind = 'PAYOUT'::\"ProviderOperationKind\") AND (status = ANY (ARRAY['REQUESTED'::\"ProviderOperationStatus\", 'PENDING'::\"ProviderOperationStatus\", 'UNKNOWN'::\"ProviderOperationStatus\"])))"))
+  @@index([status, updatedAt])
+  @@index([paymentId])
+  @@index([payoutId])
+}
+
+// Dinheiro que entrou na conta e não fecha nenhum pagamento: valor errado, a
+// parte a mais de um pagamento, ou uma confirmação que chegou depois de a
+// reserva expirar. Fica fora do escrow e tem de ser devolvido a quem pagou.
+model UnallocatedFunds {
+  id                String            @id @default(uuid())
+  provider          String
+  providerReference String
+  amount            Decimal           @db.Decimal(12, 2)
+  payerMsisdn       String?
+  /// O pagamento a que o dinheiro parecia destinar-se, quando se sabe.
+  paymentId         String?
+  reason            UnallocatedReason
+  status            UnallocatedStatus @default(OPEN)
+  note              String?
+  recordedById      String
+  returnReference   String?           @unique
+  returnedById      String?
+  returnedAt        DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  payment    Payment?            @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  operations ProviderOperation[]
+
+  @@unique([provider, providerReference])
+  @@index([status])
+  @@index([paymentId])
+}
+
+// Aviso do fornecedor, guardado tal como chegou antes de ser tratado. Um
+// aviso repetido não entra duas vezes.
+model ProviderEvent {
+  id          String    @id @default(uuid())
+  provider    String
+  externalId  String
+  payload     Json
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+  attempts    Int       @default(0)
+  lastError   String?
+
+  @@unique([provider, externalId])
+  @@index([processedAt])
 }
 
 // Strike aplicado a um provider que cancela reserva confirmada (política D2).
@@ -295,6 +433,8 @@ model ProviderStrike {
   id        String   @id @default(uuid())
   userId    String
   bookingId String?
+  /// Preenchido quando o strike vem de uma reserva de serviço.
+  serviceBookingId String?
   reason    String
   createdAt DateTime @default(now())
 
@@ -307,22 +447,35 @@ model ProviderStrike {
 // DISPUTAS
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Uma reserva pode ter várias disputas ao longo da vida (do pagamento antes
+// da entrega, do depósito depois dela), mas só uma aberta de cada vez. Essa
+// regra está num índice único parcial sobre paymentId, na migração.
 model Dispute {
   id               String        @id @default(uuid())
-  bookingId        String?       @unique
-  serviceBookingId String?       @unique
-  paymentId        String        @unique
+  bookingId        String?
+  serviceBookingId String?
+  paymentId        String
   openedBy         String
   type             DisputeType   @default(PAYMENT)
   reason           DisputeReason
   description      String
   evidenceUrls  String[]
-  ownerResponse    String?
+  /// O que a outra parte respondeu. A coluna guarda o nome antigo.
+  response         String?       @map("ownerResponse")
+  /// Provas que a outra parte juntou à resposta.
+  responseEvidenceUrls String[]  @default([])
+  respondedAt      DateTime?
+  /// Quem registou a resposta: a outra parte, ou um admin por ela.
+  respondedBy      String?
   status           DisputeStatus @default(OPEN)
   resolution       String?
   refundPercent    Int?
   autoResolvedAt   DateTime?
-  ownerDeadline    DateTime?
+  /// Até quando a outra parte pode responder. A coluna guarda o nome antigo.
+  responseDeadline DateTime?     @map("ownerDeadline")
+  /// Quando a disputa fechou: resolvida pelo admin ou retirada.
+  closedAt         DateTime?
+  closedBy         String?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
@@ -332,9 +485,14 @@ model Dispute {
   opener         User            @relation("OpenedDisputes", fields: [openedBy], references: [id])
 
   @@index([status])
-  @@index([ownerDeadline])
+  @@index([responseDeadline])
   @@index([openedBy])
   @@index([serviceBookingId])
+  @@index([bookingId])
+  @@index([paymentId])
+  // Uma disputa aberta de cada vez por pagamento. Criado na migração
+  // disputes_due_process. Declarado aqui para um migrate dev não o apagar.
+  @@unique([paymentId], map: "Dispute_one_open_per_payment", where: raw("(status = ANY (ARRAY['OPEN'::\"DisputeStatus\", 'AWAITING_OWNER'::\"DisputeStatus\", 'UNDER_REVIEW'::\"DisputeStatus\"]))"))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -392,6 +550,7 @@ model Conversation {
   @@index([ownerId])
   @@index([equipmentId])
   @@index([serviceId])
+  @@index([clientId, createdAt])
 }
 
 model Message {
@@ -407,6 +566,8 @@ model Message {
 
   @@index([conversationId])
   @@index([senderId])
+  @@index([conversationId, createdAt])
+  @@index([conversationId], map: "Message_unread_idx", where: raw("(\"isRead\" = false)"))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -432,6 +593,9 @@ model Service {
   totalRating     Decimal?           @db.Decimal(3, 2)
   totalReviews    Int                @default(0)
   totalCompleted  Int                @default(0)
+  /// Porque é que um admin rejeitou o anúncio, para o provider o corrigir.
+  rejectionReason String?
+  rejectedAt      DateTime?
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
@@ -446,6 +610,7 @@ model Service {
   @@index([categoryId])
   @@index([status])
   @@index([isActive])
+  @@index([status, isActive, createdAt])
 }
 
 model ServicePhoto {
@@ -529,6 +694,8 @@ model ServiceBooking {
   completedAt        DateTime?
   cancelledAt        DateTime?
   cancellationReason String?
+  /// Até quando a reserva pode ser paga. Passa a null quando o pagamento entra.
+  expiresAt          DateTime?
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
 
@@ -538,13 +705,14 @@ model ServiceBooking {
   request  ServiceRequest @relation(fields: [requestId], references: [id])
   quote    ServiceQuote   @relation(fields: [quoteId], references: [id])
   payment  Payment?
-  dispute  Dispute?
+  disputes Dispute[]
   reviews  Review[]
 
   @@index([clientId])
   @@index([providerId])
   @@index([serviceId])
   @@index([status])
+  @@index([expiresAt])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -657,6 +825,8 @@ enum BookingStatus {
   COMPLETED
   CANCELLED
   DISPUTED
+  /// Não foi paga dentro do prazo. Deixa de ocupar as datas.
+  EXPIRED
 }
 
 enum PaymentMethod {
@@ -704,8 +874,37 @@ enum PayoutKind {
 
 enum PayoutStatus {
   PENDING
+  /// O envio pelo fornecedor está em curso.
+  SENDING
   EXECUTED
   FAILED
+}
+
+enum ProviderOperationKind {
+  COLLECTION
+  PAYOUT
+  RETURN
+}
+
+enum ProviderOperationStatus {
+  REQUESTED
+  PENDING
+  CONFIRMED
+  FAILED
+  UNKNOWN
+}
+
+enum UnallocatedReason {
+  AMOUNT_MISMATCH
+  OVERPAYMENT
+  LATE
+  UNKNOWN_REFERENCE
+}
+
+enum UnallocatedStatus {
+  OPEN
+  RETURNING
+  RETURNED
 }
 
 // PAYMENT: disputa do cliente sobre o pagamento (antes/durante o aluguer).
@@ -727,11 +926,14 @@ enum DisputeReason {
 
 enum DisputeStatus {
   OPEN
+  /// À espera da resposta da outra parte, seja ela o provider ou o cliente.
   AWAITING_OWNER
   UNDER_REVIEW
   RESOLVED_CLIENT
   RESOLVED_OWNER
   RESOLVED_PARTIAL
+  /// Retirada por quem a abriu, ou arquivada por um admin. Não move dinheiro.
+  WITHDRAWN
 }
 
 enum AuditAction {
@@ -748,6 +950,12 @@ enum AuditAction {
   PAYOUT_EXECUTED
   PAYOUT_FAILED
   PAYOUT_RETRIED
+  PAYOUT_SENT
+  PAYOUT_APPROVED
+  PAYMENT_UNALLOCATED_RETURNED
+  PAYMENT_UNALLOCATED_RECEIVED
+  PAYMENT_COLLECTION_FAILED
+  PAYMENT_COLLECTION_REQUESTED
   PROVIDER_STRIKE_ISSUED
   PROVIDER_LISTINGS_SUSPENDED
   BOOKING_RETURN_CONFIRMED
@@ -770,6 +978,7 @@ enum AuditAction {
   EQUIPMENT_REJECTED
   EQUIPMENT_REMOVED
   EQUIPMENT_AVAILABILITY_TOGGLED
+  EQUIPMENT_SENT_TO_REVIEW
   USER_SUSPENDED
   USER_REACTIVATED
   USER_VERIFIED
@@ -779,9 +988,23 @@ enum AuditAction {
   CATEGORY_CREATED
   CATEGORY_UPDATED
   CATEGORY_DEACTIVATED
+  CATEGORY_REACTIVATED
   SERVICE_APPROVED
   SERVICE_REJECTED
   SERVICE_REMOVED
+  SERVICE_SENT_TO_REVIEW
+  AUTH_REFRESH_TOKEN_REUSED
+  AUTH_LOGIN_SUCCEEDED
+  AUTH_LOGIN_FAILED
+  AUTH_PASSWORD_CHANGED
+  AUTH_PASSWORD_RESET
+  AUTH_PASSWORD_CONFIRMATION_FAILED
+  USER_PAYOUT_NUMBER_CHANGED
+  PAYMENT_DECLARED
+  SERVICE_BOOKING_EXPIRED
+  BOOKING_EXPIRED
+  DISPUTE_WITHDRAWN
+  DISPUTE_RESPONSE_WINDOW_CLOSED
 }
 
 enum VerificationStatus {
@@ -839,6 +1062,8 @@ enum ServiceBookingStatus {
   COMPLETED
   CANCELLED
   DISPUTED
+  /// Não foi paga dentro do prazo.
+  EXPIRED
 }
 
 enum VerificationPurpose {

@@ -4,19 +4,24 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
+import { EquipmentStatus, UserRole } from '@prisma/client';
 
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { CloudinaryService } from '../../../shared/cloudinary/cloudinary.service';
+import { EquipmentService } from './equipment.service';
 
 // Maximo de fotos por equipamento
 const MAX_PHOTOS_PER_EQUIPMENT = 10;
+
+const BACK_TO_REVIEW =
+  ' Como as fotos mudaram, o anúncio volta à revisão antes de ficar público.';
 
 @Injectable()
 export class EquipmentPhotosService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryService,
+    private readonly equipment: EquipmentService,
   ) {}
 
   // Upload de uma foto
@@ -37,7 +42,7 @@ export class EquipmentPhotosService {
       },
     });
 
-    if (!equipment) {
+    if (!equipment || equipment.status === EquipmentStatus.DELETED) {
       throw new NotFoundException('Equipamento não encontrado.');
     }
 
@@ -100,8 +105,15 @@ export class EquipmentPhotosService {
       },
     });
 
+    const backToReview = await this.equipment.reviewAfterPhotoChange({
+      actorId: userId,
+      actorRole: user.role,
+      equipment,
+      addedPhotos: true,
+    });
+
     return {
-      message: 'Foto adicionada com sucesso.',
+      message: `Foto adicionada com sucesso.${backToReview ? BACK_TO_REVIEW : ''}`,
       data: {
         id: photo.id,
         url: photo.url,
@@ -133,11 +145,12 @@ export class EquipmentPhotosService {
       select: {
         id: true,
         ownerId: true,
+        status: true,
         photos: { select: { id: true, order: true } },
       },
     });
 
-    if (!equipment) {
+    if (!equipment || equipment.status === EquipmentStatus.DELETED) {
       throw new NotFoundException('Equipamento não encontrado.');
     }
 
@@ -197,8 +210,15 @@ export class EquipmentPhotosService {
       ),
     );
 
+    const backToReview = await this.equipment.reviewAfterPhotoChange({
+      actorId: userId,
+      actorRole: user.role,
+      equipment,
+      addedPhotos: true,
+    });
+
     return {
-      message: `${photos.length} foto(s) adicionada(s) com sucesso.`,
+      message: `${photos.length} foto(s) adicionada(s) com sucesso.${backToReview ? BACK_TO_REVIEW : ''}`,
       data: photos.map((photo) => ({
         id: photo.id,
         url: photo.url,
@@ -221,10 +241,10 @@ export class EquipmentPhotosService {
 
     const equipment = await this.prisma.equipment.findUnique({
       where: { id: equipmentId },
-      select: { id: true, ownerId: true },
+      select: { id: true, ownerId: true, status: true },
     });
 
-    if (!equipment) {
+    if (!equipment || equipment.status === EquipmentStatus.DELETED) {
       throw new NotFoundException('Equipamento não encontrado.');
     }
 
@@ -275,10 +295,10 @@ export class EquipmentPhotosService {
 
     const equipment = await this.prisma.equipment.findUnique({
       where: { id: equipmentId },
-      select: { id: true, ownerId: true },
+      select: { id: true, ownerId: true, status: true },
     });
 
-    if (!equipment) {
+    if (!equipment || equipment.status === EquipmentStatus.DELETED) {
       throw new NotFoundException('Equipamento não encontrado.');
     }
 
@@ -321,8 +341,17 @@ export class EquipmentPhotosService {
       }
     }
 
+    const backToReview = await this.equipment.reviewAfterPhotoChange({
+      actorId: userId,
+      actorRole: user.role,
+      equipment,
+      addedPhotos: false,
+    });
+
     return {
-      message: 'Foto removida com sucesso.',
+      message: backToReview
+        ? 'Foto removida. O anúncio foi enviado de novo para revisão.'
+        : 'Foto removida com sucesso.',
     };
   }
 

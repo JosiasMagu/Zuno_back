@@ -23,6 +23,9 @@ export function getTestPrisma(): PrismaClient {
 }
 
 const TABLES_IN_TRUNCATE_ORDER = [
+  'ProviderEvent',
+  'ProviderOperation',
+  'UnallocatedFunds',
   'Message',
   'Conversation',
   'Review',
@@ -36,6 +39,7 @@ const TABLES_IN_TRUNCATE_ORDER = [
   'Equipment',
   'Category',
   'AuthSession',
+  'LoginThrottle',
   'User',
 ];
 

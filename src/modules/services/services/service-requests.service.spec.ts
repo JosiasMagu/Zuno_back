@@ -34,6 +34,7 @@ const makeService = (overrides: Record<string, unknown> = {}) => ({
   acceptsUrgent: true,
   status: ServiceStatus.ACTIVE,
   isActive: true,
+  provider: { isActive: true },
   ...overrides,
 });
 
@@ -97,6 +98,25 @@ describe('ServiceRequestsService', () => {
       address: 'Av. Eduardo Mondlane, 123',
       isUrgent: false,
     };
+
+    it('recusa o pedido a um serviço de uma conta suspensa', async () => {
+      prisma.user.findUnique.mockResolvedValue(makeClient());
+      prisma.service.findUnique.mockResolvedValue(
+        makeService({ provider: { isActive: false } }),
+      );
+
+      await expect(
+        service.create(CLIENT_ID, {
+          serviceId: SERVICE_ID,
+          description: 'Quadro eléctrico a disparar.',
+          address: 'Av. Eduardo Mondlane, 123',
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Este serviço não está disponível para pedidos.',
+        ),
+      );
+    });
 
     it('cliente cria pedido com sucesso', async () => {
       prisma.user.findUnique.mockResolvedValue(makeClient());

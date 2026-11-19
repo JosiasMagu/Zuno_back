@@ -1,3 +1,5 @@
+import { CollectionPresenter } from './collection.presenter';
+
 type PaymentListEntity = {
   id: string;
   bookingId: string | null;
@@ -14,6 +16,8 @@ type PaymentListEntity = {
   mpesaReference: string | null;
   status: string;
   heldAt: Date | null;
+  /** Quando o cliente declarou que pagou. Null se ainda não declarou. */
+  declaredAt?: Date | null;
   releasedAt: Date | null;
   refundedAt: Date | null;
   refundAmount: unknown;
@@ -56,10 +60,10 @@ type PaymentDetailsEntity = PaymentListEntity & {
     deliveryAddress: string | null;
     clientNote: string | null;
   } | null;
-  dispute?: {
-    id: string;
-    status: string;
-  } | null;
+  /** A disputa mais recente da reserva, quando a consulta a traz. */
+  disputes?: { id: string; status: string }[];
+  /** A cobrança mais recente no telemóvel, quando a consulta a traz. */
+  providerOperations?: Parameters<typeof CollectionPresenter.toItem>[0][];
 };
 
 function toNumber(value: unknown): number | null {
@@ -82,6 +86,7 @@ export class PaymentPresenter {
       mpesaReference: payment.mpesaReference,
       status: payment.status,
       heldAt: payment.heldAt,
+      declaredAt: payment.declaredAt ?? null,
       releasedAt: payment.releasedAt,
       refundedAt: payment.refundedAt,
       refundAmount: toNumber(payment.refundAmount),
@@ -123,6 +128,61 @@ export class PaymentPresenter {
     };
   }
 
+  /**
+   * O pagamento como o vê quem o declarou: a referência que indicou e até
+   * quando a reserva espera pela confirmação do admin.
+   */
+  static toDeclared(
+    payment: PaymentListEntity & {
+      declaredReference: string | null;
+      booking: { expiresAt: Date | null } | null;
+      serviceBooking: { expiresAt: Date | null } | null;
+    },
+  ) {
+    const reservation = payment.booking ?? payment.serviceBooking;
+
+    return {
+      ...PaymentPresenter.toListItem(payment),
+      declaredReference: payment.declaredReference,
+      confirmBy: reservation?.expiresAt ?? null,
+    };
+  }
+
+  /**
+   * Um pagamento na fila do admin: o que o cliente declarou, para comparar
+   * com o extracto, e até quando a reserva espera pela confirmação.
+   */
+  static toAwaitingConfirmation(payment: {
+    id: string;
+    receiptNumber: string;
+    totalCharged: unknown;
+    declaredReference: string | null;
+    declaredPayerMsisdn: string | null;
+    declaredAt: Date | null;
+    booking: { id: string; expiresAt: Date | null } | null;
+    serviceBooking: { id: string; expiresAt: Date | null } | null;
+    client: { id: string; name: string; phone: string };
+  }) {
+    const reservation = payment.booking ?? payment.serviceBooking;
+
+    return {
+      id: payment.id,
+      receiptNumber: payment.receiptNumber,
+      totalCharged: Number(payment.totalCharged),
+      declaredReference: payment.declaredReference,
+      declaredPayerMsisdn: payment.declaredPayerMsisdn,
+      declaredAt: payment.declaredAt,
+      confirmBy: reservation?.expiresAt ?? null,
+      bookingId: payment.booking?.id ?? null,
+      serviceBookingId: payment.serviceBooking?.id ?? null,
+      client: {
+        id: payment.client.id,
+        name: payment.client.name,
+        phone: payment.client.phone,
+      },
+    };
+  }
+
   static toDetails(payment: PaymentDetailsEntity) {
     return {
       id: payment.id,
@@ -137,6 +197,7 @@ export class PaymentPresenter {
       mpesaReference: payment.mpesaReference,
       status: payment.status,
       heldAt: payment.heldAt,
+      declaredAt: payment.declaredAt ?? null,
       releasedAt: payment.releasedAt,
       refundedAt: payment.refundedAt,
       refundAmount: toNumber(payment.refundAmount),
@@ -178,11 +239,15 @@ export class PaymentPresenter {
           }
         : undefined,
       ownerId: payment.ownerId,
-      dispute: payment.dispute
+      dispute: payment.disputes?.[0]
         ? {
-            id: payment.dispute.id,
-            status: payment.dispute.status,
+            id: payment.disputes[0].id,
+            status: payment.disputes[0].status,
           }
+        : null,
+      // A cobrança mais recente no telemóvel: em curso, confirmada ou falhada.
+      collection: payment.providerOperations?.[0]
+        ? CollectionPresenter.toItem(payment.providerOperations[0])
         : null,
     };
   }

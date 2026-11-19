@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 
 import { AppModule } from '../src/app.module';
+import { paymentReceipt } from './helpers/booking-flow';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import {
   disconnectTestPrisma,
@@ -15,6 +16,7 @@ import {
   TEST_PASSWORD,
   TestSeedResult,
 } from './helpers/seed-test-data';
+import { expectMoneyReconciles } from './helpers/reconciliation';
 
 describe('Happy Path E2E — service request → booking → escrow → review', () => {
   let app: INestApplication;
@@ -52,6 +54,9 @@ describe('Happy Path E2E — service request → booking → escrow → review',
     clientAuth = await loginViaApi(app, seed.client.phone, TEST_PASSWORD);
     adminAuth = await loginViaApi(app, seed.admin.phone, TEST_PASSWORD);
   });
+
+  // No fim de cada teste, o dinheiro tem de bater certo.
+  afterEach(() => expectMoneyReconciles(app));
 
   afterAll(async () => {
     await app.close();
@@ -139,7 +144,7 @@ describe('Happy Path E2E — service request → booking → escrow → review',
     const markHeldRes = await request(httpServer)
       .patch(`/api/v1/payments/${paymentId}/mark-held`)
       .set(authHeader(adminAuth.accessToken))
-      .send({});
+      .send(await paymentReceipt(paymentId));
 
     expect(markHeldRes.status).toBe(200);
     expect(markHeldRes.body?.data?.status).toBe('HELD');
@@ -240,23 +245,32 @@ describe('Happy Path E2E — service request → booking → escrow → review',
     expect(finalPayment?.serviceBookingId).toBe(serviceBookingId);
     expect(finalPayment?.bookingId).toBeNull();
 
-    // Provider rating: actualmente recalculateUserRating agrega tambem reviews
-    // de clientes nos serviços/equipamentos do provider (via serviceBooking.providerId
-    // ou booking.providerId), nao só reviews directos (targetId === providerId).
-    // Isto reflecte a satisfacao total do provider — bug do backlog item 7 corrigido.
+    // Cada conta tem duas notas. A do provider vem do que o cliente disse do
+    // serviço, e a do cliente do que o provider disse dele. Nenhuma das duas
+    // avaliações conta para o outro lado da mesma conta.
     const finalProvider = await prisma.user.findUnique({
       where: { id: seed.provider.id },
-      select: { totalRating: true, totalReviews: true },
+      select: {
+        providerRating: true,
+        providerReviews: true,
+        clientReviews: true,
+      },
     });
-    expect(Number(finalProvider?.totalRating)).toBe(5);
-    expect(finalProvider?.totalReviews).toBe(1);
+    expect(Number(finalProvider?.providerRating)).toBe(5);
+    expect(finalProvider?.providerReviews).toBe(1);
+    expect(finalProvider?.clientReviews).toBe(0);
 
     const finalClient = await prisma.user.findUnique({
       where: { id: seed.client.id },
-      select: { totalRating: true, totalReviews: true },
+      select: {
+        clientRating: true,
+        clientReviews: true,
+        providerReviews: true,
+      },
     });
-    expect(Number(finalClient?.totalRating)).toBe(5);
-    expect(finalClient?.totalReviews).toBe(1);
+    expect(Number(finalClient?.clientRating)).toBe(5);
+    expect(finalClient?.clientReviews).toBe(1);
+    expect(finalClient?.providerReviews).toBe(0);
 
     // Audit log: verificar entradas esperadas
     const auditEntries = await prisma.auditLog.findMany({

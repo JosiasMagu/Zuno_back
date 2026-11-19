@@ -1,9 +1,11 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
   Get,
   Param,
+  ParseEnumPipe,
   Patch,
   Post,
   Query,
@@ -27,6 +29,16 @@ import { RolesGuard } from '../../auth/guards/roles.guard';
 import { CreateCategoryDto } from '../dto/create-category.dto';
 import { UpdateCategoryDto } from '../dto/update-category.dto';
 import { CategoriesService } from '../services/categories.service';
+
+/**
+ * Lê o filtro `kind` da lista pública. Um valor desconhecido responde 400 em
+ * vez de ser tratado como se fosse BOTH.
+ */
+const KIND_FILTER = new ParseEnumPipe(CategoryKind, {
+  optional: true,
+  exceptionFactory: () =>
+    new BadRequestException('kind tem de ser EQUIPMENT, SERVICE ou BOTH.'),
+});
 
 @ApiTags('Categories')
 @Controller('categories')
@@ -56,8 +68,23 @@ export class CategoriesController {
       'Filtra por tipo. EQUIPMENT inclui EQUIPMENT+BOTH; SERVICE inclui SERVICE+BOTH.',
   })
   @ApiResponse({ status: 200, description: 'Categorias obtidas com sucesso.' })
-  findAll(@Query('kind') kind?: CategoryKind) {
+  findAll(@Query('kind', KIND_FILTER) kind?: CategoryKind) {
     return this.categoriesService.findAll({ kind });
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Get('admin/all')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: '[ADMIN] Listar todas as categorias',
+    description:
+      'Traz também as categorias desactivadas, que a lista pública esconde. É daqui que o painel as mostra para se poderem reactivar.',
+  })
+  @ApiResponse({ status: 200, description: 'Categorias obtidas com sucesso.' })
+  @ApiResponse({ status: 403, description: 'Sem permissão.' })
+  findAllForAdmin() {
+    return this.categoriesService.findAllForAdmin();
   }
 
   @Get(':id')
@@ -73,7 +100,11 @@ export class CategoriesController {
   @Roles(UserRole.ADMIN)
   @Patch(':id')
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Atualizar categoria' })
+  @ApiOperation({
+    summary: 'Atualizar categoria',
+    description:
+      'Muda o nome, o ícone, a categoria pai, o tipo e se está activa. null em iconUrl ou parentId tira o valor. Uma categoria não pode ficar debaixo de uma das suas subcategorias.',
+  })
   @ApiParam({ name: 'id', description: 'ID da categoria' })
   @ApiBody({ type: UpdateCategoryDto })
   @ApiResponse({

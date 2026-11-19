@@ -9,6 +9,7 @@ import { UserRole } from '@prisma/client';
 import { CloudinaryService } from '../../../shared/cloudinary/cloudinary.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { ServicePhotosService } from './service-photos.service';
+import { ServicesService } from './services.service';
 
 const PROVIDER_ID = 'provider-uuid';
 const CLIENT_ID = 'client-uuid';
@@ -63,6 +64,13 @@ describe('ServicePhotosService', () => {
         ServicePhotosService,
         { provide: PrismaService, useValue: prisma },
         { provide: CloudinaryService, useValue: cloudinary },
+        // Por omissão a mudança de fotos não devolve o anúncio à revisão.
+        {
+          provide: ServicesService,
+          useValue: {
+            reviewAfterPhotoChange: jest.fn().mockResolvedValue(false),
+          },
+        },
       ],
     }).compile();
     service = module.get(ServicePhotosService);

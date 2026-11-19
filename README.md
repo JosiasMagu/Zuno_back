@@ -35,7 +35,7 @@ cp .env.example .env
 # editar .env com:
 #   - DATABASE_URL (BD principal)
 #   - DATABASE_URL_TEST (BD de testes — DEVE conter "zuno_db_test" no nome)
-#   - JWT_ACCESS_SECRET e JWT_REFRESH_SECRET (64+ chars aleatorios)
+#   - JWT_ACCESS_SECRET (64+ chars aleatorios)
 #   - credenciais Cloudinary
 #   - ALLOWED_ORIGINS (origens do frontend separadas por virgula)
 
@@ -104,7 +104,8 @@ Apos `npm run db:seed`, ficam disponiveis 5 contas para teste local
 
 | Path | Auth | Descricao |
 |---|---|---|
-| `GET /api/v1/health` | publico | Estado do servico e da BD |
+| `GET /health` | publico | Liveness: o processo esta vivo (fora do prefixo `/api/v1`) |
+| `GET /ready` | publico | Readiness: o servico consegue falar com a BD |
 | `POST /api/v1/auth/register` | publico | Registo |
 | `POST /api/v1/auth/login` | publico | Login (devolve access + refresh) |
 | `POST /api/v1/auth/refresh` | refresh JWT | Rotaciona o par de tokens |

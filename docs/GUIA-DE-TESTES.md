@@ -30,8 +30,8 @@ npx expo start
 
 | Verificação | Como | Esperado |
 |---|---|---|
-| Liveness | `curl http://localhost:3000/api/v1/health` | 200, `uptimeSeconds` |
-| Readiness (BD) | `curl http://localhost:3000/api/v1/ready` | 200, `database: ok` |
+| Liveness | `curl http://localhost:3000/health` | 200, `uptimeSeconds` |
+| Readiness (BD) | `curl http://localhost:3000/ready` | 200, `database: ok` |
 | Swagger | abrir `http://localhost:3000/docs` no browser | UI carrega (só em dev) |
 
 O **Swagger é a tua ferramenta de admin** durante os testes: as operações sem UI
@@ -89,7 +89,7 @@ ponta com verificação financeira em cada checkpoint.
 ### 1.4 Paula confirma
 10. Paula → pedidos recebidos → confirmar.
 11. ✅ Carlos vê *Confirmado* e o botão de pagar M-Pesa.
-12. ✅ BD: `Equipment.availableQuantity` decrementou.
+12. ✅ O anúncio da Paula continua activo. As datas desta reserva deixam de aparecer livres em `GET /equipment?availableFrom=…&availableTo=…`.
 
 ### 1.5 Carlos paga (mock em dev)
 13. Carlos → pagar via M-Pesa.
@@ -158,7 +158,7 @@ Repete a preparação (nova reserva paga e HELD) antes de cada cenário.
 - Carlos cancela uma reserva paga que começa daqui a 4 dias.
 - ✅ Diálogo NÃO avisa retenção. Payment → REFUNDED, refundAmount 2650.
 - ✅ Ledger: OUTFLOW CLIENT 2650. Payout CLIENT_REFUND criado.
-- ✅ `availableQuantity` da Paula restaurada.
+- ✅ As datas da reserva voltam a aparecer livres no catálogo.
 
 ### 2.2 Cancelamento tardio (cliente, <48h antes)
 - Cria reserva a começar **amanhã**, paga, e cancela.
@@ -180,18 +180,28 @@ Repete a preparação (nova reserva paga e HELD) antes de cada cenário.
 - Reserva paga (HELD). Carlos → "Reportar problema" → motivo + descrição + 2 fotos.
 - ✅ Reserva fica *Em disputa*; Carlos NÃO consegue liberar o pagamento (o botão
   não deve funcionar / API recusa).
+- No painel admin a disputa aparece com o prazo de resposta e sem botões de
+  decisão. Tentar resolver pela API nesta fase responde 400.
+- Paula responde à disputa (`PATCH /disputes/{id}/respond`, pelo Swagger enquanto
+  não há ecrã), ou o admin regista a resposta por ela. A disputa passa a
+  *Em revisão* e os botões aparecem.
 - Admin resolve a favor do cliente (painel admin).
 - ✅ REFUNDED total, booking CANCELLED, quantidade restaurada, ledger e payout corretos.
-- Repete com resolução a favor do owner: ✅ RELEASED (payout provider) + depósito
-  devolvido ao cliente, booking COMPLETED.
+- Repete com resolução a favor do owner: ✅ RELEASED (payout provider), depósito
+  ainda retido e booking ACTIVE. Paula confirma a devolução e só então o
+  depósito volta ao Carlos e a reserva fica COMPLETED.
 - Repete com resolução parcial 50%: ✅ refund = 50% × rental = **750** (nunca
-  sobre o total!); provider recebe 1500−750−150 = 600; depósito devolvido à parte.
-  **Reconciliação tem de bater.**
+  sobre o total!); provider recebe 1500−750−150 = 600; o depósito fica retido
+  até à devolução. **Reconciliação tem de bater.**
+- Repete e, em vez de resolver, Carlos retira a disputa
+  (`PATCH /disputes/{id}/withdraw`): ✅ disputa WITHDRAWN, reserva de volta a
+  CONFIRMED, pagamento HELD e nenhum movimento no ledger.
 
 ### 2.5 Reclamação do depósito (provider, pós-entrega) — fluxo novo
 - Reserva ACTIVE (entrega confirmada). Paula → "Reportar dano no equipamento"
   → descrição ≥20 chars + fotos do dano.
-- ✅ Reserva fica *Em disputa*; disputa criada com `type = DEPOSIT` em UNDER_REVIEW.
+- ✅ Reserva fica *Em disputa*; disputa criada com `type = DEPOSIT` em AWAITING_OWNER.
+- Carlos responde (`PATCH /disputes/{id}/respond`) e a disputa passa a UNDER_REVIEW.
 - Admin (Swagger ou painel): resolve a favor do owner.
 - ✅ `depositStatus = CLAIMED`; Payout DEPOSIT_CLAIM 1000 para a Paula; booking COMPLETED.
 - Repete com resolução parcial 40%: ✅ 400 ao Carlos, 600 à Paula, `depositStatus = SPLIT`.
@@ -236,6 +246,10 @@ de devolver 403/400 — se alguma passar, é bug crítico.**
 | S13 | Executar payout como Paula | `PATCH /payouts/{id}/execute` | 403 |
 | S14 | Reclamar depósito fora da janela | `UPDATE "Booking" SET "endDate" = now() - interval '5 days'` e tentar | 400 |
 | S15 | Brute force no login | 11+ tentativas erradas seguidas | 429 (throttle) |
+| S16 | Carlos responde à disputa que ele próprio abriu | `PATCH /disputes/{id}/respond` | 403 |
+| S17 | Admin resolve antes de a outra parte responder | `PATCH /disputes/{id}/resolve-client` logo após a abertura | 400 |
+| S18 | Prova com um link de fora | `POST /disputes` com `evidenceUrls: ["https://exemplo.com/x.jpg"]` | 400 |
+| S19 | Paula retira a disputa que o Carlos abriu | `PATCH /disputes/{id}/withdraw` | 403 |
 
 ---
 
@@ -267,10 +281,20 @@ $job1 = Start-Job { curl -X PATCH http://localhost:3000/api/v1/payments/<ID>/rel
 $job2 = Start-Job { curl -X PATCH http://localhost:3000/api/v1/payments/<ID>/release -H "Authorization: Bearer <TOKEN_ADMIN>" }
 Receive-Job $job1, $job2 -Wait
 ```
-- ✅ Um 200, um 400. Ledger com UMA saída só. Reconciliação bate.
+- ✅ Um 200, um 409. Ledger com UMA saída só. Reconciliação bate.
 
 Repete o padrão para: dois `confirm` na última unidade (um deve falhar),
 duas resoluções de disputa diferentes (uma deve falhar), dois `mark-held`.
+
+Depois de cada cenário, confere o dinheiro:
+
+```powershell
+curl http://localhost:3000/api/v1/payments/admin/reconciliation -H "Authorization: Bearer <TOKEN_ADMIN>"
+```
+- ✅ `findings` vazio. Qualquer linha aí é um bug a registar, com o `detail`.
+
+Estes casos também correm sozinhos em `test/concurrent-money-moves.e2e-spec.ts`,
+`test/ledger-integrity.e2e-spec.ts` e `test/reconciliation.e2e-spec.ts`.
 
 ---
 
@@ -282,6 +306,15 @@ duas resoluções de disputa diferentes (uma deve falhar), dois `mark-held`.
 3. Carlos aceita → ✅ ServiceBooking criado + Payment PENDING (aceitar 2ª vez → 400).
 4. Paga (mock) → Paula inicia (`start`) → conclui (`complete`) → Carlos liberta.
 5. ✅ Ledger/payout como no equipamento (sem depósito). Reviews nos dois sentidos.
+6. Prazo de pagamento: a aceitação devolve `payBy` (24 horas). Carlos declara o
+   pagamento (`PATCH /payments/:id/declare`) → ✅ `confirmBy` passa a 48 horas e
+   o pagamento aparece em `GET /payments/admin/declared`.
+7. Cancelamentos: por pagar (qualquer parte, pagamento FAILED); pago e por
+   começar (reembolso total; se for a Paula a cancelar, leva strike); em
+   execução (Carlos recebe 400 `SERVICE_BOOKING_IN_PROGRESS`).
+8. Serviço concluído sem resposta do Carlos → ✅ `autoReleaseAt` na reserva; o
+   job de hora a hora liberta o pagamento 3 dias depois.
+9. Reserva cancelada antes de ser paga → ✅ `POST /reviews` responde 400.
 
 > Nota conhecida: a gestão do ServiceBooking (start/complete) ainda não tem UI
 > completa — testa esses passos via Swagger e regista as lacunas de UI que

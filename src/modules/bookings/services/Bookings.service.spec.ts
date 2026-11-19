@@ -18,6 +18,8 @@ import {
 } from '@prisma/client';
 
 import { BookingsService } from './bookings.service';
+import { ApiException } from '../../../common/exceptions/api.exception';
+import { ErrorCode } from '../../../common/exceptions/error-codes';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { PushService } from '../../../shared/push/push.service';
 import { AuditService } from '../../../shared/audit/audit.service';
@@ -25,6 +27,7 @@ import {
   CANCELLATION_FREE_WINDOW_HOURS,
   PROVIDER_STRIKE_LIMIT,
 } from '../../../shared/constants/policy';
+import { EscrowRefundService } from '../../payments/services/escrow-refund.service';
 import { LedgerService } from '../../payments/services/ledger.service';
 import { PayoutsService } from '../../payments/services/payouts.service';
 
@@ -82,6 +85,7 @@ const makeEquipment = (overrides: Partial<Record<string, unknown>> = {}) => ({
     name: 'Proprietário',
     avatarUrl: null,
     pushToken: null,
+    isActive: true,
   },
   category: { id: CATEGORY_ID, name: 'Construção', slug: 'construcao' },
   ...overrides,
@@ -204,14 +208,21 @@ const makePrismaMock = () => ({
   },
   booking: {
     findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
     findMany: jest.fn(),
     count: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
   },
   user: { findUnique: jest.fn(), update: jest.fn() },
-  payment: { findUnique: jest.fn(), update: jest.fn() },
+  payment: {
+    findUnique: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+  },
   providerStrike: { create: jest.fn(), count: jest.fn() },
+  service: { updateMany: jest.fn() },
   $transaction: jest.fn(),
 });
 
@@ -247,6 +258,7 @@ describe('BookingsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BookingsService,
+        EscrowRefundService,
         { provide: PrismaService, useValue: prisma },
         { provide: PushService, useValue: push },
         { provide: AuditService, useValue: audit },
@@ -336,13 +348,15 @@ describe('BookingsService', () => {
       );
     });
 
-    it('lança BadRequestException se não há unidades disponíveis (availableQuantity=0)', async () => {
+    it('lança BadRequestException se o equipamento está pausado (isAvailable=false)', async () => {
       prisma.equipment.findUnique.mockResolvedValue(
-        makeEquipment({ availableQuantity: 0 }),
+        makeEquipment({ isAvailable: false }),
       );
 
       await expect(service.create(CLIENT_ID, validDto)).rejects.toThrow(
-        new BadRequestException('Este equipamento não está disponível.'),
+        new BadRequestException(
+          'Este equipamento não está a aceitar reservas.',
+        ),
       );
     });
 
@@ -806,12 +820,11 @@ describe('BookingsService', () => {
     /**
      * Configura as re-leituras dentro da transacção Serializable:
      * tx.booking.findUnique (status), tx.equipment.findUnique
-     * (availableQuantity/quantity/status) e tx.booking.count (overlaps).
+     * (quantity/status) e tx.booking.count (overlaps).
      */
     const setupConfirmTx = ({
       freshBooking = { status: BookingStatus.PENDING } as unknown,
       freshEquipment = {
-        availableQuantity: 1,
         quantity: 1,
         status: EquipmentStatus.ACTIVE,
       } as unknown,
@@ -887,23 +900,6 @@ describe('BookingsService', () => {
       );
     });
 
-    it('lança BadRequestException se não há unidades disponíveis (leitura externa)', async () => {
-      prisma.booking.findUnique.mockResolvedValue(
-        makeBookingWithEquipment(BookingStatus.PENDING, {
-          availableQuantity: 0,
-        }),
-      );
-      prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.PROVIDER),
-      );
-
-      await expect(service.confirm(OWNER_ID, BOOKING_ID)).rejects.toThrow(
-        new BadRequestException(
-          'Não há unidades disponíveis para confirmar esta reserva.',
-        ),
-      );
-    });
-
     it('re-leitura na transacção: reserva já não está PENDING → BadRequestException', async () => {
       prisma.booking.findUnique.mockResolvedValueOnce(
         makeBookingWithEquipment(),
@@ -916,29 +912,6 @@ describe('BookingsService', () => {
       await expect(service.confirm(OWNER_ID, BOOKING_ID)).rejects.toThrow(
         new BadRequestException(
           'Apenas reservas pendentes podem ser confirmadas.',
-        ),
-      );
-      expect(prisma.booking.update).not.toHaveBeenCalled();
-    });
-
-    it('re-leitura na transacção: unidades esgotadas entretanto → BadRequestException', async () => {
-      prisma.booking.findUnique.mockResolvedValueOnce(
-        makeBookingWithEquipment(),
-      );
-      prisma.user.findUnique.mockResolvedValue(
-        makeUser(OWNER_ID, UserRole.PROVIDER),
-      );
-      setupConfirmTx({
-        freshEquipment: {
-          availableQuantity: 0,
-          quantity: 1,
-          status: EquipmentStatus.ACTIVE,
-        },
-      });
-
-      await expect(service.confirm(OWNER_ID, BOOKING_ID)).rejects.toThrow(
-        new BadRequestException(
-          'Não há unidades disponíveis para confirmar esta reserva.',
         ),
       );
       expect(prisma.booking.update).not.toHaveBeenCalled();
@@ -960,7 +933,7 @@ describe('BookingsService', () => {
       );
     });
 
-    it('OWNER confirma com sucesso e decrementa availableQuantity na transacção', async () => {
+    it('OWNER confirma com sucesso, sem mexer no equipamento', async () => {
       prisma.booking.findUnique.mockResolvedValueOnce(
         makeBookingWithEquipment(),
       );
@@ -977,36 +950,33 @@ describe('BookingsService', () => {
           data: expect.objectContaining({ status: BookingStatus.CONFIRMED }),
         }),
       );
-      // Última unidade confirmada → decrementa e marca indisponível
-      expect(prisma.equipment.update).toHaveBeenCalledWith({
-        where: { id: EQUIPMENT_ID },
-        data: { availableQuantity: { decrement: 1 }, isAvailable: false },
-      });
+      // É a própria reserva confirmada que passa a ocupar as datas.
+      expect(prisma.equipment.update).not.toHaveBeenCalled();
     });
 
-    it('mantém isAvailable=true quando restam unidades após o decremento', async () => {
+    it('conta como ocupadas as outras reservas confirmadas, entregues ou em disputa', async () => {
       prisma.booking.findUnique.mockResolvedValueOnce(
-        makeBookingWithEquipment(BookingStatus.PENDING, {
-          availableQuantity: 2,
-          quantity: 3,
-        }),
+        makeBookingWithEquipment(),
       );
       prisma.user.findUnique.mockResolvedValue(
         makeUser(OWNER_ID, UserRole.PROVIDER),
       );
-      setupConfirmTx({
-        freshEquipment: {
-          availableQuantity: 2,
-          quantity: 3,
-          status: EquipmentStatus.ACTIVE,
-        },
-      });
+      setupConfirmTx();
 
       await service.confirm(OWNER_ID, BOOKING_ID);
 
-      expect(prisma.equipment.update).toHaveBeenCalledWith({
-        where: { id: EQUIPMENT_ID },
-        data: { availableQuantity: { decrement: 1 }, isAvailable: true },
+      expect(prisma.booking.count).toHaveBeenCalledWith({
+        where: expect.objectContaining({
+          id: { not: BOOKING_ID },
+          equipmentId: EQUIPMENT_ID,
+          status: {
+            in: [
+              BookingStatus.CONFIRMED,
+              BookingStatus.ACTIVE,
+              BookingStatus.DISPUTED,
+            ],
+          },
+        }),
       });
     });
 
@@ -1038,6 +1008,29 @@ describe('BookingsService', () => {
         data: Record<string, unknown>;
       };
       expect(updateCall.data.confirmedAt).toBeInstanceOf(Date);
+    });
+
+    it('volta a contar o prazo de pagamento a partir da confirmação', async () => {
+      prisma.booking.findUnique.mockResolvedValueOnce(
+        makeBookingWithEquipment(),
+      );
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(OWNER_ID, UserRole.PROVIDER),
+      );
+      setupConfirmTx();
+      const before = Date.now();
+
+      await service.confirm(OWNER_ID, BOOKING_ID);
+
+      const updateCall = prisma.booking.update.mock.calls[0][0] as {
+        data: { expiresAt: Date };
+      };
+      const hoursToPay =
+        (updateCall.data.expiresAt.getTime() - before) / 3_600_000;
+      // O aluguer começa longe: o cliente tem as 24 horas inteiras, contadas
+      // da confirmação e não da criação da reserva.
+      expect(hoursToPay).toBeGreaterThan(23.9);
+      expect(hoursToPay).toBeLessThanOrEqual(24.1);
     });
 
     it('converte erro P2034 em BadRequestException de confirmação concorrente', async () => {
@@ -1259,35 +1252,14 @@ describe('BookingsService', () => {
       expect(updateCall.data.cancelledAt).toBeInstanceOf(Date);
     });
 
-    it('reserva CONFIRMED cancelada restaura availableQuantity (re-leitura dentro da tx)', async () => {
+    it('não mexe no equipamento: a reserva cancelada deixa de ocupar as datas', async () => {
       setupCancelTx({
         booking: makeBooking({ status: BookingStatus.CONFIRMED }),
-        freshEquipment: { availableQuantity: 0, quantity: 1 },
       });
 
       await service.cancel(CLIENT_ID, BOOKING_ID, {});
 
-      expect(prisma.equipment.findUnique).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: EQUIPMENT_ID } }),
-      );
-      expect(prisma.equipment.update).toHaveBeenCalledWith({
-        where: { id: EQUIPMENT_ID },
-        data: { availableQuantity: 1, isAvailable: true },
-      });
-    });
-
-    it('não excede quantity ao restaurar unidades', async () => {
-      setupCancelTx({
-        booking: makeBooking({ status: BookingStatus.CONFIRMED }),
-        freshEquipment: { availableQuantity: 1, quantity: 1 },
-      });
-
-      await service.cancel(CLIENT_ID, BOOKING_ID, {});
-
-      expect(prisma.equipment.update).toHaveBeenCalledWith({
-        where: { id: EQUIPMENT_ID },
-        data: { availableQuantity: 1, isAvailable: true },
-      });
+      expect(prisma.equipment.update).not.toHaveBeenCalled();
     });
 
     // Liquidação financeira (política D2)
@@ -1349,6 +1321,79 @@ describe('BookingsService', () => {
           ownerPayout: 0,
           depositStatus: DepositStatus.RETURNED,
         }),
+      });
+    });
+
+    describe('com o aluguer já começado', () => {
+      const startedBooking = (paymentStatus: PaymentStatus) =>
+        makeBooking({
+          status: BookingStatus.CONFIRMED,
+          startDate: hoursFromNow(-6),
+          endDate: hoursFromNow(66),
+          payment: { id: PAYMENT_ID, status: paymentStatus },
+        });
+
+      it('recusa o cancelamento do CLIENTE com o dinheiro retido, sem mexer em nada', async () => {
+        setupCancelTx({
+          booking: startedBooking(PaymentStatus.HELD),
+          freshPayment: makeFreshPayment(),
+        });
+
+        const error = (await service
+          .cancel(CLIENT_ID, BOOKING_ID, {})
+          .catch((thrown: unknown) => thrown)) as ApiException;
+
+        expect(error.getStatus()).toBe(400);
+        expect(error.errorCode).toBe(ErrorCode.BOOKING_RENTAL_STARTED);
+        expect(prisma.booking.update).not.toHaveBeenCalled();
+        expect(prisma.payment.update).not.toHaveBeenCalled();
+        expect(ledger.record).not.toHaveBeenCalled();
+        expect(ledger.recordMany).not.toHaveBeenCalled();
+        expect(payouts.createPending).not.toHaveBeenCalled();
+      });
+
+      it('decide pelo estado do pagamento relido dentro da transacção', async () => {
+        // Lido fora da transacção ainda estava PENDING; entretanto entrou.
+        setupCancelTx({
+          booking: startedBooking(PaymentStatus.PENDING),
+          freshPayment: makeFreshPayment({ status: PaymentStatus.HELD }),
+        });
+
+        await expect(
+          service.cancel(CLIENT_ID, BOOKING_ID, {}),
+        ).rejects.toMatchObject({
+          errorCode: ErrorCode.BOOKING_RENTAL_STARTED,
+        });
+        expect(prisma.booking.update).not.toHaveBeenCalled();
+      });
+
+      it('deixa o CLIENTE cancelar a reserva que ficou por pagar', async () => {
+        setupCancelTx({
+          booking: startedBooking(PaymentStatus.PENDING),
+          freshPayment: makeFreshPayment({ status: PaymentStatus.PENDING }),
+        });
+
+        await service.cancel(CLIENT_ID, BOOKING_ID, {});
+
+        expect(prisma.payment.update).toHaveBeenCalledWith({
+          where: { id: PAYMENT_ID },
+          data: { status: PaymentStatus.FAILED },
+        });
+      });
+
+      it('deixa o PROVIDER cancelar, com reembolso total ao cliente', async () => {
+        setupCancelTx({
+          booking: startedBooking(PaymentStatus.HELD),
+          user: makeUser(OWNER_ID, UserRole.PROVIDER),
+          freshPayment: makeFreshPayment(),
+        });
+
+        await service.cancel(OWNER_ID, BOOKING_ID, {});
+
+        expect(prisma.payment.update).toHaveBeenCalledWith({
+          where: { id: PAYMENT_ID },
+          data: expect.objectContaining({ status: PaymentStatus.REFUNDED }),
+        });
       });
     });
 
@@ -1648,7 +1693,7 @@ describe('BookingsService', () => {
       expect(prisma.booking.update).not.toHaveBeenCalled();
     });
 
-    it('OWNER conclui reserva ACTIVE: COMPLETED + returnConfirmedAt e restaura o equipamento', async () => {
+    it('OWNER conclui reserva ACTIVE: COMPLETED + returnConfirmedAt, sem mexer no equipamento', async () => {
       setupCompleteTx();
 
       const result = await service.complete(OWNER_ID, BOOKING_ID);
@@ -1661,10 +1706,7 @@ describe('BookingsService', () => {
       };
       expect(updateCall.data.status).toBe(BookingStatus.COMPLETED);
       expect(updateCall.data.returnConfirmedAt).toBeInstanceOf(Date);
-      expect(prisma.equipment.update).toHaveBeenCalledWith({
-        where: { id: EQUIPMENT_ID },
-        data: { availableQuantity: 1, isAvailable: true },
-      });
+      expect(prisma.equipment.update).not.toHaveBeenCalled();
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({
           action: AuditAction.BOOKING_RETURN_CONFIRMED,
@@ -1759,80 +1801,120 @@ describe('BookingsService', () => {
     });
   });
 
-  // autoReturnDepositsDue() — auto-devolução do depósito (scheduler D1)
+  // autoReturnDepositsDue(): auto-devolução do depósito pelo scheduler
 
   describe('autoReturnDepositsDue()', () => {
-    const completeResult = {
-      message: 'Devolução confirmada e reserva concluída com sucesso.',
-      data: {},
-    } as unknown as Awaited<ReturnType<BookingsService['complete']>>;
+    const activeBooking = (id: string) =>
+      makeBooking({
+        id,
+        status: BookingStatus.ACTIVE,
+        payment: makeDepositPayment(),
+      });
+
+    const setupDue = (ids: string[]) => {
+      prisma.booking.findMany
+        .mockResolvedValueOnce(ids.map((id) => ({ id })))
+        .mockResolvedValue([]);
+      prisma.booking.findUniqueOrThrow.mockImplementation(
+        ({ where }: { where: { id: string } }) =>
+          Promise.resolve(activeBooking(where.id)),
+      );
+      // Re-leitura do estado dentro da transacção.
+      prisma.booking.findUnique.mockResolvedValue({
+        status: BookingStatus.ACTIVE,
+      });
+      prisma.booking.update.mockResolvedValue(
+        makeBooking({ status: BookingStatus.COMPLETED }),
+      );
+      prisma.payment.findUnique.mockResolvedValue(makeDepositPayment());
+      prisma.payment.update.mockResolvedValue({});
+      useRealTransaction();
+    };
 
     it('devolve 0 quando não há reservas devidas', async () => {
       prisma.booking.findMany.mockResolvedValue([]);
-      const completeSpy = jest.spyOn(service, 'complete');
 
       const result = await service.autoReturnDepositsDue();
 
       expect(result).toBe(0);
-      expect(completeSpy).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
       expect(audit.record).not.toHaveBeenCalled();
     });
 
-    it('conclui cada reserva devida em nome do owner e regista DEPOSIT_AUTO_RETURNED', async () => {
-      prisma.booking.findMany.mockResolvedValue([
-        { id: 'booking-1', ownerId: OWNER_ID },
-        { id: 'booking-2', ownerId: 'owner-uuid-002' },
+    it('procura reservas entregues cuja janela fechou a contar do fim do aluguer e da entrega', async () => {
+      prisma.booking.findMany.mockResolvedValue([]);
+
+      await service.autoReturnDepositsDue();
+
+      const { where } = prisma.booking.findMany.mock.calls[0][0] as {
+        where: {
+          endDate: { lte: Date };
+          OR: unknown[];
+        };
+      };
+      expect(where).toMatchObject({
+        status: BookingStatus.ACTIVE,
+        // Sem disputa aberta, e com o aluguer já pago ao provider.
+        disputes: {
+          none: { status: { in: ['OPEN', 'AWAITING_OWNER', 'UNDER_REVIEW'] } },
+        },
+        payment: {
+          status: {
+            in: [PaymentStatus.RELEASED, PaymentStatus.PARTIALLY_REFUNDED],
+          },
+        },
+      });
+      expect(where.endDate.lte.getTime()).toBeLessThan(Date.now());
+      expect(where.OR).toEqual([
+        { deliveryConfirmedAt: null },
+        { deliveryConfirmedAt: { lte: where.endDate.lte } },
       ]);
-      const completeSpy = jest
-        .spyOn(service, 'complete')
-        .mockResolvedValue(completeResult);
+    });
+
+    it('conclui cada reserva devida e devolve o depósito', async () => {
+      setupDue(['booking-1', 'booking-2']);
 
       const result = await service.autoReturnDepositsDue();
 
       expect(result).toBe(2);
-      expect(completeSpy).toHaveBeenNthCalledWith(1, OWNER_ID, 'booking-1');
-      expect(completeSpy).toHaveBeenNthCalledWith(
-        2,
-        'owner-uuid-002',
-        'booking-2',
+      expect(prisma.booking.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'booking-2' },
+          data: expect.objectContaining({ status: BookingStatus.COMPLETED }),
+        }),
       );
-      expect(audit.record).toHaveBeenCalledTimes(2);
+      expect(payouts.createPending).toHaveBeenCalledTimes(2);
+    });
+
+    it('fica registado como acção do sistema, e não do provider', async () => {
+      setupDue(['booking-1']);
+
+      await service.autoReturnDepositsDue();
+
+      expect(ledger.record).toHaveBeenCalledWith(
+        prisma,
+        expect.objectContaining({ actorId: null }),
+      );
+      expect(audit.record).toHaveBeenCalledTimes(1);
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({
           action: AuditAction.DEPOSIT_AUTO_RETURNED,
-          actorId: OWNER_ID,
+          actorId: 'system',
           targetType: 'Booking',
           targetId: 'booking-1',
         }),
       );
-
-      // O filtro só apanha reservas ACTIVE, sem disputa e com payment RELEASED
-      const whereArg = (
-        prisma.booking.findMany.mock.calls[0][0] as {
-          where: Record<string, unknown>;
-        }
-      ).where;
-      expect(whereArg).toMatchObject({
-        status: BookingStatus.ACTIVE,
-        dispute: null,
-        payment: { status: PaymentStatus.RELEASED },
-      });
     });
 
     it('falha num item não trava o processamento dos restantes', async () => {
-      prisma.booking.findMany.mockResolvedValue([
-        { id: 'booking-1', ownerId: OWNER_ID },
-        { id: 'booking-2', ownerId: OWNER_ID },
-      ]);
-      const completeSpy = jest
-        .spyOn(service, 'complete')
-        .mockRejectedValueOnce(new Error('Disputa aberta entretanto'))
-        .mockResolvedValueOnce(completeResult);
+      setupDue(['booking-1', 'booking-2']);
+      prisma.booking.findUnique
+        .mockResolvedValueOnce({ status: BookingStatus.DISPUTED })
+        .mockResolvedValueOnce({ status: BookingStatus.ACTIVE });
 
       const result = await service.autoReturnDepositsDue();
 
       expect(result).toBe(1);
-      expect(completeSpy).toHaveBeenCalledTimes(2);
       expect(audit.record).toHaveBeenCalledTimes(1);
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1840,6 +1922,226 @@ describe('BookingsService', () => {
           targetId: 'booking-2',
         }),
       );
+    });
+  });
+
+  // expireUnpaidBookings(): expiração das reservas por pagar (D5)
+
+  describe('expireUnpaidBookings()', () => {
+    const setupDue = (updatedRows: number) => {
+      prisma.booking.findMany
+        .mockResolvedValueOnce([{ id: BOOKING_ID }])
+        .mockResolvedValue([]);
+      prisma.booking.updateMany.mockResolvedValue({ count: updatedRows });
+      prisma.payment.updateMany.mockResolvedValue({ count: 1 });
+      prisma.booking.findUnique.mockResolvedValue({
+        client: { pushToken: 'ExponentPushToken[cliente]' },
+        equipment: { title: 'Betoneira 300L' },
+      });
+      useRealTransaction();
+    };
+
+    it('procura reservas vivas com o prazo vencido e sem dinheiro no escrow', async () => {
+      prisma.booking.findMany.mockResolvedValue([]);
+
+      const expired = await service.expireUnpaidBookings();
+
+      expect(expired).toBe(0);
+      const { where } = prisma.booking.findMany.mock.calls[0][0] as {
+        where: Record<string, unknown>;
+      };
+      expect(where).toMatchObject({
+        status: { in: [BookingStatus.PENDING, BookingStatus.CONFIRMED] },
+        OR: [
+          { payment: null },
+          {
+            payment: {
+              status: { in: [PaymentStatus.PENDING, PaymentStatus.FAILED] },
+            },
+          },
+        ],
+      });
+      expect(where.expiresAt).toEqual({ lte: expect.any(Date) });
+    });
+
+    it('expira a reserva e falha o pagamento que estava por entrar', async () => {
+      setupDue(1);
+
+      const expired = await service.expireUnpaidBookings();
+
+      expect(expired).toBe(1);
+      expect(prisma.booking.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: BookingStatus.EXPIRED }),
+        }),
+      );
+      expect(prisma.payment.updateMany).toHaveBeenCalledWith({
+        where: { bookingId: BOOKING_ID, status: PaymentStatus.PENDING },
+        data: { status: PaymentStatus.FAILED },
+      });
+    });
+
+    it('avisa o cliente de que a reserva expirou', async () => {
+      setupDue(1);
+
+      await service.expireUnpaidBookings();
+
+      expect(push.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: 'ExponentPushToken[cliente]',
+          title: 'Reserva expirada',
+        }),
+      );
+    });
+
+    it('não mexe no pagamento nem avisa quando o dinheiro entrou entretanto', async () => {
+      setupDue(0);
+
+      await service.expireUnpaidBookings();
+
+      expect(prisma.payment.updateMany).not.toHaveBeenCalled();
+      expect(push.send).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('fica em auditoria como acção do sistema, com o motivo de não ter sido paga', async () => {
+      setupDue(1);
+
+      await service.expireUnpaidBookings();
+
+      expect(prisma.booking.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            cancellationReason:
+              'A reserva expirou porque não foi paga dentro do prazo.',
+          }),
+        }),
+      );
+      expect(audit.record).toHaveBeenCalledWith({
+        action: AuditAction.BOOKING_EXPIRED,
+        actorId: 'system',
+        targetType: 'Booking',
+        targetId: BOOKING_ID,
+        metadata: { declaredReference: null },
+      });
+    });
+
+    describe('quando o cliente declarou o pagamento e o admin não o confirmou a tempo', () => {
+      beforeEach(() => {
+        setupDue(1);
+        // A primeira leitura do pagamento é a da transacção de expiração.
+        prisma.payment.findUnique.mockResolvedValue({
+          declaredAt: new Date('2030-06-01T10:00:00.000Z'),
+          declaredReference: 'CHK7H3ABCD',
+        });
+      });
+
+      it('a reserva fica com o motivo de pagamento por confirmar', async () => {
+        await service.expireUnpaidBookings();
+
+        expect(prisma.booking.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              cancellationReason:
+                'A reserva expirou porque o pagamento declarado não foi confirmado a tempo.',
+            }),
+          }),
+        );
+      });
+
+      it('a referência declarada fica em auditoria, para reconciliar com o extracto', async () => {
+        await service.expireUnpaidBookings();
+
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: AuditAction.BOOKING_EXPIRED,
+            metadata: { declaredReference: 'CHK7H3ABCD' },
+          }),
+        );
+      });
+
+      it('o aviso diz ao cliente para contactar o suporte se pagou', async () => {
+        await service.expireUnpaidBookings();
+
+        expect(push.send).toHaveBeenCalledWith(
+          expect.objectContaining({
+            title: 'Reserva expirada',
+            body: expect.stringContaining('contacta o suporte'),
+          }),
+        );
+      });
+    });
+  });
+
+  // Prazos fixados na criação da reserva
+
+  describe('create() e os prazos', () => {
+    const dtoFor = (days: number) => ({
+      equipmentId: EQUIPMENT_ID,
+      startDate: future(5).toISOString(),
+      endDate: future(5 + days).toISOString(),
+    });
+
+    beforeEach(() => {
+      prisma.equipment.findUnique.mockResolvedValue(makeEquipment());
+      prisma.booking.count.mockResolvedValue(0);
+      prisma.booking.create.mockResolvedValue(makeBooking());
+      useRealTransaction();
+    });
+
+    it('recusa uma reserva com mais de 90 dias', async () => {
+      await expect(service.create(CLIENT_ID, dtoFor(91))).rejects.toThrow(
+        new BadRequestException('Uma reserva não pode ter mais de 90 dias.'),
+      );
+      expect(prisma.booking.create).not.toHaveBeenCalled();
+    });
+
+    it('aceita uma reserva de 90 dias', async () => {
+      await service.create(CLIENT_ID, dtoFor(90));
+
+      expect(prisma.booking.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('calcula o preço em decimal, sem restos de vírgula flutuante', async () => {
+      prisma.equipment.findUnique.mockResolvedValue(
+        makeEquipment({
+          pricePerDay: new Prisma.Decimal('0.1'),
+          depositAmount: new Prisma.Decimal('0.2'),
+        }),
+      );
+
+      await service.create(CLIENT_ID, dtoFor(3));
+
+      const { data } = prisma.booking.create.mock.calls[0][0] as {
+        data: {
+          rentalAmount: number;
+          depositAmount: number;
+          platformFee: number;
+          totalAmount: number;
+        };
+      };
+      expect(data.rentalAmount).toBe(0.3);
+      expect(data.depositAmount).toBe(0.2);
+      expect(data.totalAmount).toBe(
+        Number(
+          new Prisma.Decimal(data.rentalAmount)
+            .plus(data.depositAmount)
+            .plus(data.platformFee),
+        ),
+      );
+    });
+
+    it('dá à reserva 24 horas para ser paga', async () => {
+      const before = Date.now();
+
+      await service.create(CLIENT_ID, dtoFor(3));
+
+      const { data } = prisma.booking.create.mock.calls[0][0] as {
+        data: { expiresAt: Date };
+      };
+      const hoursToPay = (data.expiresAt.getTime() - before) / 3_600_000;
+      expect(hoursToPay).toBeGreaterThan(23.9);
+      expect(hoursToPay).toBeLessThanOrEqual(24.1);
     });
   });
 });

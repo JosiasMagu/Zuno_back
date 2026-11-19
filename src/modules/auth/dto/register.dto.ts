@@ -1,11 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsEmail,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  MinLength,
-} from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+
+import { PASSWORD_MIN_LENGTH } from '../auth.policy';
+import { IsMzPhone, IsNewPassword } from './account-fields';
 
 export class RegisterDto {
   @ApiProperty({
@@ -18,10 +15,10 @@ export class RegisterDto {
 
   @ApiProperty({
     example: '841234567',
-    description: 'Número de telefone do utilizador',
+    description:
+      'Telemóvel moçambicano, com ou sem o indicativo +258. Fica guardado em E.164.',
   })
-  @IsString()
-  @IsNotEmpty()
+  @IsMzPhone()
   phone: string;
 
   @ApiPropertyOptional({
@@ -33,11 +30,10 @@ export class RegisterDto {
   email?: string;
 
   @ApiProperty({
-    example: '123456',
-    description: 'Palavra-passe com no mínimo 6 caracteres',
-    minLength: 6,
+    example: 'gerador-amarelo-2026',
+    description: `Palavra-passe com pelo menos ${PASSWORD_MIN_LENGTH} caracteres`,
+    minLength: PASSWORD_MIN_LENGTH,
   })
-  @IsString()
-  @MinLength(6)
+  @IsNewPassword()
   password: string;
 }

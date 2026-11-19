@@ -7,10 +7,14 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
 } from 'class-validator';
 import { EquipmentCondition } from '@prisma/client';
-import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
+import {
+  MAX_SEARCH_LENGTH,
+  PaginationQueryDto,
+} from '../../../common/dto/pagination-query.dto';
 
 export enum EquipmentSortBy {
   RELEVANT = 'relevant',
@@ -45,6 +49,7 @@ export class FindEquipmentQueryDto extends PaginationQueryDto {
   @IsOptional()
   @Transform(({ value }) => toOptionalTrimmedString(value))
   @IsString()
+  @MaxLength(MAX_SEARCH_LENGTH)
   search?: string;
 
   @ApiPropertyOptional({
@@ -133,7 +138,7 @@ export class FindEquipmentQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     example: '2026-09-15',
     description:
-      'Início do intervalo desejado (ISO date). Combinado com `availableTo`, filtra equipamentos SEM bookings em conflito nesse intervalo.',
+      'Primeiro dia do período desejado (ISO date). Com `availableTo`, devolve só os equipamentos com pelo menos uma unidade livre nesse período, contado em dias inteiros como nas reservas.',
   })
   @IsOptional()
   @IsDateString()
@@ -141,7 +146,8 @@ export class FindEquipmentQueryDto extends PaginationQueryDto {
 
   @ApiPropertyOptional({
     example: '2026-09-20',
-    description: 'Fim do intervalo desejado (ISO date). Exige `availableFrom`.',
+    description:
+      'Dia em que o período acaba (ISO date); esse dia já não faz parte dele. Exige `availableFrom`.',
   })
   @IsOptional()
   @IsDateString()

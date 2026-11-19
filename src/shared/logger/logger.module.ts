@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { LoggerModule as PinoLoggerModule } from 'nestjs-pino';
 import type { Params } from 'nestjs-pino';
 
+import { assignRequestId } from './request-id';
+
 const REDACTED_PATHS = [
   'req.headers.authorization',
   'req.headers.cookie',
@@ -26,6 +28,7 @@ function buildPinoConfig(): Params {
       pinoHttp: {
         level: 'silent',
         autoLogging: false,
+        genReqId: assignRequestId,
       },
     };
   }
@@ -33,7 +36,14 @@ function buildPinoConfig(): Params {
   const base: Params['pinoHttp'] = {
     level,
     redact: { paths: REDACTED_PATHS, censor: '[REDACTED]' },
-    customProps: () => ({ context: 'HTTP' }),
+    genReqId: assignRequestId,
+    // O id do pedido e quem o fez vão em cada linha de log, para se seguir
+    // um pedido de ponta a ponta.
+    customProps: (req) => ({
+      context: 'HTTP',
+      requestId: req.id,
+      userId: (req as { user?: { id?: string } }).user?.id,
+    }),
     serializers: {
       req: (req: { method: string; url: string; id: string }) => ({
         id: req.id,

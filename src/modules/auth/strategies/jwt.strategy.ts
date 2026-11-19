@@ -2,21 +2,15 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ConfigService } from '@nestjs/config';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import { UserRole } from '@prisma/client';
 
-import { PrismaService } from '../../../shared/db/prisma.service';
-
-type JwtPayload = {
-  sub: string;
-  phone: string;
-  role: UserRole;
-};
+import { ACCESS_TOKEN_TYPE, AccessTokenPayload } from '../access-token';
+import { SessionsService } from '../services/sessions.service';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
-    private readonly configService: ConfigService,
-    private readonly prisma: PrismaService,
+    configService: ConfigService,
+    private readonly sessions: SessionsService,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -25,44 +19,26 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: JwtPayload) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
-      select: {
-        id: true,
-        name: true,
-        phone: true,
-        email: true,
-        role: true,
-        isVerified: true,
-        isActive: true,
-        avatarUrl: true,
-        bio: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-
-    if (!user) {
-      throw new UnauthorizedException('Utilizador não encontrado.');
+  /**
+   * A assinatura e a validade do token já foram verificadas. Falta confirmar
+   * que a sessão a que ele pertence continua aberta, para que um logout, uma
+   * troca de password ou uma suspensão cortem o acesso de imediato.
+   */
+  async validate(payload: Partial<AccessTokenPayload>) {
+    if (payload.typ !== ACCESS_TOKEN_TYPE || !payload.sid) {
+      throw new UnauthorizedException('Token inválido.');
     }
 
-    if (!user.isActive) {
+    const session = await this.sessions.findUsable(payload.sid);
+
+    if (!session || session.userId !== payload.sub) {
+      throw new UnauthorizedException('Sessão inválida ou revogada.');
+    }
+
+    if (!session.user.isActive) {
       throw new UnauthorizedException('Conta desativada.');
     }
 
-    return {
-      id: user.id,
-      name: user.name,
-      phone: user.phone,
-      email: user.email,
-      role: user.role,
-      isVerified: user.isVerified,
-      isActive: user.isActive,
-      avatarUrl: user.avatarUrl,
-      bio: user.bio,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
-    };
+    return { ...session.user, sessionId: session.id };
   }
 }

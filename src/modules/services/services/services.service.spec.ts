@@ -14,6 +14,7 @@ import {
 
 import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { PushService } from '../../../shared/push/push.service';
 import { ServiceSortBy } from '../dto/find-services-query.dto';
 import { ServicesService } from './services.service';
 
@@ -63,18 +64,30 @@ const makeService = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-const makePrisma = () => ({
-  user: { findUnique: jest.fn() },
-  category: { findFirst: jest.fn() },
-  service: {
-    create: jest.fn(),
-    findFirst: jest.fn(),
-    findMany: jest.fn(),
-    findUnique: jest.fn(),
-    update: jest.fn(),
-    count: jest.fn(),
-  },
-});
+const makePrisma = () => {
+  const mock = {
+    user: { findUnique: jest.fn(), update: jest.fn() },
+    category: { findFirst: jest.fn() },
+    service: {
+      create: jest.fn(),
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
+    },
+    // Por omissão o serviço não tem reservas em curso.
+    serviceBooking: { count: jest.fn().mockResolvedValue(0) },
+    $transaction: jest.fn(),
+  };
+
+  // As transacções correm sobre o próprio mock.
+  mock.$transaction.mockImplementation((work: (tx: unknown) => unknown) =>
+    work(mock),
+  );
+
+  return mock;
+};
 
 describe('ServicesService', () => {
   let service: ServicesService;
@@ -87,6 +100,10 @@ describe('ServicesService', () => {
         ServicesService,
         { provide: PrismaService, useValue: prisma },
         { provide: AuditService, useValue: { record: jest.fn() } },
+        {
+          provide: PushService,
+          useValue: { send: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
     service = module.get(ServicesService);
@@ -122,6 +139,51 @@ describe('ServicesService', () => {
           }),
         }),
       );
+    });
+
+    it('promove a PROVIDER a conta CLIENT que publica um serviço', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        role: UserRole.CLIENT,
+        listingsSuspendedUntil: null,
+      });
+      prisma.category.findFirst.mockResolvedValue(makeCategory());
+      prisma.service.create.mockResolvedValue(makeService());
+
+      await service.create(PROVIDER_ID, dto);
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: PROVIDER_ID },
+        data: { role: UserRole.PROVIDER },
+      });
+    });
+
+    it.each([UserRole.PROVIDER, UserRole.ADMIN])(
+      'não mexe no papel de uma conta %s',
+      async (role) => {
+        prisma.user.findUnique.mockResolvedValue({
+          role,
+          listingsSuspendedUntil: null,
+        });
+        prisma.category.findFirst.mockResolvedValue(makeCategory());
+        prisma.service.create.mockResolvedValue(makeService());
+
+        await service.create(PROVIDER_ID, dto);
+
+        expect(prisma.user.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it('não promove ninguém quando a categoria é recusada', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        role: UserRole.CLIENT,
+        listingsSuspendedUntil: null,
+      });
+      prisma.category.findFirst.mockResolvedValue(null);
+
+      await expect(service.create(PROVIDER_ID, dto)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
     });
 
     it('rejeita categoria inativa ou inexistente', async () => {
@@ -299,7 +361,12 @@ describe('ServicesService', () => {
 
       expect(prisma.service.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: { status: ServiceStatus.ACTIVE, isActive: true },
+          data: {
+            status: ServiceStatus.ACTIVE,
+            isActive: true,
+            rejectionReason: null,
+            rejectedAt: null,
+          },
         }),
       );
     });
@@ -340,7 +407,13 @@ describe('ServicesService', () => {
       expect(result.message).toContain('Sem fotos');
       expect(prisma.service.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: { status: ServiceStatus.REJECTED, isActive: false },
+          data: {
+            status: ServiceStatus.REJECTED,
+            isActive: false,
+            // O motivo fica no anúncio, para o provider o corrigir.
+            rejectionReason: 'Sem fotos.',
+            rejectedAt: expect.any(Date) as Date,
+          },
         }),
       );
     });
@@ -634,6 +707,183 @@ describe('ServicesService', () => {
         data: { urgentSurcharge?: unknown };
       };
       expect(call.data.urgentSurcharge).toBeNull();
+    });
+  });
+
+  // Moderação: o que volta à revisão e o que continua público
+
+  describe('moderação das edições', () => {
+    const asProvider = () =>
+      prisma.user.findUnique.mockResolvedValue({
+        id: PROVIDER_ID,
+        role: UserRole.PROVIDER,
+      });
+
+    /** Um anúncio já aprovado, salvo indicação em contrário. */
+    const editing = (overrides: Record<string, unknown> = {}) => {
+      const listing = makeService({
+        status: ServiceStatus.ACTIVE,
+        ...overrides,
+      });
+      prisma.service.findUnique.mockResolvedValue(listing);
+      prisma.service.update.mockResolvedValue(listing);
+    };
+
+    const updateData = () =>
+      (
+        prisma.service.update.mock.calls[0][0] as {
+          data: Record<string, unknown>;
+        }
+      ).data;
+
+    it('fica activo quando só muda o preço', async () => {
+      asProvider();
+      editing();
+      const current = makeService();
+
+      const result = await service.update(PROVIDER_ID, SERVICE_ID, {
+        title: current.title,
+        description: current.description,
+        basePrice: 9999,
+      });
+
+      expect(updateData().status).toBeUndefined();
+      expect(result.message).toBe('Serviço atualizado com sucesso.');
+    });
+
+    it('volta à revisão quando o provider muda a descrição', async () => {
+      asProvider();
+      editing();
+
+      const result = await service.update(PROVIDER_ID, SERVICE_ID, {
+        description: 'Agora também vendo material eléctrico ao balcão.',
+      });
+
+      expect(updateData().status).toBe(ServiceStatus.PENDING_REVIEW);
+      expect(result.message).toContain('volta à revisão');
+    });
+
+    it('fica activo quando é um admin a editar', async () => {
+      prisma.user.findUnique.mockResolvedValue(makeAdmin());
+      editing();
+
+      await service.update(ADMIN_ID, SERVICE_ID, { title: 'Outro título' });
+
+      expect(updateData().status).toBeUndefined();
+    });
+
+    it('um anúncio rejeitado volta à revisão com qualquer mudança', async () => {
+      asProvider();
+      editing({ status: ServiceStatus.REJECTED });
+
+      const result = await service.update(PROVIDER_ID, SERVICE_ID, {
+        basePrice: 9999,
+      });
+
+      expect(updateData().status).toBe(ServiceStatus.PENDING_REVIEW);
+      expect(result.message).toContain('enviado de novo para revisão');
+    });
+
+    it('responde 404 a um anúncio removido', async () => {
+      asProvider();
+      editing({ status: ServiceStatus.DELETED });
+
+      await expect(
+        service.update(PROVIDER_ID, SERVICE_ID, { title: 'Outro título' }),
+      ).rejects.toThrow(new NotFoundException('Serviço não encontrado.'));
+    });
+
+    it('uma foto nova devolve um anúncio activo à revisão', async () => {
+      const backToReview = await service.reviewAfterPhotoChange({
+        actorId: PROVIDER_ID,
+        actorRole: UserRole.PROVIDER,
+        service: { id: SERVICE_ID, status: ServiceStatus.ACTIVE },
+        addedPhotos: true,
+      });
+
+      expect(backToReview).toBe(true);
+      expect(prisma.service.update).toHaveBeenCalledWith({
+        where: { id: SERVICE_ID },
+        data: { status: ServiceStatus.PENDING_REVIEW },
+      });
+    });
+  });
+
+  describe('catálogo, aprovação e remoção', () => {
+    it('a listagem pública deixa de fora os anúncios de contas suspensas', async () => {
+      prisma.service.findMany.mockResolvedValue([]);
+
+      await service.findAll({ page: 1, limit: 10 });
+
+      expect(prisma.service.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            provider: { isActive: true },
+          }) as object,
+        }),
+      );
+    });
+
+    it('a aprovação não desfaz uma suspensão por strikes: o anúncio fica pausado', async () => {
+      prisma.user.findUnique.mockResolvedValue(makeAdmin());
+      prisma.service.findUnique.mockResolvedValue({
+        id: SERVICE_ID,
+        status: ServiceStatus.PENDING_REVIEW,
+        provider: {
+          listingsSuspendedUntil: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        },
+      });
+      prisma.service.update.mockResolvedValue(makeService());
+
+      await service.approve(ADMIN_ID, SERVICE_ID);
+
+      expect(prisma.service.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: ServiceStatus.ACTIVE,
+            isActive: false,
+          }) as object,
+        }),
+      );
+    });
+
+    it('os meus anúncios vêm paginados e sem os removidos', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: PROVIDER_ID,
+        role: UserRole.PROVIDER,
+      });
+      prisma.service.findMany.mockResolvedValue([makeService()]);
+      prisma.service.count.mockResolvedValue(1);
+
+      const result = await service.findMyListings(PROVIDER_ID);
+
+      expect(prisma.service.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            providerId: PROVIDER_ID,
+            status: { not: ServiceStatus.DELETED },
+          },
+          skip: 0,
+          take: 50,
+        }),
+      );
+      expect(result.meta).toMatchObject({ page: 1, limit: 50, total: 1 });
+    });
+
+    it('recusa remover um serviço com reservas em curso', async () => {
+      prisma.service.findUnique.mockResolvedValue(makeService());
+      prisma.user.findUnique.mockResolvedValue({
+        id: PROVIDER_ID,
+        role: UserRole.PROVIDER,
+      });
+      prisma.serviceBooking.count.mockResolvedValue(2);
+
+      await expect(service.remove(PROVIDER_ID, SERVICE_ID)).rejects.toThrow(
+        new BadRequestException(
+          'Este serviço tem reservas em curso. Pausa o anúncio para não receber mais pedidos e remove-o quando elas terminarem.',
+        ),
+      );
+      expect(prisma.service.update).not.toHaveBeenCalled();
     });
   });
 });

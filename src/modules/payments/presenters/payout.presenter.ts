@@ -1,3 +1,5 @@
+import { payoutNeedsApproval } from '../money-controls';
+
 type PayoutEntity = {
   id: string;
   paymentId: string;
@@ -10,6 +12,7 @@ type PayoutEntity = {
   executedById: string | null;
   executedAt: Date | null;
   failReason: string | null;
+  approvedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
   recipient?: {
@@ -27,7 +30,14 @@ type PayoutEntity = {
 };
 
 export class PayoutPresenter {
-  static toListItem(payout: PayoutEntity) {
+  /**
+   * Com autoMaxAmount (listagem do admin), diz também se o payout espera por
+   * aprovação para sair pelo fornecedor.
+   */
+  static toListItem(
+    payout: PayoutEntity,
+    options?: { autoMaxAmount?: number },
+  ) {
     return {
       id: payout.id,
       paymentId: payout.paymentId,
@@ -39,6 +49,15 @@ export class PayoutPresenter {
       mpesaReference: payout.mpesaReference,
       executedAt: payout.executedAt,
       failReason: payout.failReason,
+      approvedAt: payout.approvedAt ?? null,
+      ...(options?.autoMaxAmount === undefined
+        ? {}
+        : {
+            needsApproval: payoutNeedsApproval(
+              { ...payout, approvedAt: payout.approvedAt ?? null },
+              options.autoMaxAmount,
+            ),
+          }),
       createdAt: payout.createdAt,
       updatedAt: payout.updatedAt,
       recipient: payout.recipient

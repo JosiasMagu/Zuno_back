@@ -15,6 +15,9 @@ import {
   MinLength,
 } from 'class-validator';
 
+import { toOptionalBoolean } from '../../../common/dto/transforms';
+import { MAX_LISTING_PRICE } from '../../../shared/constants/policy';
+
 export class UpdateServiceDto {
   @ApiPropertyOptional({ minLength: 2, maxLength: 150 })
   @IsOptional()
@@ -43,6 +46,7 @@ export class UpdateServiceDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0.01)
+  @Max(MAX_LISTING_PRICE)
   basePrice?: number;
 
   @ApiPropertyOptional({ enum: ServicePricingType })
@@ -83,7 +87,7 @@ export class UpdateServiceDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(({ value }: { value: unknown }) => toOptionalBoolean(value))
   @IsBoolean()
   acceptsUrgent?: boolean;
 

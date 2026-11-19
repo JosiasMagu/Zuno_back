@@ -14,8 +14,10 @@ type SafeUserEntity = {
   avatarUrl: string | null;
   bio: string | null;
   payoutMsisdn?: string | null;
-  totalRating?: unknown;
-  totalReviews?: number;
+  providerRating?: unknown;
+  providerReviews?: number;
+  clientRating?: unknown;
+  clientReviews?: number;
   createdAt: Date;
   updatedAt?: Date;
 };
@@ -26,10 +28,31 @@ type PublicUserEntity = {
   avatarUrl: string | null;
   bio: string | null;
   role: string;
-  totalRating?: unknown;
-  totalReviews?: number;
+  providerRating?: unknown;
+  providerReviews?: number;
+  clientRating?: unknown;
+  clientReviews?: number;
   createdAt: Date;
 };
+
+/**
+ * As duas notas de uma conta. `totalRating` e `totalReviews` são a nota como
+ * provider, a que a app mostra ao lado dos anúncios. A nota como cliente sai
+ * à parte, para quem recebe uma reserva saber com quem está a tratar.
+ */
+function ratingsOf(user: {
+  providerRating?: unknown;
+  providerReviews?: number;
+  clientRating?: unknown;
+  clientReviews?: number;
+}) {
+  return {
+    totalRating: toNumber(user.providerRating),
+    totalReviews: user.providerReviews ?? 0,
+    clientRating: toNumber(user.clientRating),
+    clientReviews: user.clientReviews ?? 0,
+  };
+}
 
 export class UserPresenter {
   static toMe(user: SafeUserEntity) {
@@ -44,8 +67,7 @@ export class UserPresenter {
       avatarUrl: user.avatarUrl,
       bio: user.bio,
       payoutMsisdn: user.payoutMsisdn ?? null,
-      totalRating: toNumber(user.totalRating),
-      totalReviews: user.totalReviews ?? 0,
+      ...ratingsOf(user),
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
@@ -58,8 +80,7 @@ export class UserPresenter {
       avatarUrl: user.avatarUrl,
       bio: user.bio,
       role: user.role,
-      totalRating: toNumber(user.totalRating),
-      totalReviews: user.totalReviews ?? 0,
+      ...ratingsOf(user),
       createdAt: user.createdAt,
     };
   }

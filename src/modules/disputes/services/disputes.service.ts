@@ -2,8 +2,10 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   AuditAction,
   BookingStatus,
@@ -20,13 +22,29 @@ import {
   UserRole,
 } from '@prisma/client';
 
-import { AuditService } from '../../../shared/audit/audit.service';
-import { MetricsService } from '../../../shared/metrics/metrics.service';
+import { ApiErrors } from '../../../common/exceptions/api.exception';
+import { ErrorCode } from '../../../common/exceptions/error-codes';
 import {
-  DEPOSIT_CLAIM_WINDOW_HOURS,
-  roundMoney,
-} from '../../../shared/constants/policy';
+  AuditService,
+  SYSTEM_ACTOR_ID,
+} from '../../../shared/audit/audit.service';
+import { MetricsService } from '../../../shared/metrics/metrics.service';
+import { percentOf, roundMoney } from '../../../shared/constants/policy';
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { runSerializable } from '../../../shared/db/serializable-transaction';
+import {
+  isOpenDispute,
+  OPEN_DISPUTE_SELECT,
+  OPEN_DISPUTE_STATUSES,
+} from '../../../shared/disputes/open-disputes';
+import {
+  describeError,
+  processDue,
+} from '../../../shared/scheduling/process-due';
+import { depositClaimDeadline } from '../../bookings/booking-deadlines';
+import { assertNotPartyToPayment } from '../../payments/money-controls';
+import { RENTAL_PAID_OUT_STATUSES } from '../../payments/payment-states';
+import { EscrowRefundService } from '../../payments/services/escrow-refund.service';
 import { LedgerService } from '../../payments/services/ledger.service';
 import { PayoutsService } from '../../payments/services/payouts.service';
 import { ClaimDepositDto } from '../dto/claim-deposit.dto';
@@ -34,7 +52,17 @@ import { CreateDisputeDto } from '../dto/create-dispute.dto';
 import { FindDisputesQueryDto } from '../dto/find-disputes-query.dto';
 import { ResolvePartialDto } from '../dto/resolve-partial.dto';
 import { RespondDisputeDto } from '../dto/respond-dispute.dto';
+import { WithdrawDisputeDto } from '../dto/withdraw-dispute.dto';
+import {
+  DisputeParties,
+  isOwnEvidence,
+  rentalStatusBeforeDispute,
+  respondentOf,
+  responseDeadline,
+  serviceStatusBeforeDispute,
+} from '../dispute-rules';
 import { DisputePresenter } from '../presenters/dispute.presenter';
+import { DisputeNotifier } from './dispute-notifier.service';
 
 const DISPUTE_FULL_INCLUDE = {
   booking: {
@@ -63,22 +91,113 @@ const DISPUTE_FULL_INCLUDE = {
       totalCharged: true,
       receiptNumber: true,
       refundAmount: true,
+      rentalAmount: true,
+      depositAmount: true,
+      depositStatus: true,
     },
   },
   opener: { select: { id: true, name: true, avatarUrl: true } },
 } as const;
 
+const DISPUTE_FOR_RESOLUTION_INCLUDE = {
+  booking: true,
+  serviceBooking: true,
+  payment: true,
+} satisfies Prisma.DisputeInclude;
+
+type DisputeForResolution = Prisma.DisputeGetPayload<{
+  include: typeof DISPUTE_FOR_RESOLUTION_INCLUDE;
+}>;
+
+/** O que uma resolução precisa de saber do pagamento, relido dentro da transacção. */
+const RESOLUTION_PAYMENT_SELECT = {
+  id: true,
+  status: true,
+  depositStatus: true,
+  totalCharged: true,
+  rentalAmount: true,
+  platformFee: true,
+  depositAmount: true,
+  ownerPayout: true,
+  clientId: true,
+  ownerId: true,
+} satisfies Prisma.PaymentSelect;
+
+type ResolutionPayment = Prisma.PaymentGetPayload<{
+  select: typeof RESOLUTION_PAYMENT_SELECT;
+}>;
+
+/** As quatro parcelas em que se reparte um pagamento numa resolução parcial. */
+interface RentalSplit {
+  refundAmount: number;
+  providerPayout: number;
+  platformRetained: number;
+  depositAmount: number;
+}
+
+interface PartialResolution {
+  /** Percentagem (1 a 99) que volta ao cliente. */
+  refundPercent: number;
+  actorId: string;
+}
+
+const RESOLUTION_TIMEOUT_MS = 8000;
+
+/** Resposta a quem perdeu a corrida numa resolução: outro pedido chegou primeiro. */
+function resolutionConflict() {
+  return ApiErrors.conflict(
+    ErrorCode.CONFLICT,
+    'Outro pedido mexeu nesta disputa ou no pagamento dela ao mesmo tempo. Actualiza e tenta de novo.',
+  );
+}
+
+/** Estados em que a disputa espera pela resposta da outra parte. */
+const AWAITING_RESPONSE: DisputeStatus[] = [
+  DisputeStatus.OPEN,
+  DisputeStatus.AWAITING_OWNER,
+];
+
+/**
+ * A disputa ainda aceita a resposta da outra parte: está por decidir e
+ * ninguém respondeu. O fim do prazo não fecha esta porta. Só deixa o admin
+ * decidir sem esperar mais, e uma resposta atrasada ainda lhe chega.
+ */
+const ACCEPTS_RESPONSE = {
+  status: { in: OPEN_DISPUTE_STATUSES },
+  respondedAt: null,
+} satisfies Prisma.DisputeWhereInput;
+
+/** Quantas disputas o job do prazo de resposta trata de cada vez. */
+const JOB_BATCH_SIZE = 50;
+
+const ALREADY_OPEN = 'Já existe uma disputa aberta nesta reserva.';
+const RESPONSE_CLOSED = 'Esta disputa já não aceita resposta.';
+
+/** Resposta a quem perdeu a corrida: a reserva mudou enquanto a disputa era aberta. */
+function openingConflict() {
+  return new BadRequestException(
+    'A reserva mudou de estado enquanto abrias a disputa. Actualiza e tenta de novo.',
+  );
+}
+
 @Injectable()
 export class DisputesService {
+  private readonly logger = new Logger(DisputesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly metrics: MetricsService,
     private readonly ledger: LedgerService,
     private readonly payouts: PayoutsService,
+    private readonly escrowRefunds: EscrowRefundService,
+    private readonly config: ConfigService,
+    private readonly notifier: DisputeNotifier,
   ) {}
 
   async create(userId: string, dto: CreateDisputeDto) {
+    this.assertOwnEvidence(userId, dto.evidenceUrls);
+
     const bookingId = dto.bookingId?.trim();
     const serviceBookingId = dto.serviceBookingId?.trim();
     const paymentId = dto.paymentId!.trim();
@@ -108,7 +227,7 @@ export class DisputesService {
   ) {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      include: { payment: true, dispute: true },
+      include: { payment: true, disputes: OPEN_DISPUTE_SELECT },
     });
 
     if (!booking) {
@@ -135,10 +254,8 @@ export class DisputesService {
       );
     }
 
-    if (booking.dispute) {
-      throw new BadRequestException(
-        'Já existe uma disputa associada a esta reserva.',
-      );
+    if (booking.disputes.length > 0) {
+      throw new BadRequestException(ALREADY_OPEN);
     }
 
     if (payment.status !== PaymentStatus.HELD) {
@@ -147,26 +264,31 @@ export class DisputesService {
       );
     }
 
-    const dispute = await this.prisma.$transaction(async (tx) => {
-      await tx.booking.update({
-        where: { id: booking.id },
-        data: { status: BookingStatus.DISPUTED },
-      });
+    const dispute = await runSerializable(
+      this.prisma,
+      async (tx) => {
+        await this.assertStillDisputable(tx, payment.id);
+        await tx.booking.update({
+          where: { id: booking.id },
+          data: { status: BookingStatus.DISPUTED },
+        });
 
-      return tx.dispute.create({
-        data: {
-          bookingId: booking.id,
-          paymentId: payment.id,
-          openedBy: userId,
-          reason: dto.reason!,
-          description: dto.description!.trim(),
-          evidenceUrls: dto.evidenceUrls ?? [],
-          status: DisputeStatus.AWAITING_OWNER,
-          ownerDeadline: this.buildOwnerDeadline(),
-        },
-        include: DISPUTE_FULL_INCLUDE,
-      });
-    });
+        return tx.dispute.create({
+          data: {
+            bookingId: booking.id,
+            paymentId: payment.id,
+            openedBy: userId,
+            reason: dto.reason!,
+            description: dto.description!.trim(),
+            evidenceUrls: dto.evidenceUrls ?? [],
+            status: DisputeStatus.AWAITING_OWNER,
+            responseDeadline: responseDeadline(new Date()),
+          },
+          include: DISPUTE_FULL_INCLUDE,
+        });
+      },
+      openingConflict,
+    );
 
     this.metrics.businessEvents.inc({ event: 'dispute_opened' });
 
@@ -182,6 +304,8 @@ export class DisputesService {
       },
     });
 
+    void this.notifier.opened(dispute.id);
+
     return {
       message: 'Disputa criada com sucesso.',
       data: DisputePresenter.toDetails(dispute),
@@ -196,7 +320,7 @@ export class DisputesService {
   ) {
     const booking = await this.prisma.serviceBooking.findUnique({
       where: { id: serviceBookingId },
-      include: { payment: true, dispute: true },
+      include: { payment: true, disputes: OPEN_DISPUTE_SELECT },
     });
 
     if (!booking) {
@@ -223,10 +347,8 @@ export class DisputesService {
       );
     }
 
-    if (booking.dispute) {
-      throw new BadRequestException(
-        'Já existe uma disputa associada a esta reserva.',
-      );
+    if (booking.disputes.length > 0) {
+      throw new BadRequestException(ALREADY_OPEN);
     }
 
     if (payment.status !== PaymentStatus.HELD) {
@@ -235,26 +357,31 @@ export class DisputesService {
       );
     }
 
-    const dispute = await this.prisma.$transaction(async (tx) => {
-      await tx.serviceBooking.update({
-        where: { id: booking.id },
-        data: { status: ServiceBookingStatus.DISPUTED },
-      });
+    const dispute = await runSerializable(
+      this.prisma,
+      async (tx) => {
+        await this.assertStillDisputable(tx, payment.id);
+        await tx.serviceBooking.update({
+          where: { id: booking.id },
+          data: { status: ServiceBookingStatus.DISPUTED },
+        });
 
-      return tx.dispute.create({
-        data: {
-          serviceBookingId: booking.id,
-          paymentId: payment.id,
-          openedBy: userId,
-          reason: dto.reason!,
-          description: dto.description!.trim(),
-          evidenceUrls: dto.evidenceUrls ?? [],
-          status: DisputeStatus.AWAITING_OWNER,
-          ownerDeadline: this.buildOwnerDeadline(),
-        },
-        include: DISPUTE_FULL_INCLUDE,
-      });
-    });
+        return tx.dispute.create({
+          data: {
+            serviceBookingId: booking.id,
+            paymentId: payment.id,
+            openedBy: userId,
+            reason: dto.reason!,
+            description: dto.description!.trim(),
+            evidenceUrls: dto.evidenceUrls ?? [],
+            status: DisputeStatus.AWAITING_OWNER,
+            responseDeadline: responseDeadline(new Date()),
+          },
+          include: DISPUTE_FULL_INCLUDE,
+        });
+      },
+      openingConflict,
+    );
 
     this.metrics.businessEvents.inc({ event: 'dispute_opened' });
 
@@ -270,6 +397,8 @@ export class DisputesService {
       },
     });
 
+    void this.notifier.opened(dispute.id);
+
     return {
       message: 'Disputa criada com sucesso.',
       data: DisputePresenter.toDetails(dispute),
@@ -277,15 +406,17 @@ export class DisputesService {
   }
 
   /**
-   * D1 — reclamação do depósito pelo provider (checkpoint 2).
-   * Só possível com a reserva ACTIVE, pagamento RELEASED, depósito HELD,
-   * e dentro da janela de reclamação após o fim do aluguer.
-   * Vai directamente para UNDER_REVIEW: quem decide é o admin.
+   * Reclamação do depósito pelo provider (segundo checkpoint do escrow).
+   * Só possível com a reserva ACTIVE, o aluguer já pago ao provider, o
+   * depósito HELD e dentro da janela de reclamação após o fim do aluguer.
+   * O cliente tem prazo para responder antes de o admin decidir.
    */
   async claimDeposit(userId: string, dto: ClaimDepositDto) {
+    this.assertOwnEvidence(userId, dto.evidenceUrls);
+
     const booking = await this.prisma.booking.findUnique({
       where: { id: dto.bookingId.trim() },
-      include: { payment: true, dispute: true },
+      include: { payment: true, disputes: OPEN_DISPUTE_SELECT },
     });
 
     if (!booking) {
@@ -304,15 +435,13 @@ export class DisputesService {
       );
     }
 
-    if (booking.dispute) {
-      throw new BadRequestException(
-        'Já existe uma disputa associada a esta reserva.',
-      );
+    if (booking.disputes.length > 0) {
+      throw new BadRequestException(ALREADY_OPEN);
     }
 
     const payment = booking.payment;
 
-    if (!payment || payment.status !== PaymentStatus.RELEASED) {
+    if (!payment || !RENTAL_PAID_OUT_STATUSES.includes(payment.status)) {
       throw new BadRequestException(
         'O estado atual do pagamento não permite reclamar o depósito.',
       );
@@ -327,37 +456,39 @@ export class DisputesService {
       );
     }
 
-    const claimDeadline = new Date(booking.endDate);
-    claimDeadline.setHours(
-      claimDeadline.getHours() + DEPOSIT_CLAIM_WINDOW_HOURS,
-    );
-
-    if (new Date() > claimDeadline) {
+    if (new Date() > depositClaimDeadline(booking)) {
       throw new BadRequestException(
         'A janela de reclamação do depósito já expirou.',
       );
     }
 
-    const dispute = await this.prisma.$transaction(async (tx) => {
-      await tx.booking.update({
-        where: { id: booking.id },
-        data: { status: BookingStatus.DISPUTED },
-      });
+    const dispute = await runSerializable(
+      this.prisma,
+      async (tx) => {
+        await this.assertDepositStillClaimable(tx, booking.id);
+        await tx.booking.update({
+          where: { id: booking.id },
+          data: { status: BookingStatus.DISPUTED },
+        });
 
-      return tx.dispute.create({
-        data: {
-          bookingId: booking.id,
-          paymentId: payment.id,
-          openedBy: userId,
-          type: DisputeType.DEPOSIT,
-          reason: dto.reason ?? DisputeReason.DAMAGED,
-          description: dto.description.trim(),
-          evidenceUrls: dto.evidenceUrls ?? [],
-          status: DisputeStatus.UNDER_REVIEW,
-        },
-        include: DISPUTE_FULL_INCLUDE,
-      });
-    });
+        return tx.dispute.create({
+          data: {
+            bookingId: booking.id,
+            paymentId: payment.id,
+            openedBy: userId,
+            type: DisputeType.DEPOSIT,
+            reason: dto.reason ?? DisputeReason.DAMAGED,
+            description: dto.description.trim(),
+            evidenceUrls: dto.evidenceUrls ?? [],
+            // O cliente também é ouvido antes de o admin decidir.
+            status: DisputeStatus.AWAITING_OWNER,
+            responseDeadline: responseDeadline(new Date()),
+          },
+          include: DISPUTE_FULL_INCLUDE,
+        });
+      },
+      openingConflict,
+    );
 
     this.metrics.businessEvents.inc({ event: 'dispute_opened' });
 
@@ -370,9 +501,11 @@ export class DisputesService {
       metadata: { bookingId: booking.id, paymentId: payment.id },
     });
 
+    void this.notifier.opened(dispute.id);
+
     return {
       message:
-        'Reclamação do depósito registada. Um administrador vai analisar.',
+        'Reclamação do depósito registada. O cliente pode responder antes de um administrador decidir.',
       data: DisputePresenter.toDetails(dispute),
     };
   }
@@ -488,12 +621,22 @@ export class DisputesService {
     return { clientId: null, ownerId: null };
   }
 
+  /**
+   * A outra parte responde à disputa, com as suas provas. Responde quem não
+   * a abriu: o provider quando abriu o cliente, o cliente quando abriu o
+   * provider. Um admin pode registar a resposta por ela, por exemplo depois
+   * de a ouvir por telefone. Aceita-se uma resposta só, até a disputa ser
+   * decidida ou retirada, mesmo depois do prazo.
+   */
   async respond(userId: string, disputeId: string, dto: RespondDisputeDto) {
     const dispute = await this.prisma.dispute.findUnique({
       where: { id: disputeId },
-      include: {
-        booking: { select: { ownerId: true } },
-        serviceBooking: { select: { providerId: true } },
+      select: {
+        openedBy: true,
+        status: true,
+        respondedAt: true,
+        booking: { select: { clientId: true, ownerId: true } },
+        serviceBooking: { select: { clientId: true, providerId: true } },
       },
     });
 
@@ -501,45 +644,41 @@ export class DisputesService {
       throw new NotFoundException('Disputa não encontrada.');
     }
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, role: true },
-    });
+    const isRespondent =
+      respondentOf(this.partiesOf(dispute), dispute.openedBy) === userId;
 
-    if (!user) {
-      throw new NotFoundException('Utilizador não encontrado.');
-    }
-
-    const ownerId =
-      dispute.booking?.ownerId ?? dispute.serviceBooking?.providerId ?? null;
-
-    if (!ownerId) {
-      throw new BadRequestException('Disputa sem reserva associada.');
-    }
-
-    const canRespond = user.role === UserRole.ADMIN || ownerId === userId;
-
-    if (!canRespond) {
+    if (!isRespondent && !(await this.isAdmin(userId))) {
       throw new ForbiddenException(
         'Não tens permissão para responder a esta disputa.',
       );
     }
 
-    if (
-      dispute.status !== DisputeStatus.OPEN &&
-      dispute.status !== DisputeStatus.AWAITING_OWNER
-    ) {
-      throw new BadRequestException(
-        'Esta disputa não pode mais receber resposta do owner.',
-      );
+    if (!isOpenDispute(dispute.status) || dispute.respondedAt) {
+      throw new BadRequestException(RESPONSE_CLOSED);
     }
 
-    const updatedDispute = await this.prisma.dispute.update({
-      where: { id: disputeId },
+    this.assertOwnEvidence(userId, dto.evidenceUrls);
+
+    // A condição repete-se na escrita: uma resposta que chega depois de a
+    // disputa ser decidida ou retirada não a pode reabrir, e a segunda de
+    // duas respostas em simultâneo não apaga a primeira.
+    const { count } = await this.prisma.dispute.updateMany({
+      where: { id: disputeId, ...ACCEPTS_RESPONSE },
       data: {
-        ownerResponse: dto.ownerResponse.trim(),
+        response: dto.response,
+        responseEvidenceUrls: dto.evidenceUrls ?? [],
+        respondedAt: new Date(),
+        respondedBy: userId,
         status: DisputeStatus.UNDER_REVIEW,
       },
+    });
+
+    if (count === 0) {
+      throw new BadRequestException(RESPONSE_CLOSED);
+    }
+
+    const updatedDispute = await this.prisma.dispute.findUniqueOrThrow({
+      where: { id: disputeId },
       include: DISPUTE_FULL_INCLUDE,
     });
 
@@ -548,136 +687,191 @@ export class DisputesService {
       actorId: userId,
       targetType: 'Dispute',
       targetId: disputeId,
+      metadata: { onBehalfOfRespondent: !isRespondent },
     });
 
+    void this.notifier.responded(disputeId);
+
     return {
-      message: 'Resposta da disputa registrada com sucesso.',
+      message: 'Resposta registada. A disputa segue para análise.',
       data: DisputePresenter.toDetails(updatedDispute),
     };
   }
 
-  async resolveClient(userId: string, disputeId: string) {
-    await this.assertAdmin(userId);
-
+  /**
+   * Retira uma disputa ainda por decidir. Quem a abriu pode retirá-la, e um
+   * admin pode arquivá-la. Não move dinheiro: a reserva volta ao estado em
+   * que estava e segue o caminho normal.
+   */
+  async withdraw(userId: string, disputeId: string, dto: WithdrawDisputeDto) {
     const dispute = await this.prisma.dispute.findUnique({
       where: { id: disputeId },
-      include: { booking: true, serviceBooking: true, payment: true },
+      select: { openedBy: true },
     });
 
     if (!dispute) {
       throw new NotFoundException('Disputa não encontrada.');
     }
 
-    if (this.isResolved(dispute.status)) {
-      throw new BadRequestException('Esta disputa já foi resolvida.');
+    const byOpener = dispute.openedBy === userId;
+
+    if (!byOpener && !(await this.isAdmin(userId))) {
+      throw new ForbiddenException('Só quem abriu a disputa a pode retirar.');
     }
 
-    if (!dispute.booking && !dispute.serviceBooking) {
-      throw new BadRequestException('Disputa sem reserva associada.');
+    const reason =
+      dto.reason ||
+      (byOpener
+        ? 'Disputa retirada por quem a abriu.'
+        : 'Disputa arquivada por um administrador.');
+
+    const withdrawn = await runSerializable(
+      this.prisma,
+      (tx) => this.applyWithdrawal(tx, disputeId, { actorId: userId, reason }),
+      resolutionConflict,
+      RESOLUTION_TIMEOUT_MS,
+    );
+
+    await this.audit.record({
+      action: AuditAction.DISPUTE_WITHDRAWN,
+      actorId: userId,
+      targetType: 'Dispute',
+      targetId: disputeId,
+      metadata: { reason, byOpener },
+    });
+
+    void this.notifier.withdrawn(disputeId, { opener: byOpener });
+
+    return {
+      message: 'Disputa retirada. A reserva volta ao estado em que estava.',
+      data: DisputePresenter.toDetails(withdrawn),
+    };
+  }
+
+  /**
+   * Fecha o prazo de resposta das disputas a que a outra parte não respondeu.
+   * A disputa segue para análise sem a resposta, para o dinheiro não ficar
+   * parado à espera de quem não aparece. Chamado pelo DisputesScheduler.
+   */
+  async closeResponseWindows(): Promise<number> {
+    const now = new Date();
+
+    return processDue({
+      fetchBatch: (seenIds) =>
+        this.prisma.dispute.findMany({
+          where: {
+            id: { notIn: seenIds },
+            status: { in: AWAITING_RESPONSE },
+            responseDeadline: { lte: now },
+          },
+          select: { id: true },
+          orderBy: { responseDeadline: 'asc' },
+          take: JOB_BATCH_SIZE,
+        }),
+      handle: (dispute) => this.closeResponseWindow(dispute.id, now),
+      onFailure: (dispute, error) =>
+        this.logger.warn(
+          `Fecho do prazo falhou para a disputa ${dispute.id}: ${describeError(error)}`,
+        ),
+    });
+  }
+
+  private async closeResponseWindow(disputeId: string, now: Date) {
+    // Se a outra parte respondeu entretanto, a disputa já não é apanhada.
+    const { count } = await this.prisma.dispute.updateMany({
+      where: {
+        id: disputeId,
+        status: { in: AWAITING_RESPONSE },
+        responseDeadline: { lte: now },
+      },
+      data: { status: DisputeStatus.UNDER_REVIEW },
+    });
+
+    if (count === 0) {
+      return;
     }
 
-    this.assertPaymentResolvable(dispute.type, dispute.payment);
+    await this.audit.record({
+      action: AuditAction.DISPUTE_RESPONSE_WINDOW_CLOSED,
+      actorId: SYSTEM_ACTOR_ID,
+      targetType: 'Dispute',
+      targetId: disputeId,
+    });
 
-    const updatedDispute = await this.prisma.$transaction(
+    void this.notifier.responseWindowClosed(disputeId);
+  }
+
+  /**
+   * Retira a disputa dentro da transacção: relê o estado e devolve a reserva
+   * ao ponto em que estava antes de a disputa ser aberta.
+   */
+  private async applyWithdrawal(
+    tx: Prisma.TransactionClient,
+    disputeId: string,
+    withdrawal: { actorId: string; reason: string },
+  ) {
+    const fresh = await tx.dispute.findUnique({
+      where: { id: disputeId },
+      select: {
+        status: true,
+        type: true,
+        booking: { select: { id: true, status: true } },
+        serviceBooking: {
+          select: {
+            id: true,
+            status: true,
+            startedAt: true,
+            completedAt: true,
+          },
+        },
+      },
+    });
+
+    if (!fresh || !isOpenDispute(fresh.status)) {
+      throw new BadRequestException(
+        'Só se retira uma disputa que ainda está por decidir.',
+      );
+    }
+
+    if (fresh.booking?.status === BookingStatus.DISPUTED) {
+      await tx.booking.update({
+        where: { id: fresh.booking.id },
+        data: { status: rentalStatusBeforeDispute(fresh.type) },
+      });
+    } else if (fresh.serviceBooking?.status === ServiceBookingStatus.DISPUTED) {
+      await tx.serviceBooking.update({
+        where: { id: fresh.serviceBooking.id },
+        data: { status: serviceStatusBeforeDispute(fresh.serviceBooking) },
+      });
+    } else {
+      throw new BadRequestException('A reserva já não está em disputa.');
+    }
+
+    return tx.dispute.update({
+      where: { id: disputeId },
+      data: {
+        status: DisputeStatus.WITHDRAWN,
+        resolution: withdrawal.reason,
+        ...this.closedBy(withdrawal.actorId),
+      },
+      include: DISPUTE_FULL_INCLUDE,
+    });
+  }
+
+  async resolveClient(userId: string, disputeId: string) {
+    const dispute = await this.loadForResolution(userId, disputeId);
+
+    const updatedDispute = await runSerializable(
+      this.prisma,
       async (tx) => {
         const fresh = await this.reloadForResolution(tx, disputeId);
 
         if (fresh.type === DisputeType.PAYMENT) {
-          // Cliente ganha a disputa do pagamento: reembolso total
-          // (rental + fee + depósito) e a reserva é cancelada.
-          if (dispute.booking) {
-            await tx.booking.update({
-              where: { id: dispute.booking.id },
-              data: {
-                status: BookingStatus.CANCELLED,
-                cancelledAt: new Date(),
-                cancellationReason:
-                  'Cancelada por resolução de disputa a favor do cliente.',
-              },
-            });
-            await this.restoreEquipmentUnit(tx, dispute.booking.equipmentId);
-          } else if (dispute.serviceBooking) {
-            await tx.serviceBooking.update({
-              where: { id: dispute.serviceBooking.id },
-              data: {
-                status: ServiceBookingStatus.CANCELLED,
-                cancelledAt: new Date(),
-                cancellationReason:
-                  'Cancelada por resolução de disputa a favor do cliente.',
-              },
-            });
-          }
-
-          const totalCharged = Number(fresh.payment.totalCharged);
-
-          await this.ledger.record(tx, {
-            paymentId: fresh.payment.id,
-            direction: LedgerDirection.OUTFLOW,
-            party: LedgerParty.CLIENT,
-            amount: totalCharged,
-            reason: 'Reembolso total por disputa resolvida a favor do cliente.',
-            actorId: userId,
-          });
-
-          await this.payouts.createPending(tx, {
-            paymentId: fresh.payment.id,
-            recipientId: fresh.payment.clientId,
-            kind: PayoutKind.CLIENT_REFUND,
-            amount: totalCharged,
-          });
-
-          await tx.payment.update({
-            where: { id: fresh.payment.id },
-            data: {
-              status: PaymentStatus.REFUNDED,
-              refundedAt: new Date(),
-              refundAmount: totalCharged,
-              ownerPayout: 0,
-              ...(fresh.payment.depositStatus === DepositStatus.HELD
-                ? {
-                    depositStatus: DepositStatus.RETURNED,
-                    depositReleasedAt: new Date(),
-                  }
-                : {}),
-            },
-          });
+          await this.cancelDisputedReservation(tx, dispute);
+          await this.refundDisputedPaymentInFull(tx, fresh.payment, userId);
         } else {
-          // Disputa de DEPÓSITO: o cliente fica com o depósito de volta.
-          const depositAmount = roundMoney(Number(fresh.payment.depositAmount));
-
-          await tx.booking.update({
-            where: { id: dispute.booking!.id },
-            data: {
-              status: BookingStatus.COMPLETED,
-              returnConfirmedAt: new Date(),
-            },
-          });
-          await this.restoreEquipmentUnit(tx, dispute.booking!.equipmentId);
-
-          await this.ledger.record(tx, {
-            paymentId: fresh.payment.id,
-            direction: LedgerDirection.OUTFLOW,
-            party: LedgerParty.CLIENT,
-            amount: depositAmount,
-            reason:
-              'Depósito devolvido ao cliente por disputa resolvida a seu favor.',
-            actorId: userId,
-          });
-
-          await this.payouts.createPending(tx, {
-            paymentId: fresh.payment.id,
-            recipientId: fresh.payment.clientId,
-            kind: PayoutKind.DEPOSIT_RETURN,
-            amount: depositAmount,
-          });
-
-          await tx.payment.update({
-            where: { id: fresh.payment.id },
-            data: {
-              depositStatus: DepositStatus.RETURNED,
-              depositReleasedAt: new Date(),
-            },
-          });
+          await this.completeDisputedReservation(tx, dispute);
+          await this.returnDepositToClient(tx, fresh.payment, userId);
         }
 
         return tx.dispute.update({
@@ -685,14 +879,13 @@ export class DisputesService {
           data: {
             status: DisputeStatus.RESOLVED_CLIENT,
             resolution: 'Resolvido a favor do cliente.',
+            ...this.closedBy(userId),
           },
           include: DISPUTE_FULL_INCLUDE,
         });
       },
-      {
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-        timeout: 8000,
-      },
+      resolutionConflict,
+      RESOLUTION_TIMEOUT_MS,
     );
 
     await this.audit.record({
@@ -700,12 +893,11 @@ export class DisputesService {
       actorId: userId,
       targetType: 'Dispute',
       targetId: disputeId,
-      amount:
-        dispute.type === DisputeType.DEPOSIT
-          ? dispute.payment.depositAmount
-          : dispute.payment.totalCharged,
+      amount: this.disputedAmount(dispute),
       metadata: { type: dispute.type },
     });
+
+    void this.notifier.resolved(disputeId);
 
     return {
       message: 'Disputa resolvida a favor do cliente.',
@@ -714,156 +906,23 @@ export class DisputesService {
   }
 
   async resolveOwner(userId: string, disputeId: string) {
-    await this.assertAdmin(userId);
+    const dispute = await this.loadForResolution(userId, disputeId);
 
-    const dispute = await this.prisma.dispute.findUnique({
-      where: { id: disputeId },
-      include: { booking: true, serviceBooking: true, payment: true },
-    });
-
-    if (!dispute) {
-      throw new NotFoundException('Disputa não encontrada.');
-    }
-
-    if (this.isResolved(dispute.status)) {
-      throw new BadRequestException('Esta disputa já foi resolvida.');
-    }
-
-    if (!dispute.booking && !dispute.serviceBooking) {
-      throw new BadRequestException('Disputa sem reserva associada.');
-    }
-
-    this.assertPaymentResolvable(dispute.type, dispute.payment);
-
-    const updatedDispute = await this.prisma.$transaction(
+    const updatedDispute = await runSerializable(
+      this.prisma,
       async (tx) => {
         const fresh = await this.reloadForResolution(tx, disputeId);
 
+        await this.closeReservationAfterProviderWin(tx, dispute, fresh.type);
+
         if (fresh.type === DisputeType.PAYMENT) {
-          // Owner ganha a disputa do pagamento: recebe o rental (menos fee),
-          // o depósito volta ao cliente e a reserva conclui.
-          if (dispute.booking) {
-            await tx.booking.update({
-              where: { id: dispute.booking.id },
-              data: {
-                status: BookingStatus.COMPLETED,
-                returnConfirmedAt: new Date(),
-              },
-            });
-            await this.restoreEquipmentUnit(tx, dispute.booking.equipmentId);
-          } else if (dispute.serviceBooking) {
-            await tx.serviceBooking.update({
-              where: { id: dispute.serviceBooking.id },
-              data: {
-                status: ServiceBookingStatus.COMPLETED,
-                completedAt: new Date(),
-              },
-            });
-          }
-
-          const providerPayout = roundMoney(
-            Number(fresh.payment.ownerPayout ?? 0),
+          await this.releaseDisputedPaymentToProvider(
+            tx,
+            fresh.payment,
+            userId,
           );
-          const depositAmount = roundMoney(
-            Number(fresh.payment.depositAmount ?? 0),
-          );
-          const platformTake = roundMoney(
-            Number(fresh.payment.totalCharged) - depositAmount - providerPayout,
-          );
-
-          await this.ledger.record(tx, {
-            paymentId: fresh.payment.id,
-            direction: LedgerDirection.OUTFLOW,
-            party: LedgerParty.PROVIDER,
-            amount: providerPayout,
-            reason:
-              'Rental liberado ao provider por disputa resolvida a seu favor.',
-            actorId: userId,
-          });
-
-          if (platformTake > 0) {
-            await this.ledger.record(tx, {
-              paymentId: fresh.payment.id,
-              direction: LedgerDirection.OUTFLOW,
-              party: LedgerParty.PLATFORM,
-              amount: platformTake,
-              reason: 'Platform fee retida na resolução da disputa.',
-              actorId: userId,
-            });
-          }
-
-          await this.payouts.createPending(tx, {
-            paymentId: fresh.payment.id,
-            recipientId: fresh.payment.ownerId,
-            kind: PayoutKind.PROVIDER_PAYOUT,
-            amount: providerPayout,
-          });
-
-          if (depositAmount > 0) {
-            await this.ledger.record(tx, {
-              paymentId: fresh.payment.id,
-              direction: LedgerDirection.OUTFLOW,
-              party: LedgerParty.CLIENT,
-              amount: depositAmount,
-              reason: 'Depósito devolvido ao cliente na resolução da disputa.',
-              actorId: userId,
-            });
-
-            await this.payouts.createPending(tx, {
-              paymentId: fresh.payment.id,
-              recipientId: fresh.payment.clientId,
-              kind: PayoutKind.DEPOSIT_RETURN,
-              amount: depositAmount,
-            });
-          }
-
-          await tx.payment.update({
-            where: { id: fresh.payment.id },
-            data: {
-              status: PaymentStatus.RELEASED,
-              releasedAt: new Date(),
-              depositStatus:
-                depositAmount > 0 ? DepositStatus.RETURNED : DepositStatus.NONE,
-              depositReleasedAt: new Date(),
-            },
-          });
         } else {
-          // Disputa de DEPÓSITO: o provider fica com o depósito (dano).
-          const depositAmount = roundMoney(Number(fresh.payment.depositAmount));
-
-          await tx.booking.update({
-            where: { id: dispute.booking!.id },
-            data: {
-              status: BookingStatus.COMPLETED,
-              returnConfirmedAt: new Date(),
-            },
-          });
-          await this.restoreEquipmentUnit(tx, dispute.booking!.equipmentId);
-
-          await this.ledger.record(tx, {
-            paymentId: fresh.payment.id,
-            direction: LedgerDirection.OUTFLOW,
-            party: LedgerParty.PROVIDER,
-            amount: depositAmount,
-            reason:
-              'Depósito atribuído ao provider por disputa de dano resolvida a seu favor.',
-            actorId: userId,
-          });
-
-          await this.payouts.createPending(tx, {
-            paymentId: fresh.payment.id,
-            recipientId: fresh.payment.ownerId,
-            kind: PayoutKind.DEPOSIT_CLAIM,
-            amount: depositAmount,
-          });
-
-          await tx.payment.update({
-            where: { id: fresh.payment.id },
-            data: {
-              depositStatus: DepositStatus.CLAIMED,
-              depositReleasedAt: new Date(),
-            },
-          });
+          await this.awardDepositToProvider(tx, fresh.payment, userId);
         }
 
         return tx.dispute.update({
@@ -871,14 +930,13 @@ export class DisputesService {
           data: {
             status: DisputeStatus.RESOLVED_OWNER,
             resolution: 'Resolvido a favor do owner.',
+            ...this.closedBy(userId),
           },
           include: DISPUTE_FULL_INCLUDE,
         });
       },
-      {
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-        timeout: 8000,
-      },
+      resolutionConflict,
+      RESOLUTION_TIMEOUT_MS,
     );
 
     await this.audit.record({
@@ -889,12 +947,11 @@ export class DisputesService {
       actorId: userId,
       targetType: 'Dispute',
       targetId: disputeId,
-      amount:
-        dispute.type === DisputeType.DEPOSIT
-          ? dispute.payment.depositAmount
-          : dispute.payment.totalCharged,
+      amount: this.disputedAmount(dispute),
       metadata: { type: dispute.type },
     });
+
+    void this.notifier.resolved(disputeId);
 
     return {
       message: 'Disputa resolvida a favor do owner.',
@@ -907,246 +964,44 @@ export class DisputesService {
     disputeId: string,
     dto: ResolvePartialDto,
   ) {
-    await this.assertAdmin(userId);
+    const dispute = await this.loadForResolution(userId, disputeId);
+    const { refundPercent } = dto;
 
-    const dispute = await this.prisma.dispute.findUnique({
-      where: { id: disputeId },
-      include: { booking: true, serviceBooking: true, payment: true },
-    });
-
-    if (!dispute) {
-      throw new NotFoundException('Disputa não encontrada.');
-    }
-
-    if (this.isResolved(dispute.status)) {
-      throw new BadRequestException('Esta disputa já foi resolvida.');
-    }
-
-    if (!dispute.booking && !dispute.serviceBooking) {
-      throw new BadRequestException('Disputa sem reserva associada.');
-    }
-
-    this.assertPaymentResolvable(dispute.type, dispute.payment);
-
-    let auditAmount = 0;
-
-    const updatedDispute = await this.prisma.$transaction(
+    const { updatedDispute, refundedToClient } = await runSerializable(
+      this.prisma,
       async (tx) => {
         const fresh = await this.reloadForResolution(tx, disputeId);
 
-        if (fresh.type === DisputeType.PAYMENT) {
-          // Política D2: a percentagem aplica-se APENAS ao rental.
-          // A fee fica com a plataforma; o depósito volta ao cliente.
-          // Invariante: refund + payout + feeRetida = totalCharged − depósito.
-          const rentalAmount = Number(fresh.payment.rentalAmount);
-          const platformFee = Number(fresh.payment.platformFee);
-          const depositAmount = roundMoney(
-            Number(fresh.payment.depositAmount ?? 0),
-          );
-          const totalCharged = Number(fresh.payment.totalCharged);
+        await this.closeReservationAfterProviderWin(tx, dispute, fresh.type);
 
-          const refundAmount = roundMoney(
-            (rentalAmount * dto.refundPercent) / 100,
-          );
-          const providerPayout = Math.max(
-            0,
-            roundMoney(rentalAmount - refundAmount - platformFee),
-          );
-          const platformRetained = roundMoney(
-            totalCharged - depositAmount - refundAmount - providerPayout,
-          );
+        // Numa disputa de pagamento a percentagem incide sobre o rental;
+        // numa de depósito, sobre o depósito.
+        const refundedToClient =
+          fresh.type === DisputeType.PAYMENT
+            ? await this.splitDisputedRental(tx, fresh.payment, {
+                refundPercent,
+                actorId: userId,
+              })
+            : await this.splitDisputedDeposit(tx, fresh.payment, {
+                refundPercent,
+                actorId: userId,
+              });
 
-          auditAmount = refundAmount;
-
-          if (dispute.booking) {
-            await tx.booking.update({
-              where: { id: dispute.booking.id },
-              data: {
-                status: BookingStatus.COMPLETED,
-                returnConfirmedAt: new Date(),
-              },
-            });
-            await this.restoreEquipmentUnit(tx, dispute.booking.equipmentId);
-          } else if (dispute.serviceBooking) {
-            await tx.serviceBooking.update({
-              where: { id: dispute.serviceBooking.id },
-              data: {
-                status: ServiceBookingStatus.COMPLETED,
-                completedAt: new Date(),
-              },
-            });
-          }
-
-          await this.ledger.recordMany(tx, [
-            {
-              paymentId: fresh.payment.id,
-              direction: LedgerDirection.OUTFLOW,
-              party: LedgerParty.CLIENT,
-              amount: refundAmount,
-              reason: `Reembolso parcial de ${dto.refundPercent}% do rental por disputa.`,
-              actorId: userId,
-            },
-            ...(providerPayout > 0
-              ? [
-                  {
-                    paymentId: fresh.payment.id,
-                    direction: LedgerDirection.OUTFLOW,
-                    party: LedgerParty.PROVIDER,
-                    amount: providerPayout,
-                    reason:
-                      'Rental remanescente liberado ao provider na resolução parcial.',
-                    actorId: userId,
-                  },
-                ]
-              : []),
-            ...(platformRetained > 0
-              ? [
-                  {
-                    paymentId: fresh.payment.id,
-                    direction: LedgerDirection.OUTFLOW,
-                    party: LedgerParty.PLATFORM,
-                    amount: platformRetained,
-                    reason: 'Platform fee retida na resolução parcial.',
-                    actorId: userId,
-                  },
-                ]
-              : []),
-            ...(depositAmount > 0
-              ? [
-                  {
-                    paymentId: fresh.payment.id,
-                    direction: LedgerDirection.OUTFLOW,
-                    party: LedgerParty.CLIENT,
-                    amount: depositAmount,
-                    reason:
-                      'Depósito devolvido ao cliente na resolução parcial.',
-                    actorId: userId,
-                  },
-                ]
-              : []),
-          ]);
-
-          await this.payouts.createPending(tx, {
-            paymentId: fresh.payment.id,
-            recipientId: fresh.payment.clientId,
-            kind: PayoutKind.CLIENT_REFUND,
-            amount: refundAmount,
-          });
-          await this.payouts.createPending(tx, {
-            paymentId: fresh.payment.id,
-            recipientId: fresh.payment.ownerId,
-            kind: PayoutKind.PROVIDER_PAYOUT,
-            amount: providerPayout,
-          });
-          if (depositAmount > 0) {
-            await this.payouts.createPending(tx, {
-              paymentId: fresh.payment.id,
-              recipientId: fresh.payment.clientId,
-              kind: PayoutKind.DEPOSIT_RETURN,
-              amount: depositAmount,
-            });
-          }
-
-          await tx.payment.update({
-            where: { id: fresh.payment.id },
-            data: {
-              status: PaymentStatus.PARTIALLY_REFUNDED,
-              refundedAt: new Date(),
-              releasedAt: new Date(),
-              refundAmount,
-              ownerPayout: providerPayout,
-              depositStatus:
-                depositAmount > 0 ? DepositStatus.RETURNED : DepositStatus.NONE,
-              depositReleasedAt: new Date(),
-            },
-          });
-        } else {
-          // Disputa de DEPÓSITO: refundPercent é a parte do depósito que
-          // volta ao CLIENTE; o resto vai ao provider.
-          const depositAmount = roundMoney(Number(fresh.payment.depositAmount));
-          const clientPart = roundMoney(
-            (depositAmount * dto.refundPercent) / 100,
-          );
-          const providerPart = roundMoney(depositAmount - clientPart);
-
-          auditAmount = clientPart;
-
-          await tx.booking.update({
-            where: { id: dispute.booking!.id },
-            data: {
-              status: BookingStatus.COMPLETED,
-              returnConfirmedAt: new Date(),
-            },
-          });
-          await this.restoreEquipmentUnit(tx, dispute.booking!.equipmentId);
-
-          await this.ledger.recordMany(tx, [
-            ...(clientPart > 0
-              ? [
-                  {
-                    paymentId: fresh.payment.id,
-                    direction: LedgerDirection.OUTFLOW,
-                    party: LedgerParty.CLIENT,
-                    amount: clientPart,
-                    reason: `Parte do depósito (${dto.refundPercent}%) devolvida ao cliente.`,
-                    actorId: userId,
-                  },
-                ]
-              : []),
-            ...(providerPart > 0
-              ? [
-                  {
-                    paymentId: fresh.payment.id,
-                    direction: LedgerDirection.OUTFLOW,
-                    party: LedgerParty.PROVIDER,
-                    amount: providerPart,
-                    reason: 'Parte do depósito atribuída ao provider por dano.',
-                    actorId: userId,
-                  },
-                ]
-              : []),
-          ]);
-
-          if (clientPart > 0) {
-            await this.payouts.createPending(tx, {
-              paymentId: fresh.payment.id,
-              recipientId: fresh.payment.clientId,
-              kind: PayoutKind.DEPOSIT_RETURN,
-              amount: clientPart,
-            });
-          }
-          if (providerPart > 0) {
-            await this.payouts.createPending(tx, {
-              paymentId: fresh.payment.id,
-              recipientId: fresh.payment.ownerId,
-              kind: PayoutKind.DEPOSIT_CLAIM,
-              amount: providerPart,
-            });
-          }
-
-          await tx.payment.update({
-            where: { id: fresh.payment.id },
-            data: {
-              depositStatus: DepositStatus.SPLIT,
-              depositReleasedAt: new Date(),
-            },
-          });
-        }
-
-        return tx.dispute.update({
+        const updatedDispute = await tx.dispute.update({
           where: { id: disputeId },
           data: {
             status: DisputeStatus.RESOLVED_PARTIAL,
-            refundPercent: dto.refundPercent,
-            resolution: `Resolvido parcialmente com reembolso de ${dto.refundPercent}%.`,
+            refundPercent,
+            resolution: `Resolvido parcialmente com reembolso de ${refundPercent}%.`,
+            ...this.closedBy(userId),
           },
           include: DISPUTE_FULL_INCLUDE,
         });
+
+        return { updatedDispute, refundedToClient };
       },
-      {
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-        timeout: 8000,
-      },
+      resolutionConflict,
+      RESOLUTION_TIMEOUT_MS,
     );
 
     await this.audit.record({
@@ -1154,9 +1009,11 @@ export class DisputesService {
       actorId: userId,
       targetType: 'Dispute',
       targetId: disputeId,
-      amount: auditAmount,
-      metadata: { refundPercent: dto.refundPercent, type: dispute.type },
+      amount: refundedToClient,
+      metadata: { refundPercent, type: dispute.type },
     });
+
+    void this.notifier.resolved(disputeId);
 
     return {
       message: 'Disputa resolvida parcialmente com sucesso.',
@@ -1177,20 +1034,7 @@ export class DisputesService {
       select: {
         status: true,
         type: true,
-        payment: {
-          select: {
-            id: true,
-            status: true,
-            depositStatus: true,
-            totalCharged: true,
-            rentalAmount: true,
-            platformFee: true,
-            depositAmount: true,
-            ownerPayout: true,
-            clientId: true,
-            ownerId: true,
-          },
-        },
+        payment: { select: RESOLUTION_PAYMENT_SELECT },
       },
     });
 
@@ -1198,13 +1042,69 @@ export class DisputesService {
       throw new NotFoundException('Disputa não encontrada.');
     }
 
-    if (this.isResolved(fresh.status)) {
-      throw new BadRequestException('Esta disputa já foi resolvida.');
-    }
+    this.assertReadyToResolve(fresh.status);
 
     this.assertPaymentResolvable(fresh.type, fresh.payment);
 
     return fresh;
+  }
+
+  /**
+   * Relê o pagamento dentro da transacção. Entre a primeira leitura e a
+   * escrita, o cliente pode ter confirmado a entrega ou a outra parte pode
+   * ter aberto a sua disputa.
+   */
+  private async assertStillDisputable(
+    tx: Prisma.TransactionClient,
+    paymentId: string,
+  ) {
+    const fresh = await tx.payment.findUnique({
+      where: { id: paymentId },
+      select: { status: true, disputes: OPEN_DISPUTE_SELECT },
+    });
+
+    if (fresh && fresh.disputes.length > 0) {
+      throw new BadRequestException(ALREADY_OPEN);
+    }
+
+    if (fresh?.status !== PaymentStatus.HELD) {
+      throw new BadRequestException(
+        'O estado atual do pagamento não permite abrir disputa.',
+      );
+    }
+  }
+
+  /**
+   * Relê a reserva dentro da transacção. Entre a primeira leitura e a
+   * escrita, a devolução pode ter sido confirmada e o depósito devolvido.
+   */
+  private async assertDepositStillClaimable(
+    tx: Prisma.TransactionClient,
+    bookingId: string,
+  ) {
+    const fresh = await tx.booking.findUnique({
+      where: { id: bookingId },
+      select: {
+        status: true,
+        disputes: OPEN_DISPUTE_SELECT,
+        payment: { select: { status: true, depositStatus: true } },
+      },
+    });
+
+    if (fresh && fresh.disputes.length > 0) {
+      throw new BadRequestException(ALREADY_OPEN);
+    }
+
+    const depositIsHeld =
+      fresh?.status === BookingStatus.ACTIVE &&
+      fresh.payment?.depositStatus === DepositStatus.HELD &&
+      RENTAL_PAID_OUT_STATUSES.includes(fresh.payment.status);
+
+    if (!depositIsHeld) {
+      throw new BadRequestException(
+        'A reserva mudou de estado e o depósito já não pode ser reclamado.',
+      );
+    }
   }
 
   private assertPaymentResolvable(
@@ -1221,7 +1121,7 @@ export class DisputesService {
       }
     } else {
       if (
-        payment.status !== PaymentStatus.RELEASED ||
+        !RENTAL_PAID_OUT_STATUSES.includes(payment.status) ||
         payment.depositStatus !== DepositStatus.HELD
       ) {
         throw new BadRequestException(
@@ -1231,40 +1131,512 @@ export class DisputesService {
     }
   }
 
-  private async restoreEquipmentUnit(
+  /**
+   * Primeira leitura de uma resolução: confirma que quem resolve é admin, que
+   * não é parte da reserva, e que a disputa existe, ainda está aberta e tem o
+   * dinheiro num estado que permite resolvê-la.
+   */
+  private async loadForResolution(userId: string, disputeId: string) {
+    await this.assertAdmin(userId);
+
+    const dispute = await this.prisma.dispute.findUnique({
+      where: { id: disputeId },
+      include: DISPUTE_FOR_RESOLUTION_INCLUDE,
+    });
+
+    if (!dispute) {
+      throw new NotFoundException('Disputa não encontrada.');
+    }
+
+    this.assertReadyToResolve(dispute.status);
+
+    if (!dispute.booking && !dispute.serviceBooking) {
+      throw new BadRequestException('Disputa sem reserva associada.');
+    }
+
+    this.assertPaymentResolvable(dispute.type, dispute.payment);
+    // Uma resolução decide para onde vai o dinheiro: quem é cliente ou dono
+    // da reserva não a decide, mesmo sendo admin.
+    assertNotPartyToPayment(userId, dispute.payment);
+
+    return dispute;
+  }
+
+  /** O valor em causa: o depósito numa disputa de depósito, tudo o que foi cobrado nas outras. */
+  private disputedAmount(dispute: DisputeForResolution) {
+    return dispute.type === DisputeType.DEPOSIT
+      ? dispute.payment.depositAmount
+      : dispute.payment.totalCharged;
+  }
+
+  /** Cancela a reserva em disputa e, num aluguer, devolve a unidade ao stock. */
+  private async cancelDisputedReservation(
     tx: Prisma.TransactionClient,
-    equipmentId: string,
+    dispute: DisputeForResolution,
   ) {
-    const equipment = await tx.equipment.findUnique({
-      where: { id: equipmentId },
-      select: { availableQuantity: true, quantity: true },
-    });
+    const cancellation = {
+      cancelledAt: new Date(),
+      cancellationReason:
+        'Cancelada por resolução de disputa a favor do cliente.',
+    };
 
-    if (!equipment) return;
+    if (dispute.booking) {
+      await tx.booking.update({
+        where: { id: dispute.booking.id },
+        data: { status: BookingStatus.CANCELLED, ...cancellation },
+      });
+    } else if (dispute.serviceBooking) {
+      await tx.serviceBooking.update({
+        where: { id: dispute.serviceBooking.id },
+        data: { status: ServiceBookingStatus.CANCELLED, ...cancellation },
+      });
+    }
+  }
 
-    const restored = Math.min(
-      equipment.availableQuantity + 1,
-      equipment.quantity,
-    );
+  /** Conclui a reserva em disputa e, num aluguer, devolve a unidade ao stock. */
+  private async completeDisputedReservation(
+    tx: Prisma.TransactionClient,
+    dispute: DisputeForResolution,
+  ) {
+    if (dispute.booking) {
+      await tx.booking.update({
+        where: { id: dispute.booking.id },
+        data: {
+          status: BookingStatus.COMPLETED,
+          returnConfirmedAt: new Date(),
+        },
+      });
+    } else if (dispute.serviceBooking) {
+      await tx.serviceBooking.update({
+        where: { id: dispute.serviceBooking.id },
+        data: {
+          status: ServiceBookingStatus.COMPLETED,
+          // Um serviço que o provider já tinha concluído guarda essa data.
+          completedAt: dispute.serviceBooking.completedAt ?? new Date(),
+        },
+      });
+    }
+  }
 
-    await tx.equipment.update({
-      where: { id: equipmentId },
-      data: { availableQuantity: restored, isAvailable: restored > 0 },
+  /** Devolve uma função que constrói saídas do ledger para este pagamento e este actor. */
+  private outflowFor(paymentId: string, actorId: string) {
+    return (party: LedgerParty, amount: number, reason: string) => ({
+      paymentId,
+      direction: LedgerDirection.OUTFLOW,
+      party,
+      amount,
+      reason,
+      actorId,
     });
   }
 
-  private buildOwnerDeadline() {
-    const deadline = new Date();
-    deadline.setDate(deadline.getDate() + 3);
-    return deadline;
+  /**
+   * O cliente ganha a disputa do pagamento: recebe de volta tudo o que
+   * pagou (rental, taxa e depósito).
+   */
+  private async refundDisputedPaymentInFull(
+    tx: Prisma.TransactionClient,
+    payment: ResolutionPayment,
+    actorId: string,
+  ) {
+    await this.escrowRefunds.refundInFull(tx, payment, {
+      actorId,
+      reason: 'Reembolso total por disputa resolvida a favor do cliente.',
+    });
   }
 
-  private isResolved(status: DisputeStatus) {
-    return (
-      status === DisputeStatus.RESOLVED_CLIENT ||
-      status === DisputeStatus.RESOLVED_OWNER ||
-      status === DisputeStatus.RESOLVED_PARTIAL
+  /** O cliente ganha a disputa do depósito: o depósito volta para ele. */
+  private async returnDepositToClient(
+    tx: Prisma.TransactionClient,
+    payment: ResolutionPayment,
+    actorId: string,
+  ) {
+    const outflow = this.outflowFor(payment.id, actorId);
+    const depositAmount = roundMoney(Number(payment.depositAmount));
+
+    await this.ledger.record(
+      tx,
+      outflow(
+        LedgerParty.CLIENT,
+        depositAmount,
+        'Depósito devolvido ao cliente por disputa resolvida a seu favor.',
+      ),
     );
+
+    await this.payouts.createPending(tx, {
+      paymentId: payment.id,
+      recipientId: payment.clientId,
+      kind: PayoutKind.DEPOSIT_RETURN,
+      amount: depositAmount,
+    });
+
+    await tx.payment.update({
+      where: { id: payment.id },
+      data: {
+        depositStatus: DepositStatus.RETURNED,
+        depositReleasedAt: new Date(),
+      },
+    });
+  }
+
+  /**
+   * O provider ganha a disputa do pagamento: recebe o rental menos a taxa e
+   * a plataforma fica com a taxa. O depósito, quando existe, continua retido
+   * até o equipamento voltar, como numa entrega confirmada pelo cliente.
+   */
+  private async releaseDisputedPaymentToProvider(
+    tx: Prisma.TransactionClient,
+    payment: ResolutionPayment,
+    actorId: string,
+  ) {
+    const outflow = this.outflowFor(payment.id, actorId);
+    const providerPayout = roundMoney(Number(payment.ownerPayout ?? 0));
+    const depositAmount = roundMoney(Number(payment.depositAmount ?? 0));
+    const platformTake = roundMoney(
+      Number(payment.totalCharged) - depositAmount - providerPayout,
+    );
+
+    await this.ledger.record(
+      tx,
+      outflow(
+        LedgerParty.PROVIDER,
+        providerPayout,
+        'Rental liberado ao provider por disputa resolvida a seu favor.',
+      ),
+    );
+
+    if (platformTake > 0) {
+      await this.ledger.record(
+        tx,
+        outflow(
+          LedgerParty.PLATFORM,
+          platformTake,
+          'Platform fee retida na resolução da disputa.',
+        ),
+      );
+    }
+
+    await this.payouts.createPending(tx, {
+      paymentId: payment.id,
+      recipientId: payment.ownerId,
+      kind: PayoutKind.PROVIDER_PAYOUT,
+      amount: providerPayout,
+    });
+
+    await tx.payment.update({
+      where: { id: payment.id },
+      data: { status: PaymentStatus.RELEASED, releasedAt: new Date() },
+    });
+  }
+
+  /** O provider ganha a disputa do depósito: fica com ele, por dano. */
+  private async awardDepositToProvider(
+    tx: Prisma.TransactionClient,
+    payment: ResolutionPayment,
+    actorId: string,
+  ) {
+    const outflow = this.outflowFor(payment.id, actorId);
+    const depositAmount = roundMoney(Number(payment.depositAmount));
+
+    await this.ledger.record(
+      tx,
+      outflow(
+        LedgerParty.PROVIDER,
+        depositAmount,
+        'Depósito atribuído ao provider por disputa de dano resolvida a seu favor.',
+      ),
+    );
+
+    await this.payouts.createPending(tx, {
+      paymentId: payment.id,
+      recipientId: payment.ownerId,
+      kind: PayoutKind.DEPOSIT_CLAIM,
+      amount: depositAmount,
+    });
+
+    await tx.payment.update({
+      where: { id: payment.id },
+      data: {
+        depositStatus: DepositStatus.CLAIMED,
+        depositReleasedAt: new Date(),
+      },
+    });
+  }
+
+  /**
+   * Como se reparte um pagamento em disputa numa resolução parcial. A
+   * percentagem aplica-se só ao rental e a taxa fica com a plataforma. O
+   * depósito não entra na repartição: num aluguer continua retido até o
+   * equipamento voltar. As três parcelas e o depósito somam o que foi cobrado.
+   */
+  private splitRental(
+    payment: ResolutionPayment,
+    refundPercent: number,
+  ): RentalSplit {
+    const rentalAmount = Number(payment.rentalAmount);
+    const depositAmount = roundMoney(Number(payment.depositAmount ?? 0));
+    const refundAmount = percentOf(rentalAmount, refundPercent);
+    const providerPayout = Math.max(
+      0,
+      roundMoney(rentalAmount - refundAmount - Number(payment.platformFee)),
+    );
+    const platformRetained = roundMoney(
+      Number(payment.totalCharged) -
+        depositAmount -
+        refundAmount -
+        providerPayout,
+    );
+
+    return { refundAmount, providerPayout, platformRetained, depositAmount };
+  }
+
+  /**
+   * Resolução parcial de uma disputa de pagamento. Devolve o valor
+   * reembolsado ao cliente.
+   */
+  private async splitDisputedRental(
+    tx: Prisma.TransactionClient,
+    payment: ResolutionPayment,
+    resolution: PartialResolution,
+  ): Promise<number> {
+    const split = this.splitRental(payment, resolution.refundPercent);
+    const { refundAmount, providerPayout } = split;
+
+    await this.recordRentalSplit(tx, payment, split, resolution);
+    await this.createRentalSplitPayouts(tx, payment, split);
+
+    await tx.payment.update({
+      where: { id: payment.id },
+      data: {
+        status: PaymentStatus.PARTIALLY_REFUNDED,
+        refundedAt: new Date(),
+        releasedAt: new Date(),
+        refundAmount,
+        ownerPayout: providerPayout,
+      },
+    });
+
+    return refundAmount;
+  }
+
+  private async recordRentalSplit(
+    tx: Prisma.TransactionClient,
+    payment: ResolutionPayment,
+    split: RentalSplit,
+    resolution: PartialResolution,
+  ) {
+    const { refundAmount, providerPayout, platformRetained } = split;
+    const { refundPercent, actorId } = resolution;
+    const outflow = this.outflowFor(payment.id, actorId);
+
+    await this.ledger.recordMany(tx, [
+      outflow(
+        LedgerParty.CLIENT,
+        refundAmount,
+        `Reembolso parcial de ${refundPercent}% do rental por disputa.`,
+      ),
+      ...(providerPayout > 0
+        ? [
+            outflow(
+              LedgerParty.PROVIDER,
+              providerPayout,
+              'Rental remanescente liberado ao provider na resolução parcial.',
+            ),
+          ]
+        : []),
+      ...(platformRetained > 0
+        ? [
+            outflow(
+              LedgerParty.PLATFORM,
+              platformRetained,
+              'Platform fee retida na resolução parcial.',
+            ),
+          ]
+        : []),
+    ]);
+  }
+
+  private async createRentalSplitPayouts(
+    tx: Prisma.TransactionClient,
+    payment: ResolutionPayment,
+    split: RentalSplit,
+  ) {
+    await this.payouts.createPending(tx, {
+      paymentId: payment.id,
+      recipientId: payment.clientId,
+      kind: PayoutKind.CLIENT_REFUND,
+      amount: split.refundAmount,
+    });
+    await this.payouts.createPending(tx, {
+      paymentId: payment.id,
+      recipientId: payment.ownerId,
+      kind: PayoutKind.PROVIDER_PAYOUT,
+      amount: split.providerPayout,
+    });
+  }
+
+  /**
+   * Resolução parcial de uma disputa de depósito: a percentagem é a parte do
+   * depósito que volta ao cliente e o resto fica com o provider. Devolve a
+   * parte do cliente.
+   */
+  private async splitDisputedDeposit(
+    tx: Prisma.TransactionClient,
+    payment: ResolutionPayment,
+    resolution: PartialResolution,
+  ): Promise<number> {
+    const { refundPercent, actorId } = resolution;
+    const outflow = this.outflowFor(payment.id, actorId);
+    const depositAmount = roundMoney(Number(payment.depositAmount));
+    const clientPart = percentOf(depositAmount, refundPercent);
+    const providerPart = roundMoney(depositAmount - clientPart);
+
+    await this.ledger.recordMany(tx, [
+      ...(clientPart > 0
+        ? [
+            outflow(
+              LedgerParty.CLIENT,
+              clientPart,
+              `Parte do depósito (${refundPercent}%) devolvida ao cliente.`,
+            ),
+          ]
+        : []),
+      ...(providerPart > 0
+        ? [
+            outflow(
+              LedgerParty.PROVIDER,
+              providerPart,
+              'Parte do depósito atribuída ao provider por dano.',
+            ),
+          ]
+        : []),
+    ]);
+
+    if (clientPart > 0) {
+      await this.payouts.createPending(tx, {
+        paymentId: payment.id,
+        recipientId: payment.clientId,
+        kind: PayoutKind.DEPOSIT_RETURN,
+        amount: clientPart,
+      });
+    }
+    if (providerPart > 0) {
+      await this.payouts.createPending(tx, {
+        paymentId: payment.id,
+        recipientId: payment.ownerId,
+        kind: PayoutKind.DEPOSIT_CLAIM,
+        amount: providerPart,
+      });
+    }
+
+    await tx.payment.update({
+      where: { id: payment.id },
+      data: {
+        depositStatus: DepositStatus.SPLIT,
+        depositReleasedAt: new Date(),
+      },
+    });
+
+    return clientPart;
+  }
+
+  /**
+   * Uma disputa só se resolve em análise: depois de a outra parte responder
+   * ou de o prazo dela passar. Antes disso decidia-se sem a ouvir.
+   */
+  private assertReadyToResolve(status: DisputeStatus) {
+    if (status === DisputeStatus.UNDER_REVIEW) {
+      return;
+    }
+
+    if (AWAITING_RESPONSE.includes(status)) {
+      throw new BadRequestException(
+        'A outra parte ainda pode responder a esta disputa. Só se resolve depois da resposta ou do fim do prazo.',
+      );
+    }
+
+    throw new BadRequestException(
+      status === DisputeStatus.WITHDRAWN
+        ? 'Esta disputa foi retirada.'
+        : 'Esta disputa já foi resolvida.',
+    );
+  }
+
+  /**
+   * O provider ganhou, no todo ou em parte. Numa disputa de pagamento de um
+   * aluguer isso quer dizer que a entrega aconteceu: a reserva fica ACTIVE,
+   * o depósito continua retido e segue-se o caminho normal da devolução,
+   * com a confirmação do provider ou a reclamação do depósito. Num serviço,
+   * ou numa disputa de depósito, a reserva conclui.
+   */
+  private async closeReservationAfterProviderWin(
+    tx: Prisma.TransactionClient,
+    dispute: DisputeForResolution,
+    type: DisputeType,
+  ) {
+    if (type === DisputeType.PAYMENT && dispute.booking) {
+      await tx.booking.update({
+        where: { id: dispute.booking.id },
+        data: { status: BookingStatus.ACTIVE, deliveryConfirmedAt: new Date() },
+      });
+      return;
+    }
+
+    await this.completeDisputedReservation(tx, dispute);
+  }
+
+  /** Data e autor do fecho de uma disputa, por resolução ou por retirada. */
+  private closedBy(actorId: string) {
+    return { closedAt: new Date(), closedBy: actorId };
+  }
+
+  /** As duas partes da reserva de uma disputa. */
+  private partiesOf(dispute: {
+    booking?: { clientId: string; ownerId: string } | null;
+    serviceBooking?: { clientId: string; providerId: string } | null;
+  }): DisputeParties {
+    if (dispute.booking) {
+      return {
+        clientId: dispute.booking.clientId,
+        providerId: dispute.booking.ownerId,
+      };
+    }
+
+    if (dispute.serviceBooking) {
+      return {
+        clientId: dispute.serviceBooking.clientId,
+        providerId: dispute.serviceBooking.providerId,
+      };
+    }
+
+    throw new BadRequestException('Disputa sem reserva associada.');
+  }
+
+  /**
+   * Só valem como prova as fotos que o próprio utilizador carregou. Um link
+   * de fora, ou a foto de outra pessoa, não entra na disputa.
+   */
+  private assertOwnEvidence(userId: string, urls: string[] | undefined) {
+    if (!urls || urls.length === 0) {
+      return;
+    }
+
+    const cloudName = this.config.getOrThrow<string>('CLOUDINARY_CLOUD_NAME');
+
+    if (urls.some((url) => !isOwnEvidence(url, { cloudName, userId }))) {
+      throw new BadRequestException(
+        'As provas têm de ser fotos que carregaste em /disputes/upload-evidence.',
+      );
+    }
+  }
+
+  private async isAdmin(userId: string): Promise<boolean> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+
+    return user?.role === UserRole.ADMIN;
   }
 
   private async assertAdmin(userId: string) {

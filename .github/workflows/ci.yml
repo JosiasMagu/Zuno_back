@@ -40,7 +40,6 @@ jobs:
       DATABASE_URL: postgresql://zuno_ci:zuno_ci_password@localhost:5432/zuno_db_test?schema=public
       DATABASE_URL_TEST: postgresql://zuno_ci:zuno_ci_password@localhost:5432/zuno_db_test?schema=public
       JWT_ACCESS_SECRET: ci-access-secret-not-for-production
-      JWT_REFRESH_SECRET: ci-refresh-secret-not-for-production
       JWT_ACCESS_EXPIRES_IN: 15m
       JWT_REFRESH_EXPIRES_IN: 7d
       ALLOWED_ORIGINS: http://localhost:3000
@@ -83,12 +82,29 @@ jobs:
       - name: Apply migrations to test DB
         run: npx prisma migrate deploy
 
+      # O build pode passar e o artefacto nao arrancar (ponto de entrada no
+      # sitio errado, modulo em falta). Este passo corre o dist/ tal como o
+      # start:prod e espera pela resposta do /ready, que ja toca na base.
+      - name: Smoke test compiled app
+        run: |
+          node dist/main &
+          APP_PID=$!
+          trap 'kill "$APP_PID"' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fs http://127.0.0.1:3000/ready > /dev/null; then
+              echo "dist/main respondeu em /ready ao fim de ${attempt} s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::dist/main nao respondeu em /ready ao fim de 30 s"
+          exit 1
+
       - name: Create .env for E2E setup helper
         run: |
           echo "DATABASE_URL=${DATABASE_URL}" > .env
           echo "DATABASE_URL_TEST=${DATABASE_URL_TEST}" >> .env
           echo "JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}" >> .env
-          echo "JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}" >> .env
           echo "JWT_ACCESS_EXPIRES_IN=${JWT_ACCESS_EXPIRES_IN}" >> .env
           echo "JWT_REFRESH_EXPIRES_IN=${JWT_REFRESH_EXPIRES_IN}" >> .env
           echo "ALLOWED_ORIGINS=${ALLOWED_ORIGINS}" >> .env
@@ -103,3 +119,70 @@ jobs:
           name: coverage-report
           path: coverage/
           retention-days: 7
+
+  docker-image:
+    name: Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: zuno_ci
+          POSTGRES_PASSWORD: zuno_ci_password
+          POSTGRES_DB: zuno_db_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U zuno_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://zuno_ci:zuno_ci_password@localhost:5432/zuno_db_test?schema=public
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build migrate image
+        run: docker build --target migrate --tag zuno-back-migrate:ci .
+
+      - name: Build app image
+        run: docker build --tag zuno-back:ci .
+
+      - name: Apply migrations with the migrate image
+        run: docker run --rm --network host --env DATABASE_URL zuno-back-migrate:ci
+
+      # A imagem corre com NODE_ENV=production, que exige segredos JWT de 64
+      # caracteres ou mais. Sao gerados na hora e nao servem para mais nada.
+      - name: Start app image
+        run: |
+          docker run --detach --name zuno-back --network host \
+            --env DATABASE_URL \
+            --env JWT_ACCESS_SECRET="$(openssl rand -hex 64)" \
+            --env CLOUDINARY_CLOUD_NAME=ci-dummy \
+            --env CLOUDINARY_API_KEY=ci-dummy-key \
+            --env CLOUDINARY_API_SECRET=ci-dummy-secret \
+            zuno-back:ci
+
+      # Espera pelo HEALTHCHECK da propria imagem, para o caminho que ele
+      # chama tambem ficar testado.
+      - name: Wait for the container healthcheck
+        run: |
+          for attempt in $(seq 1 45); do
+            status="$(docker inspect --format '{{.State.Health.Status}}' zuno-back)"
+            if [ "$status" = "healthy" ]; then
+              curl -fsS http://127.0.0.1:3000/ready
+              exit 0
+            fi
+            if [ "$(docker inspect --format '{{.State.Running}}' zuno-back)" != "true" ]; then
+              break
+            fi
+            sleep 2
+          done
+          echo "::error::o contentor nao ficou healthy (estado: ${status})"
+          docker logs zuno-back
+          exit 1

@@ -22,6 +22,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
@@ -33,6 +34,7 @@ import { CreateDisputeDto } from '../dto/create-dispute.dto';
 import { FindDisputesQueryDto } from '../dto/find-disputes-query.dto';
 import { ResolvePartialDto } from '../dto/resolve-partial.dto';
 import { RespondDisputeDto } from '../dto/respond-dispute.dto';
+import { WithdrawDisputeDto } from '../dto/withdraw-dispute.dto';
 import { DisputesService } from '../services/disputes.service';
 
 @ApiTags('Disputes')
@@ -45,8 +47,8 @@ export class DisputesController {
   ) {}
 
   @Post('upload-evidence')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.CLIENT, UserRole.PROVIDER)
+  // Cada foto custa armazenamento, por isso há um tecto por hora.
+  @Throttle({ global: { ttl: 3_600_000, limit: 30 } })
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Upload de foto de evidência para disputa' })
   @ApiConsumes('multipart/form-data')
@@ -85,13 +87,11 @@ export class DisputesController {
   }
 
   @Post('deposit-claim')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Reclamar o depósito de uma reserva (provider)',
     description:
-      'O provider abre uma disputa sobre o depósito quando o equipamento é devolvido danificado. Só possível com a reserva ativa, pagamento liberado e dentro da janela de reclamação após o fim do aluguer. A decisão é do admin.',
+      'O provider abre uma disputa sobre o depósito quando o equipamento é devolvido danificado. Só possível com a reserva ativa, pagamento liberado e dentro da janela de reclamação após o fim do aluguer. O cliente tem prazo para responder e a decisão é do admin.',
   })
   @ApiBody({ type: ClaimDepositDto })
   @ApiResponse({
@@ -138,15 +138,17 @@ export class DisputesController {
   }
 
   @Patch(':id/respond')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Responder disputa como owner' })
+  @ApiOperation({
+    summary: 'Responder a uma disputa',
+    description:
+      'Responde a outra parte da reserva, a que não abriu a disputa, com a sua versão e as suas provas. Um admin pode registar a resposta por ela. Depois da resposta a disputa segue para análise.',
+  })
   @ApiParam({ name: 'id', description: 'ID da disputa' })
   @ApiBody({ type: RespondDisputeDto })
   @ApiResponse({
     status: 200,
-    description: 'Resposta da disputa registrada com sucesso.',
+    description: 'Resposta registada. A disputa segue para análise.',
   })
   @ApiResponse({ status: 400, description: 'Operação inválida.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
@@ -157,6 +159,27 @@ export class DisputesController {
     @Body() dto: RespondDisputeDto,
   ) {
     return this.disputesService.respond(user.id, id, dto);
+  }
+
+  @Patch(':id/withdraw')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Retirar uma disputa',
+    description:
+      'Quem abriu a disputa pode retirá-la enquanto não for decidida, e um admin pode arquivá-la. Não move dinheiro: a reserva volta ao estado em que estava.',
+  })
+  @ApiParam({ name: 'id', description: 'ID da disputa' })
+  @ApiBody({ type: WithdrawDisputeDto })
+  @ApiResponse({ status: 200, description: 'Disputa retirada.' })
+  @ApiResponse({ status: 400, description: 'A disputa já foi decidida.' })
+  @ApiResponse({ status: 403, description: 'Não é quem abriu a disputa.' })
+  @ApiResponse({ status: 404, description: 'Disputa não encontrada.' })
+  withdraw(
+    @CurrentUser() user: { id: string },
+    @Param('id') id: string,
+    @Body() dto: WithdrawDisputeDto,
+  ) {
+    return this.disputesService.withdraw(user.id, id, dto);
   }
 
   @Patch(':id/resolve-client')

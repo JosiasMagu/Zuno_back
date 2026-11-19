@@ -115,6 +115,11 @@ o custo de migração é mínimo hoje e cresce com cada feature/utilizador novo.
 
 **Estado:** PROPOSTA
 
+**Nota (2026-11-16):** implementada em local no lote 4 com estes valores, mais
+um mínimo de 2 horas para pagar e um tecto de 90 dias por reserva. Os valores
+estão em `src/shared/constants/policy.ts`. O estado da decisão fica por
+confirmar pelo dono.
+
 **Contexto:** reservas `PENDING` (nunca pagas) contam no cálculo de conflitos
 (`bookings.service.ts:69`) e não expiram — bloqueiam o calendário para sempre.
 Vetor de griefing a custo zero + inventário morto.

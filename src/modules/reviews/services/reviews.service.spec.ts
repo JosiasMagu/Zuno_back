@@ -4,7 +4,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { BookingStatus, ReviewAuthorRole } from '@prisma/client';
+import { BookingStatus, Prisma, ReviewAuthorRole } from '@prisma/client';
 
 import { ReviewsService } from './reviews.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
@@ -27,6 +27,20 @@ const makeBooking = (overrides: Record<string, unknown> = {}) => ({
   ownerId: OWNER_ID,
   equipmentId: EQUIPMENT_ID,
   status: BookingStatus.COMPLETED,
+  // O dinheiro chegou a entrar no escrow.
+  payment: { heldAt: new Date('2030-06-01T10:00:00.000Z') },
+  ...overrides,
+});
+
+const SERVICE_BOOKING_ID = 'service-booking-uuid-001';
+
+const makeServiceBooking = (overrides: Record<string, unknown> = {}) => ({
+  id: SERVICE_BOOKING_ID,
+  clientId: CLIENT_ID,
+  providerId: OWNER_ID,
+  serviceId: 'service-uuid-001',
+  status: 'CANCELLED',
+  payment: { heldAt: new Date('2030-06-01T10:00:00.000Z') },
   ...overrides,
 });
 
@@ -50,6 +64,7 @@ const makeReview = (overrides: Record<string, unknown> = {}) => ({
 const makePrismaMock = () => {
   const mock = {
     booking: { findUnique: jest.fn() },
+    serviceBooking: { findUnique: jest.fn() },
     equipment: { findUnique: jest.fn(), update: jest.fn() },
     user: { findUnique: jest.fn(), update: jest.fn() },
     review: {
@@ -61,6 +76,8 @@ const makePrismaMock = () => {
       aggregate: jest.fn(),
     },
     $transaction: jest.fn(),
+    // As linhas cuja nota muda são trancadas antes de se agregar.
+    $queryRaw: jest.fn().mockResolvedValue([]),
   };
   return mock;
 };
@@ -188,6 +205,43 @@ describe('ReviewsService', () => {
       await expect(service.create(CLIENT_ID, clientDto)).rejects.toThrow(
         BadRequestException,
       );
+    });
+
+    it.each([
+      ['nunca teve pagamento', null],
+      ['teve um pagamento que não chegou a entrar', { heldAt: null }],
+    ])(
+      'recusa avaliar uma reserva cancelada que %s',
+      async (_label, payment) => {
+        prisma.booking.findUnique.mockResolvedValue(
+          makeBooking({ status: BookingStatus.CANCELLED, payment }),
+        );
+
+        await expect(service.create(CLIENT_ID, clientDto)).rejects.toThrow(
+          'Só é possível avaliar uma reserva que chegou a ser paga.',
+        );
+
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+      },
+    );
+
+    it('recusa avaliar um serviço cancelado antes de ser pago', async () => {
+      prisma.serviceBooking.findUnique.mockResolvedValue(
+        makeServiceBooking({ payment: { heldAt: null } }),
+      );
+
+      await expect(
+        service.create(CLIENT_ID, {
+          serviceBookingId: SERVICE_BOOKING_ID,
+          authorRole: ReviewAuthorRole.CLIENT,
+          rating: 1,
+          comment: 'Nunca apareceu.',
+        }),
+      ).rejects.toThrow(
+        'Só é possível avaliar uma reserva que chegou a ser paga.',
+      );
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('permite avaliação de booking CANCELLED', async () => {
@@ -430,7 +484,7 @@ describe('ReviewsService', () => {
       ).rejects.toThrow(new NotFoundException('Utilizador não encontrado.'));
     });
 
-    it('filtra por targetId do utilizador', async () => {
+    it('junta as avaliações recebidas como provider e como cliente', async () => {
       prisma.user.findUnique.mockResolvedValue({ id: OWNER_ID });
       prisma.review.findMany.mockResolvedValue([]);
       prisma.review.count.mockResolvedValue(0);
@@ -442,7 +496,12 @@ describe('ReviewsService', () => {
           where: Record<string, unknown>;
         }
       ).where;
-      expect(where).toMatchObject({ targetId: OWNER_ID });
+      expect(where).toMatchObject({
+        OR: [
+          expect.objectContaining({ authorRole: ReviewAuthorRole.CLIENT }),
+          { authorRole: ReviewAuthorRole.PROVIDER, targetId: OWNER_ID },
+        ],
+      });
     });
 
     it('filtra por authorRole quando fornecido', async () => {
@@ -649,6 +708,47 @@ describe('ReviewsService', () => {
       expect(result.data.role).toBe(ReviewAuthorRole.PROVIDER);
     });
 
+    it('diz que não se pode avaliar uma reserva que não chegou a ser paga', async () => {
+      prisma.booking.findUnique.mockResolvedValue(
+        makeBooking({ status: BookingStatus.CANCELLED, payment: null }),
+      );
+
+      const result = await service.canReview(CLIENT_ID, BOOKING_ID);
+
+      expect(result.data).toEqual({
+        canReview: false,
+        reason: 'A reserva não chegou a ser paga.',
+      });
+    });
+
+    it('diz o mesmo de um serviço cancelado antes de ser pago', async () => {
+      prisma.serviceBooking.findUnique.mockResolvedValue(
+        makeServiceBooking({ payment: { heldAt: null } }),
+      );
+
+      const result = await service.canReviewServiceBooking(
+        CLIENT_ID,
+        SERVICE_BOOKING_ID,
+      );
+
+      expect(result.data).toEqual({
+        canReview: false,
+        reason: 'A reserva não chegou a ser paga.',
+      });
+    });
+
+    it('deixa avaliar um serviço cancelado depois de pago', async () => {
+      prisma.serviceBooking.findUnique.mockResolvedValue(makeServiceBooking());
+      prisma.review.findFirst.mockResolvedValue(null);
+
+      const result = await service.canReviewServiceBooking(
+        CLIENT_ID,
+        SERVICE_BOOKING_ID,
+      );
+
+      expect(result.data.canReview).toBe(true);
+    });
+
     it('booking CANCELLED também permite avaliar', async () => {
       prisma.booking.findUnique.mockResolvedValue(
         makeBooking({ status: BookingStatus.CANCELLED }),
@@ -657,6 +757,161 @@ describe('ReviewsService', () => {
 
       const result = await service.canReview(CLIENT_ID, BOOKING_ID);
       expect(result.data.canReview).toBe(true);
+    });
+  });
+
+  // As duas notas de uma conta e as avaliações em simultâneo
+
+  describe('notas da conta e concorrência', () => {
+    const clientDto = {
+      bookingId: BOOKING_ID,
+      authorRole: ReviewAuthorRole.CLIENT,
+      rating: 5,
+    };
+    const providerDto = {
+      bookingId: BOOKING_ID,
+      authorRole: ReviewAuthorRole.PROVIDER,
+      rating: 2,
+    };
+
+    const runInTransaction = () => {
+      prisma.$transaction.mockImplementation(
+        (callback: (tx: typeof prisma) => Promise<unknown>) => callback(prisma),
+      );
+      prisma.review.create.mockResolvedValue(makeReview());
+      prisma.review.aggregate.mockResolvedValue({
+        _avg: { rating: 4.5 },
+        _count: { rating: 2 },
+      });
+    };
+
+    beforeEach(() => {
+      prisma.booking.findUnique.mockResolvedValue(makeBooking());
+      prisma.review.findFirst.mockResolvedValue(null);
+    });
+
+    it('a avaliação do cliente entra na nota do provider, e não na de cliente dele', async () => {
+      runInTransaction();
+
+      await service.create(CLIENT_ID, clientDto);
+
+      expect(prisma.user.update).toHaveBeenCalledTimes(1);
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: OWNER_ID },
+        data: { providerRating: 4.5, providerReviews: 2 },
+      });
+    });
+
+    it('a avaliação do provider entra na nota de cliente, e não mexe na de provider', async () => {
+      runInTransaction();
+
+      await service.create(OWNER_ID, providerDto);
+
+      expect(prisma.user.update).toHaveBeenCalledTimes(1);
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: CLIENT_ID },
+        data: { clientRating: 4.5, clientReviews: 2 },
+      });
+    });
+
+    it('a nota do provider conta só o que os clientes disseram dos anúncios dele', async () => {
+      runInTransaction();
+
+      await service.create(CLIENT_ID, clientDto);
+
+      expect(prisma.review.aggregate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            authorRole: ReviewAuthorRole.CLIENT,
+            OR: [
+              { booking: { is: { ownerId: OWNER_ID } } },
+              { serviceBooking: { is: { providerId: OWNER_ID } } },
+            ],
+          },
+        }),
+      );
+    });
+
+    it('tranca o anúncio e a conta antes de gravar e de agregar', async () => {
+      runInTransaction();
+
+      await service.create(CLIENT_ID, clientDto);
+
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+      const lastLock = Math.max(...prisma.$queryRaw.mock.invocationCallOrder);
+      expect(lastLock).toBeLessThan(
+        prisma.review.create.mock.invocationCallOrder[0],
+      );
+      expect(lastLock).toBeLessThan(
+        prisma.review.aggregate.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('responde 400 quando a base recusa a segunda avaliação da mesma reserva', async () => {
+      prisma.$transaction.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+        }),
+      );
+
+      await expect(service.create(CLIENT_ID, clientDto)).rejects.toThrow(
+        new BadRequestException(
+          'Já submeteste uma avaliação para esta reserva.',
+        ),
+      );
+    });
+
+    it('deixa passar os outros erros da base como estão', async () => {
+      const failure = new Error('ligação perdida');
+      prisma.$transaction.mockRejectedValue(failure);
+
+      await expect(service.create(CLIENT_ID, clientDto)).rejects.toBe(failure);
+    });
+  });
+
+  describe('avaliações recebidas por uma conta', () => {
+    const whereOf = () =>
+      (prisma.review.findMany.mock.calls[0][0] as { where: unknown }).where;
+
+    const asProvider = {
+      authorRole: ReviewAuthorRole.CLIENT,
+      OR: [
+        { booking: { is: { ownerId: OWNER_ID } } },
+        { serviceBooking: { is: { providerId: OWNER_ID } } },
+      ],
+    };
+    const asClient = {
+      authorRole: ReviewAuthorRole.PROVIDER,
+      targetId: OWNER_ID,
+    };
+
+    beforeEach(() => {
+      prisma.user.findUnique.mockResolvedValue({ id: OWNER_ID });
+      prisma.review.findMany.mockResolvedValue([]);
+      prisma.review.count.mockResolvedValue(0);
+    });
+
+    it('sem filtro, traz as que recebeu como provider e como cliente', async () => {
+      await service.findByUser(OWNER_ID, {});
+
+      expect(whereOf()).toEqual({ OR: [asProvider, asClient] });
+    });
+
+    it('authorRole=CLIENT traz as que os clientes deixaram aos anúncios dela', async () => {
+      await service.findByUser(OWNER_ID, {
+        authorRole: ReviewAuthorRole.CLIENT,
+      });
+
+      expect(whereOf()).toEqual(asProvider);
+    });
+
+    it('authorRole=PROVIDER traz as que os providers lhe deixaram como cliente', async () => {
+      await service.findByUser(OWNER_ID, {
+        authorRole: ReviewAuthorRole.PROVIDER,
+      });
+
+      expect(whereOf()).toEqual(asClient);
     });
   });
 });

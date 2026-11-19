@@ -5,8 +5,10 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { UserRole } from '@prisma/client';
 import {
   ApiBearerAuth,
@@ -18,9 +20,11 @@ import {
 } from '@nestjs/swagger';
 
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
+import type { CurrentAuthUser } from '../../auth/decorators/current-user.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
+import { ChangePayoutNumberDto } from '../dto/change-payout-number.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { SavePushTokenDto } from '../dto/save-push-token.dto';
 import { SuspendUserDto } from '../dto/suspend-user.dto';
@@ -54,6 +58,36 @@ export class UsersController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Put('me/payout-number')
+  @ApiBearerAuth('access-token')
+  @Throttle({ global: { ttl: 60_000, limit: 5 } })
+  @ApiOperation({
+    summary: 'Alterar o número de recebimento',
+    description:
+      'Exige a password actual da conta. Fica em auditoria e o dono é avisado por push.',
+  })
+  @ApiBody({ type: ChangePayoutNumberDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Número de recebimento actualizado.',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Número inválido ou password actual incorrecta.',
+  })
+  @ApiResponse({ status: 401, description: 'Não autenticado.' })
+  @ApiResponse({
+    status: 429,
+    description: 'Número bloqueado por tentativas falhadas.',
+  })
+  changePayoutNumber(
+    @CurrentUser() user: CurrentAuthUser,
+    @Body() dto: ChangePayoutNumberDto,
+  ) {
+    return this.usersService.changePayoutNumber(user.id, user.sessionId, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post('push-token')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Guardar token push do dispositivo' })
@@ -79,7 +113,7 @@ export class UsersController {
     return this.usersService.getPublicProfile(id);
   }
 
-  // ─── Moderação de utilizadores (ADMIN) ────────────────────────────────────
+  // Moderação de utilizadores (ADMIN)
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)

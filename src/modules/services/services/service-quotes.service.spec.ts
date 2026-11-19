@@ -11,11 +11,13 @@ import {
   ServiceBookingStatus,
   ServiceQuoteStatus,
   ServiceRequestStatus,
+  ServiceStatus,
   UserRole,
 } from '@prisma/client';
 
 import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { ServiceBookingNotifier } from './service-booking-notifier.service';
 import { ServiceQuotesService } from './service-quotes.service';
 
 const CLIENT_ID = 'client-uuid';
@@ -25,7 +27,6 @@ const REQUEST_ID = 'request-uuid';
 const QUOTE_ID = 'quote-uuid';
 
 const makeProvider = () => ({ id: PROVIDER_ID, role: UserRole.PROVIDER });
-const makeClient = () => ({ id: CLIENT_ID, role: UserRole.CLIENT });
 
 const makeRequest = (overrides: Record<string, unknown> = {}) => ({
   id: REQUEST_ID,
@@ -66,6 +67,7 @@ const makePrisma = () => ({
   serviceRequest: { findUnique: jest.fn(), update: jest.fn() },
   serviceQuote: {
     findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
     findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
@@ -77,10 +79,46 @@ const makePrisma = () => ({
 });
 
 const audit = { record: jest.fn() };
+const notifier = { quoteAccepted: jest.fn() };
+
+const PREFERRED_DATE = new Date('2030-06-10T08:00:00.000Z');
+
+/** O pedido como a aceitação o relê dentro da transacção. */
+const makeFreshRequest = (overrides: Record<string, unknown> = {}) => ({
+  id: REQUEST_ID,
+  clientId: CLIENT_ID,
+  status: ServiceRequestStatus.QUOTED,
+  serviceId: SERVICE_ID,
+  expiresAt: null,
+  preferredDate: PREFERRED_DATE,
+  service: {
+    status: ServiceStatus.ACTIVE,
+    provider: { listingsSuspendedUntil: null },
+  },
+  ...overrides,
+});
+
+const HOUR_MS = 60 * 60 * 1000;
+const PAY_BY = new Date('2030-06-02T10:00:00.000Z');
+
+/** O orçamento como a aceitação o relê dentro da transacção. */
+const makeFreshQuote = (overrides: Record<string, unknown> = {}) => ({
+  id: QUOTE_ID,
+  status: ServiceQuoteStatus.PENDING,
+  requestId: REQUEST_ID,
+  providerId: PROVIDER_ID,
+  expiresAt: null,
+  ...overrides,
+});
 
 describe('ServiceQuotesService', () => {
   let service: ServiceQuotesService;
   let prisma: ReturnType<typeof makePrisma>;
+
+  const runTransaction = () =>
+    prisma.$transaction.mockImplementation(
+      (cb: (tx: typeof prisma) => Promise<unknown>) => cb(prisma),
+    );
 
   beforeEach(async () => {
     prisma = makePrisma();
@@ -89,6 +127,7 @@ describe('ServiceQuotesService', () => {
         ServiceQuotesService,
         { provide: PrismaService, useValue: prisma },
         { provide: AuditService, useValue: audit },
+        { provide: ServiceBookingNotifier, useValue: notifier },
       ],
     }).compile();
     service = module.get(ServiceQuotesService);
@@ -129,8 +168,42 @@ describe('ServiceQuotesService', () => {
       );
     });
 
-    it('rejeita não-provider', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeClient());
+    it('recusa se o pedido foi fechado entre a leitura e a gravação', async () => {
+      prisma.serviceRequest.findUnique
+        .mockResolvedValueOnce(makeRequest())
+        .mockResolvedValueOnce({
+          status: ServiceRequestStatus.ACCEPTED,
+          expiresAt: null,
+        });
+      runTransaction();
+
+      await expect(
+        service.create(PROVIDER_ID, REQUEST_ID, dto),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(prisma.serviceQuote.create).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('decide pela posse do serviço, sem ler o papel da conta', async () => {
+      prisma.serviceRequest.findUnique.mockResolvedValue(makeRequest());
+      prisma.$transaction.mockImplementation(
+        async (cb: (tx: typeof prisma) => Promise<unknown>) => {
+          prisma.serviceQuote.findUnique.mockResolvedValue(null);
+          prisma.serviceQuote.create.mockResolvedValue(makeQuote());
+          prisma.serviceRequest.update.mockResolvedValue({});
+          return cb(prisma);
+        },
+      );
+
+      await service.create(PROVIDER_ID, REQUEST_ID, dto);
+
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('rejeita quem não é dono do serviço pedido', async () => {
+      prisma.serviceRequest.findUnique.mockResolvedValue(makeRequest());
+
       await expect(service.create(CLIENT_ID, REQUEST_ID, dto)).rejects.toThrow(
         ForbiddenException,
       );
@@ -278,18 +351,16 @@ describe('ServiceQuotesService', () => {
         async (
           cb: (tx: typeof prisma) => Promise<unknown>,
         ): Promise<unknown> => {
-          prisma.serviceRequest.findUnique.mockResolvedValueOnce({
-            id: REQUEST_ID,
-            clientId: CLIENT_ID,
-            status: ServiceRequestStatus.QUOTED,
-            serviceId: SERVICE_ID,
-          });
+          prisma.serviceRequest.findUnique.mockResolvedValueOnce(
+            makeFreshRequest(),
+          );
           prisma.serviceQuote.update.mockResolvedValue({});
           prisma.serviceQuote.updateMany.mockResolvedValue({ count: 2 });
           prisma.serviceRequest.update.mockResolvedValue({});
           prisma.serviceBooking.create.mockResolvedValue({
             id: 'booking-uuid',
             status: ServiceBookingStatus.PENDING,
+            expiresAt: PAY_BY,
           });
           prisma.payment.findUnique.mockResolvedValue(null);
           prisma.payment.create.mockResolvedValue({
@@ -331,6 +402,119 @@ describe('ServiceQuotesService', () => {
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'SERVICE_QUOTE_ACCEPTED' }),
       );
+      expect(result.data.payBy).toEqual(PAY_BY);
+      expect(notifier.quoteAccepted).toHaveBeenCalledWith('booking-uuid');
+    });
+
+    it('dá 24 horas para pagar e guarda a data pedida só como informação', async () => {
+      prisma.serviceQuote.findUnique
+        .mockResolvedValueOnce(makeQuote())
+        .mockResolvedValueOnce(makeFreshQuote())
+        .mockResolvedValue(makeQuote({ status: ServiceQuoteStatus.ACCEPTED }));
+      prisma.serviceRequest.findUnique.mockResolvedValue(makeFreshRequest());
+      prisma.serviceBooking.create.mockResolvedValue({ id: 'booking-uuid' });
+      prisma.payment.findUnique.mockResolvedValue(null);
+      prisma.payment.create.mockResolvedValue({ id: 'payment-uuid' });
+      runTransaction();
+      const before = Date.now();
+
+      await service.accept(CLIENT_ID, QUOTE_ID);
+
+      const { data } = prisma.serviceBooking.create.mock.calls[0][0];
+      const hoursToPay = (data.expiresAt.getTime() - before) / HOUR_MS;
+      expect(hoursToPay).toBeGreaterThanOrEqual(24);
+      expect(hoursToPay).toBeLessThan(24.01);
+      expect(data.scheduledFor).toEqual(PREFERRED_DATE);
+    });
+
+    it.each([
+      [
+        'o orçamento expirou entretanto',
+        makeFreshQuote({ expiresAt: new Date(Date.now() - 1000) }),
+        makeFreshRequest(),
+      ],
+      [
+        'o pedido expirou entretanto',
+        makeFreshQuote(),
+        makeFreshRequest({ expiresAt: new Date(Date.now() - 1000) }),
+      ],
+      [
+        'o serviço saiu do catálogo',
+        makeFreshQuote(),
+        makeFreshRequest({
+          service: {
+            status: ServiceStatus.DELETED,
+            provider: { listingsSuspendedUntil: null },
+          },
+        }),
+      ],
+      [
+        'o provider está suspenso por strikes',
+        makeFreshQuote(),
+        makeFreshRequest({
+          service: {
+            status: ServiceStatus.ACTIVE,
+            provider: {
+              listingsSuspendedUntil: new Date(Date.now() + HOUR_MS),
+            },
+          },
+        }),
+      ],
+    ])(
+      'recusa dentro da transacção quando %s',
+      async (_label, freshQuote, freshRequest) => {
+        prisma.serviceQuote.findUnique
+          .mockResolvedValueOnce(makeQuote())
+          .mockResolvedValueOnce(freshQuote);
+        prisma.serviceRequest.findUnique.mockResolvedValue(freshRequest);
+        runTransaction();
+
+        await expect(service.accept(CLIENT_ID, QUOTE_ID)).rejects.toThrow(
+          BadRequestException,
+        );
+
+        expect(prisma.serviceBooking.create).not.toHaveBeenCalled();
+        expect(prisma.payment.create).not.toHaveBeenCalled();
+        expect(notifier.quoteAccepted).not.toHaveBeenCalled();
+      },
+    );
+
+    it('aceita um orçamento de um provider cuja suspensão já acabou', async () => {
+      prisma.serviceQuote.findUnique
+        .mockResolvedValueOnce(makeQuote())
+        .mockResolvedValueOnce(makeFreshQuote())
+        .mockResolvedValue(makeQuote({ status: ServiceQuoteStatus.ACCEPTED }));
+      prisma.serviceRequest.findUnique.mockResolvedValue(
+        makeFreshRequest({
+          service: {
+            status: ServiceStatus.ACTIVE,
+            provider: {
+              listingsSuspendedUntil: new Date(Date.now() - HOUR_MS),
+            },
+          },
+        }),
+      );
+      prisma.serviceBooking.create.mockResolvedValue({ id: 'booking-uuid' });
+      prisma.payment.findUnique.mockResolvedValue(null);
+      prisma.payment.create.mockResolvedValue({ id: 'payment-uuid' });
+      runTransaction();
+
+      await expect(service.accept(CLIENT_ID, QUOTE_ID)).resolves.toBeDefined();
+    });
+
+    it('troca o conflito de escrita do Postgres por um 400 limpo', async () => {
+      prisma.serviceQuote.findUnique.mockResolvedValue(makeQuote());
+      prisma.$transaction.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('conflito', {
+          code: 'P2034',
+          clientVersion: 'test',
+        }),
+      );
+
+      await expect(service.accept(CLIENT_ID, QUOTE_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(audit.record).not.toHaveBeenCalled();
     });
 
     it('rejeita não-dono do request', async () => {
@@ -396,12 +580,9 @@ describe('ServiceQuotesService', () => {
       const dbError = new Error('DB failure during booking create');
       prisma.$transaction.mockImplementation(
         async (cb: (tx: typeof prisma) => Promise<unknown>) => {
-          prisma.serviceRequest.findUnique.mockResolvedValueOnce({
-            id: REQUEST_ID,
-            clientId: CLIENT_ID,
-            status: ServiceRequestStatus.QUOTED,
-            serviceId: SERVICE_ID,
-          });
+          prisma.serviceRequest.findUnique.mockResolvedValueOnce(
+            makeFreshRequest(),
+          );
           prisma.serviceQuote.update.mockResolvedValue({});
           prisma.serviceQuote.updateMany.mockResolvedValue({ count: 0 });
           prisma.serviceRequest.update.mockResolvedValue({});
@@ -506,12 +687,49 @@ describe('ServiceQuotesService', () => {
         status: ServiceQuoteStatus.PENDING,
         request: { clientId: CLIENT_ID },
       });
-      prisma.serviceQuote.update.mockResolvedValue(
+      prisma.serviceQuote.updateMany.mockResolvedValue({ count: 1 });
+      prisma.serviceQuote.findUniqueOrThrow.mockResolvedValue(
         makeQuote({ status: ServiceQuoteStatus.REJECTED }),
       );
 
       const result = await service.reject(CLIENT_ID, QUOTE_ID);
       expect(result.data.status).toBe(ServiceQuoteStatus.REJECTED);
+    });
+
+    it('reject: recusa se o orçamento foi aceite entre a leitura e a escrita', async () => {
+      prisma.serviceQuote.findUnique.mockResolvedValue({
+        id: QUOTE_ID,
+        status: ServiceQuoteStatus.PENDING,
+        request: { clientId: CLIENT_ID },
+      });
+      prisma.serviceQuote.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.reject(CLIENT_ID, QUOTE_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+
+      expect(prisma.serviceQuote.updateMany).toHaveBeenCalledWith({
+        where: { id: QUOTE_ID, status: ServiceQuoteStatus.PENDING },
+        data: { status: ServiceQuoteStatus.REJECTED },
+      });
+    });
+
+    it('withdraw: recusa se o orçamento foi aceite entre a leitura e a escrita', async () => {
+      prisma.serviceQuote.findUnique.mockResolvedValue({
+        id: QUOTE_ID,
+        providerId: PROVIDER_ID,
+        status: ServiceQuoteStatus.PENDING,
+      });
+      prisma.serviceQuote.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.withdraw(PROVIDER_ID, QUOTE_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+
+      expect(prisma.serviceQuote.updateMany).toHaveBeenCalledWith({
+        where: { id: QUOTE_ID, status: ServiceQuoteStatus.PENDING },
+        data: { status: ServiceQuoteStatus.WITHDRAWN },
+      });
     });
 
     it('reject: outro user é proibido', async () => {
@@ -531,7 +749,8 @@ describe('ServiceQuotesService', () => {
         providerId: PROVIDER_ID,
         status: ServiceQuoteStatus.PENDING,
       });
-      prisma.serviceQuote.update.mockResolvedValue(
+      prisma.serviceQuote.updateMany.mockResolvedValue({ count: 1 });
+      prisma.serviceQuote.findUniqueOrThrow.mockResolvedValue(
         makeQuote({ status: ServiceQuoteStatus.WITHDRAWN }),
       );
 

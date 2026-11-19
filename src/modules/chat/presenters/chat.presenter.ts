@@ -44,6 +44,8 @@ export class ChatPresenter {
       lastMessage: conv.lastMessage ?? null,
       lastMessageAt: conv.lastMessageAt ?? null,
       createdAt: conv.createdAt,
+      // Mensagens do outro por ler. Só vem contado na lista de conversas.
+      unreadCount: conv._count?.messages ?? 0,
     };
   }
 

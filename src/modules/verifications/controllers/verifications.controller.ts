@@ -31,7 +31,7 @@ import { VerificationsService } from '../services/verifications.service';
 export class VerificationsController {
   constructor(private readonly verifications: VerificationsService) {}
 
-  // ─── Utilizador autenticado ───────────────────────────────────────────────
+  // Utilizador autenticado
 
   @UseGuards(JwtAuthGuard)
   @Post('users/me/verification')
@@ -67,7 +67,7 @@ export class VerificationsController {
     return this.verifications.getMyStatus(user.id);
   }
 
-  // ─── Admin ────────────────────────────────────────────────────────────────
+  // Admin
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)

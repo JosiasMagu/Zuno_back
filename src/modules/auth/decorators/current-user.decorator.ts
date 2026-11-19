@@ -4,6 +4,8 @@ import { UserRole } from '@prisma/client';
 
 export type CurrentAuthUser = {
   id: string;
+  /** A sessão a que pertence o access token do pedido. */
+  sessionId: string;
   name?: string;
   phone?: string;
   email?: string | null;

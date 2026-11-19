@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ServiceQuoteStatus, ServiceRequestStatus } from '@prisma/client';
 
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { ServiceBookingsService } from '../services/service-bookings.service';
 import { ServicesScheduler } from './services.scheduler';
 
 const makePrisma = () => ({
@@ -12,6 +13,7 @@ const makePrisma = () => ({
 describe('ServicesScheduler', () => {
   let scheduler: ServicesScheduler;
   let prisma: ReturnType<typeof makePrisma>;
+  const serviceBookings = { expireUnpaid: jest.fn() };
   const originalNodeEnv = process.env.NODE_ENV;
 
   beforeEach(async () => {
@@ -20,6 +22,7 @@ describe('ServicesScheduler', () => {
       providers: [
         ServicesScheduler,
         { provide: PrismaService, useValue: prisma },
+        { provide: ServiceBookingsService, useValue: serviceBookings },
       ],
     }).compile();
     scheduler = module.get(ServicesScheduler);
@@ -35,6 +38,34 @@ describe('ServicesScheduler', () => {
     await scheduler.expireStaleEntities();
     expect(prisma.serviceQuote.updateMany).not.toHaveBeenCalled();
     expect(prisma.serviceRequest.updateMany).not.toHaveBeenCalled();
+  });
+
+  describe('reservas de serviço por pagar', () => {
+    it('em NODE_ENV=test não corre', async () => {
+      process.env.NODE_ENV = 'test';
+
+      await scheduler.expireUnpaidBookings();
+
+      expect(serviceBookings.expireUnpaid).not.toHaveBeenCalled();
+    });
+
+    it('pede ao serviço das reservas que expire as que passaram o prazo', async () => {
+      process.env.NODE_ENV = 'development';
+      serviceBookings.expireUnpaid.mockResolvedValue(2);
+
+      await scheduler.expireUnpaidBookings();
+
+      expect(serviceBookings.expireUnpaid).toHaveBeenCalledTimes(1);
+    });
+
+    it('não deixa uma falha rebentar o agendador', async () => {
+      process.env.NODE_ENV = 'development';
+      serviceBookings.expireUnpaid.mockRejectedValue(
+        new Error('base em baixo'),
+      );
+
+      await expect(scheduler.expireUnpaidBookings()).resolves.toBeUndefined();
+    });
   });
 
   it('expira quotes PENDING com expiresAt no passado', async () => {

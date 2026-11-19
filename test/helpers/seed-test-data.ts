@@ -4,6 +4,11 @@ import { getTestPrisma } from './db';
 
 export const TEST_PASSWORD = 'TestPass@2026!';
 
+/** Hash da password dos utilizadores de teste, com o custo que os testes usam. */
+export function hashTestPassword(): Promise<string> {
+  return bcrypt.hash(TEST_PASSWORD, Number(process.env.PASSWORD_HASH_ROUNDS));
+}
+
 export interface TestUserSeed {
   id: string;
   phone: string;
@@ -30,7 +35,7 @@ export interface TestSeedResult {
 
 export async function seedMinimalTestData(): Promise<TestSeedResult> {
   const prisma = getTestPrisma();
-  const passwordHash = await bcrypt.hash(TEST_PASSWORD, 10);
+  const passwordHash = await hashTestPassword();
 
   const admin = await prisma.user.create({
     data: {

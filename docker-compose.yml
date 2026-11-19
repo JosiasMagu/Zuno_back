@@ -1,3 +1,5 @@
+x-database-url: &database-url postgresql://${POSTGRES_USER:-zuno}:${POSTGRES_PASSWORD:-zuno}@postgres:5432/${POSTGRES_DB:-zuno_db}?schema=public
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -15,6 +17,17 @@ services:
       timeout: 3s
       retries: 10
 
+  migrate:
+    build:
+      context: .
+      target: migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: *database-url
+    restart: "no"
+
   api:
     build:
       context: .
@@ -22,12 +35,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-zuno}:${POSTGRES_PASSWORD:-zuno}@postgres:5432/${POSTGRES_DB:-zuno_db}?schema=public
+      DATABASE_URL: *database-url
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
       JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}

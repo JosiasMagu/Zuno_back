@@ -8,13 +8,20 @@ import { UserRole } from '@prisma/client';
 
 import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { PushService } from '../../../shared/push/push.service';
+import { PasswordConfirmationService } from '../../auth/services/password-confirmation.service';
+import { SessionsService } from '../../auth/services/sessions.service';
 import { UsersService } from './users.service';
 
 const USER_ID = 'user-uuid-001';
 const OTHER_USER_ID = 'user-uuid-002';
+const SESSION_ID = 'session-uuid-001';
 const PHONE = '+258840000001';
 const EMAIL = 'zuno@zuno.co.mz';
+const PASSWORD = 'gerador-amarelo';
 const PAYOUT_MSISDN = '+258841234567';
+const PREVIOUS_PAYOUT_MSISDN = '+258850000009';
+const PUSH_TOKEN = 'ExponentPushToken[abc]';
 
 const makeUser = (overrides: Record<string, unknown> = {}) => ({
   id: USER_ID,
@@ -51,26 +58,47 @@ const makePublicUser = (overrides: Record<string, unknown> = {}) => ({
 const makePrisma = () => ({
   user: {
     findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
     update: jest.fn(),
   },
 });
 
 const makeAudit = () => ({ record: jest.fn() });
 
+const makeSessions = () => ({ revokeAllForUser: jest.fn() });
+
+const makePasswordConfirmation = () => ({
+  confirm: jest.fn().mockResolvedValue({ phone: PHONE }),
+});
+
+const makePush = () => ({ send: jest.fn().mockResolvedValue(undefined) });
+
 describe('UsersService', () => {
   let service: UsersService;
   let prisma: ReturnType<typeof makePrisma>;
   let audit: ReturnType<typeof makeAudit>;
+  let sessions: ReturnType<typeof makeSessions>;
+  let passwordConfirmation: ReturnType<typeof makePasswordConfirmation>;
+  let push: ReturnType<typeof makePush>;
 
   beforeEach(async () => {
     prisma = makePrisma();
     audit = makeAudit();
+    sessions = makeSessions();
+    passwordConfirmation = makePasswordConfirmation();
+    push = makePush();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UsersService,
         { provide: PrismaService, useValue: prisma },
         { provide: AuditService, useValue: audit },
+        { provide: SessionsService, useValue: sessions },
+        {
+          provide: PasswordConfirmationService,
+          useValue: passwordConfirmation,
+        },
+        { provide: PushService, useValue: push },
       ],
     }).compile();
 
@@ -106,12 +134,15 @@ describe('UsersService', () => {
       expect(result.data.totalRating).toBeNull();
     });
 
-    it('devolve totalRating como número quando existe', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser({ totalRating: 4.5 }));
+    it('devolve em totalRating a nota como provider, e à parte a de cliente', async () => {
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser({ providerRating: 4.5, clientRating: 3 }),
+      );
 
       const result = await service.getMe(USER_ID);
 
       expect(result.data.totalRating).toBe(4.5);
+      expect(result.data.clientRating).toBe(3);
     });
 
     it('devolve totalReviews como 0 quando não há avaliações', async () => {
@@ -247,42 +278,7 @@ describe('UsersService', () => {
       expect(updateCall.data.avatarUrl).toBeNull();
     });
 
-    it('guarda payoutMsisdn (número M-Pesa) com trim()', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser());
-      prisma.user.update.mockResolvedValue(
-        makeUser({ payoutMsisdn: PAYOUT_MSISDN }),
-      );
-
-      await service.updateMe(USER_ID, { payoutMsisdn: `  ${PAYOUT_MSISDN}  ` });
-
-      const updateCall = prisma.user.update.mock.calls[0][0];
-      expect(updateCall.data.payoutMsisdn).toBe(PAYOUT_MSISDN);
-    });
-
-    it('guarda payoutMsisdn como null quando string vazia é fornecida', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser());
-      prisma.user.update.mockResolvedValue(makeUser({ payoutMsisdn: null }));
-
-      await service.updateMe(USER_ID, { payoutMsisdn: '   ' });
-
-      const updateCall = prisma.user.update.mock.calls[0][0];
-      expect(updateCall.data.payoutMsisdn).toBeNull();
-    });
-
-    it('a resposta do updateMe expõe payoutMsisdn', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser());
-      prisma.user.update.mockResolvedValue(
-        makeUser({ payoutMsisdn: PAYOUT_MSISDN }),
-      );
-
-      const result = await service.updateMe(USER_ID, {
-        payoutMsisdn: PAYOUT_MSISDN,
-      });
-
-      expect(result.data.payoutMsisdn).toBe(PAYOUT_MSISDN);
-    });
-
-    it('não inclui payoutMsisdn no data do update quando não fornecido', async () => {
+    it('nunca escreve o payoutMsisdn, que tem a sua própria rota', async () => {
       prisma.user.findUnique.mockResolvedValue(makeUser());
       prisma.user.update.mockResolvedValue(makeUser());
 
@@ -423,6 +419,101 @@ describe('UsersService', () => {
     });
   });
 
+  describe('changePayoutNumber()', () => {
+    const dto = { payoutMsisdn: PAYOUT_MSISDN, currentPassword: PASSWORD };
+
+    const change = () => service.changePayoutNumber(USER_ID, SESSION_ID, dto);
+
+    beforeEach(() => {
+      prisma.user.findUniqueOrThrow.mockResolvedValue(
+        makeUser({
+          payoutMsisdn: PREVIOUS_PAYOUT_MSISDN,
+          pushToken: PUSH_TOKEN,
+        }),
+      );
+      prisma.user.update.mockResolvedValue(
+        makeUser({ payoutMsisdn: PAYOUT_MSISDN }),
+      );
+    });
+
+    it('confirma a password actual e guarda o número novo', async () => {
+      const result = await change();
+
+      expect(passwordConfirmation.confirm).toHaveBeenCalledWith(
+        USER_ID,
+        PASSWORD,
+        'PAYOUT_NUMBER_CHANGE',
+      );
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        data: { payoutMsisdn: PAYOUT_MSISDN },
+      });
+      expect(result.message).toBe('Número de recebimento actualizado.');
+      expect(result.data.payoutMsisdn).toBe(PAYOUT_MSISDN);
+    });
+
+    it('regista em auditoria o número anterior, o novo e a sessão', async () => {
+      await change();
+
+      expect(audit.record).toHaveBeenCalledWith({
+        action: 'USER_PAYOUT_NUMBER_CHANGED',
+        actorId: USER_ID,
+        targetType: 'User',
+        targetId: USER_ID,
+        metadata: {
+          previous: PREVIOUS_PAYOUT_MSISDN,
+          current: PAYOUT_MSISDN,
+          sessionId: SESSION_ID,
+        },
+      });
+    });
+
+    it('avisa o aparelho do dono, só com os últimos dígitos do número', async () => {
+      await change();
+
+      const [notification] = push.send.mock.calls[0] as [
+        { to: string; body: string },
+      ];
+      expect(notification.to).toBe(PUSH_TOKEN);
+      expect(notification.body).toContain('4567');
+      expect(notification.body).not.toContain(PAYOUT_MSISDN);
+    });
+
+    it('não envia push a uma conta sem aparelho registado', async () => {
+      prisma.user.findUniqueOrThrow.mockResolvedValue(
+        makeUser({ pushToken: null }),
+      );
+
+      await change();
+
+      expect(push.send).not.toHaveBeenCalled();
+    });
+
+    it('não mexe em nada quando a password actual é recusada', async () => {
+      passwordConfirmation.confirm.mockRejectedValue(
+        new BadRequestException('Password actual incorrecta.'),
+      );
+
+      await expect(change()).rejects.toThrow(BadRequestException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+      expect(push.send).not.toHaveBeenCalled();
+    });
+
+    it('não regista nem avisa quando o número é o que já estava', async () => {
+      prisma.user.findUniqueOrThrow.mockResolvedValue(
+        makeUser({ payoutMsisdn: PAYOUT_MSISDN, pushToken: PUSH_TOKEN }),
+      );
+
+      const result = await change();
+
+      expect(result.data.payoutMsisdn).toBe(PAYOUT_MSISDN);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+      expect(push.send).not.toHaveBeenCalled();
+    });
+  });
+
   describe('getPublicProfile()', () => {
     it('devolve o perfil público com mensagem de sucesso', async () => {
       prisma.user.findUnique.mockResolvedValue(makePublicUser());
@@ -463,12 +554,13 @@ describe('UsersService', () => {
 
     it('expõe totalRating como número quando existe', async () => {
       prisma.user.findUnique.mockResolvedValue(
-        makePublicUser({ totalRating: 4.8 }),
+        makePublicUser({ providerRating: 4.8, clientRating: 2.5 }),
       );
 
       const result = await service.getPublicProfile(USER_ID);
 
       expect(result.data.totalRating).toBe(4.8);
+      expect(result.data.clientRating).toBe(2.5);
     });
 
     it('expõe totalRating como null quando não há avaliações', async () => {
@@ -554,6 +646,32 @@ describe('UsersService', () => {
       const result = await service.getPublicProfile(USER_ID);
 
       expect(result.data.avatarUrl).toBeNull();
+    });
+  });
+
+  describe('suspend()', () => {
+    const ADMIN_ID = 'admin-uuid-001';
+
+    it('desactiva a conta e termina todas as sessões dela', async () => {
+      prisma.user.findUnique.mockResolvedValue(makeUser());
+
+      const result = await service.suspend(ADMIN_ID, USER_ID, 'Fraude');
+
+      expect(result.message).toBe('Utilizador suspenso com sucesso.');
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        data: { isActive: false },
+      });
+      expect(sessions.revokeAllForUser).toHaveBeenCalledWith(USER_ID);
+    });
+
+    it('não toca nas sessões de uma conta que já estava suspensa', async () => {
+      prisma.user.findUnique.mockResolvedValue(makeUser({ isActive: false }));
+
+      await expect(service.suspend(ADMIN_ID, USER_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
     });
   });
 });

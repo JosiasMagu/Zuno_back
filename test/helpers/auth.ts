@@ -1,5 +1,9 @@
 import { INestApplication } from '@nestjs/common';
+import { UserRole } from '@prisma/client';
 import request from 'supertest';
+
+import { getTestPrisma } from './db';
+import { hashTestPassword, TEST_PASSWORD } from './seed-test-data';
 
 export interface LoginResult {
   accessToken: string;
@@ -39,6 +43,29 @@ export async function loginViaApi(
     refreshToken: body.refreshToken ?? '',
     userId: body.user.id,
   };
+}
+
+/**
+ * Cria e autentica um utilizador que não é parte de nenhuma reserva do teste,
+ * para provar que as rotas recusam quem não é cliente, dono nem admin.
+ */
+export async function loginAsOutsider(
+  app: INestApplication,
+  role: UserRole = UserRole.CLIENT,
+): Promise<LoginResult> {
+  const phone = '+258840000999';
+
+  await getTestPrisma().user.create({
+    data: {
+      phone,
+      name: 'Outsider E2E',
+      passwordHash: await hashTestPassword(),
+      role,
+      isVerified: true,
+    },
+  });
+
+  return loginViaApi(app, phone, TEST_PASSWORD);
 }
 
 export function authHeader(token: string): { Authorization: string } {

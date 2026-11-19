@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 
 import { AppModule } from '../src/app.module';
+import { paymentReceipt } from './helpers/booking-flow';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import {
   truncateAllTables,
@@ -15,6 +16,7 @@ import {
   TestSeedResult,
 } from './helpers/seed-test-data';
 import { loginViaApi, authHeader, LoginResult } from './helpers/auth';
+import { expectMoneyReconciles } from './helpers/reconciliation';
 
 describe('Happy Path E2E — equipment rental full flow', () => {
   let app: INestApplication;
@@ -52,6 +54,9 @@ describe('Happy Path E2E — equipment rental full flow', () => {
     clientAuth = await loginViaApi(app, seed.client.phone, TEST_PASSWORD);
     adminAuth = await loginViaApi(app, seed.admin.phone, TEST_PASSWORD);
   });
+
+  // No fim de cada teste, o dinheiro tem de bater certo.
+  afterEach(() => expectMoneyReconciles(app));
 
   afterAll(async () => {
     await app.close();
@@ -136,7 +141,7 @@ describe('Happy Path E2E — equipment rental full flow', () => {
     const markHeldRes = await request(httpServer)
       .patch(`/api/v1/payments/${paymentId}/mark-held`)
       .set(authHeader(adminAuth.accessToken))
-      .send({});
+      .send(await paymentReceipt(paymentId));
 
     expect(markHeldRes.status).toBe(200);
     expect(markHeldRes.body?.data?.status).toBe('HELD');

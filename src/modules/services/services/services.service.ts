@@ -8,13 +8,22 @@ import {
   AuditAction,
   CategoryKind,
   Prisma,
+  ServiceBookingStatus,
   ServicePricingType,
   ServiceStatus,
   UserRole,
 } from '@prisma/client';
 
 import { AuditService } from '../../../shared/audit/audit.service';
+import { categoryScope } from '../../../shared/categories/category-scope';
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { runSerializable } from '../../../shared/db/serializable-transaction';
+import {
+  changedFields,
+  ListingEditor,
+  returnsToReview,
+} from '../../../shared/moderation/listing-moderation';
+import { PushService } from '../../../shared/push/push.service';
 import { CreateServiceDto } from '../dto/create-service.dto';
 import {
   FindServicesQueryDto,
@@ -34,8 +43,8 @@ const PROVIDER_DETAIL_SELECT = {
   name: true,
   avatarUrl: true,
   bio: true,
-  totalRating: true,
-  totalReviews: true,
+  providerRating: true,
+  providerReviews: true,
 } as const;
 
 const CATEGORY_SELECT = {
@@ -49,20 +58,86 @@ const PHOTOS_ORDER = [
   { order: 'asc' as const },
 ];
 
+/**
+ * Quantos trabalhos do serviço chegaram ao fim. Conta-se nas reservas em vez
+ * de se guardar num contador, que ninguém mantinha e mostrava sempre zero.
+ */
+const COMPLETED_JOBS = {
+  select: { bookings: { where: { status: ServiceBookingStatus.COMPLETED } } },
+} satisfies Prisma.ServiceInclude['_count'];
+
+/** O anúncio como sai nas listas, públicas e do provider. */
+const LISTING_INCLUDE = {
+  provider: { select: PROVIDER_SELECT },
+  category: { select: CATEGORY_SELECT },
+  photos: { orderBy: PHOTOS_ORDER },
+  _count: COMPLETED_JOBS,
+} satisfies Prisma.ServiceInclude;
+
+/** O que uma edição precisa de saber do anúncio para ver o que muda. */
+const EDITABLE_SELECT = {
+  id: true,
+  providerId: true,
+  status: true,
+  title: true,
+  description: true,
+  categoryId: true,
+  basePrice: true,
+  pricingType: true,
+  estimatedHours: true,
+  location: true,
+  latitude: true,
+  longitude: true,
+  acceptsUrgent: true,
+  urgentSurcharge: true,
+} satisfies Prisma.ServiceSelect;
+
+/** O que um admin aprovou. Mudá-lo devolve o anúncio à revisão. */
+const MODERATED_FIELDS: readonly string[] = [
+  'title',
+  'description',
+  'categoryId',
+];
+
+/** Reservas em que o serviço ainda tem trabalho ou dinheiro por fechar. */
+const BOOKINGS_IN_PROGRESS: ServiceBookingStatus[] = [
+  ServiceBookingStatus.PENDING,
+  ServiceBookingStatus.IN_PROGRESS,
+  ServiceBookingStatus.DISPUTED,
+];
+
+const NOT_FOUND = 'Serviço não encontrado.';
+const UPDATED = 'Serviço atualizado com sucesso.';
+const SENT_TO_REVIEW =
+  'Alterações guardadas. Como mudou o que tinha sido aprovado, o anúncio volta à revisão antes de ficar público.';
+const RESUBMITTED =
+  'Alterações guardadas. O anúncio foi enviado de novo para revisão.';
+const REMOVAL_BLOCKED =
+  'Este serviço tem reservas em curso. Pausa o anúncio para não receber mais pedidos e remove-o quando elas terminarem.';
+
+/** Quantos anúncios por página nas listas do provider e do admin, por omissão. */
+const DEFAULT_LISTINGS_PAGE_SIZE = 50;
+
+interface ListingsPage {
+  page?: number;
+  limit?: number;
+}
+
 @Injectable()
 export class ServicesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly push: PushService,
   ) {}
 
   async create(providerId: string, dto: CreateServiceDto) {
     const categoryId = dto.categoryId.trim();
 
-    // Política D2: providers suspensos por strikes não publicam listagens.
+    // Providers suspensos por strikes não publicam listagens.
     const provider = await this.prisma.user.findUnique({
       where: { id: providerId },
-      select: { listingsSuspendedUntil: true },
+      select: { role: true, listingsSuspendedUntil: true },
     });
 
     if (
@@ -112,6 +187,16 @@ export class ServicesService {
     // Dev/staging: AUTO_APPROVE_SERVICES=true publica directamente como ACTIVE.
     const autoApprove = process.env.AUTO_APPROVE_SERVICES === 'true';
 
+    // Quem publica passa a PROVIDER, como no equipamento. O papel só serve à
+    // app para mostrar a área de provider: as permissões decidem-se pela
+    // posse do serviço e pela posição em cada reserva.
+    if (provider?.role === UserRole.CLIENT) {
+      await this.prisma.user.update({
+        where: { id: providerId },
+        data: { role: UserRole.PROVIDER },
+      });
+    }
+
     const service = await this.prisma.service.create({
       data: {
         providerId,
@@ -131,11 +216,7 @@ export class ServicesService {
           : ServiceStatus.PENDING_REVIEW,
         isActive: autoApprove,
       },
-      include: {
-        provider: { select: PROVIDER_SELECT },
-        category: { select: CATEGORY_SELECT },
-        photos: { orderBy: PHOTOS_ORDER },
-      },
+      include: LISTING_INCLUDE,
     });
 
     return {
@@ -164,6 +245,8 @@ export class ServicesService {
     const where: Prisma.ServiceWhereInput = {
       status: ServiceStatus.ACTIVE,
       isActive: true,
+      // Os anúncios de uma conta suspensa saem do catálogo enquanto durar.
+      provider: { isActive: true },
     };
 
     if (query.search?.trim()) {
@@ -178,14 +261,10 @@ export class ServicesService {
       ];
     }
 
-    if (query.categoryId?.trim()) {
-      where.categoryId = query.categoryId.trim();
-    }
-
-    if (query.categorySlug?.trim()) {
-      where.category = {
-        is: { slug: query.categorySlug.trim(), isActive: true },
-      };
+    // A categoria pedida e as que estão debaixo dela.
+    const categoryIds = await categoryScope(this.prisma, query);
+    if (categoryIds) {
+      where.categoryId = { in: categoryIds };
     }
 
     if (query.location?.trim()) {
@@ -210,11 +289,7 @@ export class ServicesService {
         skip,
         take: limit,
         orderBy,
-        include: {
-          provider: { select: PROVIDER_SELECT },
-          category: { select: CATEGORY_SELECT },
-          photos: { orderBy: PHOTOS_ORDER },
-        },
+        include: LISTING_INCLUDE,
       }),
       this.prisma.service.count({ where }),
     ]);
@@ -235,11 +310,16 @@ export class ServicesService {
 
   async findOne(id: string) {
     const service = await this.prisma.service.findFirst({
-      where: { id, status: ServiceStatus.ACTIVE },
+      where: {
+        id,
+        status: ServiceStatus.ACTIVE,
+        provider: { isActive: true },
+      },
       include: {
         provider: { select: PROVIDER_DETAIL_SELECT },
         category: { select: CATEGORY_SELECT },
         photos: { orderBy: PHOTOS_ORDER },
+        _count: COMPLETED_JOBS,
       },
     });
 
@@ -253,7 +333,39 @@ export class ServicesService {
     };
   }
 
-  async findMyListings(userId: string) {
+  /**
+   * O anúncio como o provider o vê, em qualquer estado menos removido. O
+   * detalhe público só mostra anúncios activos, por isso é daqui que a app
+   * lê um anúncio em revisão ou rejeitado para o editar.
+   */
+  async findMine(userId: string, id: string) {
+    const service = await this.prisma.service.findUnique({
+      where: { id },
+      include: {
+        provider: { select: PROVIDER_DETAIL_SELECT },
+        category: { select: CATEGORY_SELECT },
+        photos: { orderBy: PHOTOS_ORDER },
+        _count: COMPLETED_JOBS,
+      },
+    });
+
+    if (!service || service.status === ServiceStatus.DELETED) {
+      throw new NotFoundException(NOT_FOUND);
+    }
+
+    await this.managerRoleOf(
+      userId,
+      service.providerId,
+      'Não tens permissão para ver este anúncio.',
+    );
+
+    return {
+      message: 'Serviço obtido com sucesso.',
+      data: ServicePresenter.toProviderDetails(service),
+    };
+  }
+
+  async findMyListings(userId: string, query: ListingsPage = {}) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, role: true },
@@ -263,41 +375,28 @@ export class ServicesService {
       throw new NotFoundException('Utilizador não encontrado.');
     }
 
+    // Um anúncio removido deixa de aparecer, como nos equipamentos.
     const where: Prisma.ServiceWhereInput =
-      user.role === UserRole.ADMIN ? {} : { providerId: userId };
-
-    const items = await this.prisma.service.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        provider: { select: PROVIDER_SELECT },
-        category: { select: CATEGORY_SELECT },
-        photos: { orderBy: PHOTOS_ORDER },
-      },
-    });
+      user.role === UserRole.ADMIN
+        ? { status: { not: ServiceStatus.DELETED } }
+        : { providerId: userId, status: { not: ServiceStatus.DELETED } };
 
     return {
       message: 'Serviços obtidos com sucesso.',
-      data: items.map((item) => ServicePresenter.toProviderListingItem(item)),
+      ...(await this.listingsPage(where, { createdAt: 'desc' }, query)),
     };
   }
 
-  async findPending(adminId: string) {
+  async findPending(adminId: string, query: ListingsPage = {}) {
     await this.assertAdmin(adminId);
-
-    const items = await this.prisma.service.findMany({
-      where: { status: ServiceStatus.PENDING_REVIEW },
-      orderBy: { createdAt: 'asc' },
-      include: {
-        provider: { select: PROVIDER_SELECT },
-        category: { select: CATEGORY_SELECT },
-        photos: { orderBy: PHOTOS_ORDER },
-      },
-    });
 
     return {
       message: 'Serviços pendentes de revisão obtidos com sucesso.',
-      data: items.map((item) => ServicePresenter.toProviderListingItem(item)),
+      ...(await this.listingsPage(
+        { status: ServiceStatus.PENDING_REVIEW },
+        { createdAt: 'asc' },
+        query,
+      )),
     };
   }
 
@@ -306,7 +405,11 @@ export class ServicesService {
 
     const service = await this.prisma.service.findUnique({
       where: { id: serviceId },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        provider: { select: { listingsSuspendedUntil: true } },
+      },
     });
 
     if (!service) {
@@ -323,14 +426,31 @@ export class ServicesService {
       );
     }
 
+    const suspendedUntil = service.provider?.listingsSuspendedUntil;
+    const providerIsSuspended = !!suspendedUntil && suspendedUntil > new Date();
+
     const updated = await this.prisma.service.update({
       where: { id: serviceId },
-      data: { status: ServiceStatus.ACTIVE, isActive: true },
+      data: {
+        status: ServiceStatus.ACTIVE,
+        // A aprovação não desfaz uma suspensão por strikes: o anúncio fica
+        // aprovado, mas pausado até a suspensão acabar.
+        isActive: !providerIsSuspended,
+        rejectionReason: null,
+        rejectedAt: null,
+      },
       include: {
-        provider: { select: PROVIDER_SELECT },
+        provider: { select: { ...PROVIDER_SELECT, pushToken: true } },
         category: { select: CATEGORY_SELECT },
         photos: { orderBy: PHOTOS_ORDER },
+        _count: COMPLETED_JOBS,
       },
+    });
+
+    this.notifyProvider(updated.provider?.pushToken, {
+      title: 'Serviço aprovado',
+      body: `"${updated.title}" já está visível no catálogo público.`,
+      data: { type: 'service_approved', serviceId },
     });
 
     await this.audit.record({
@@ -369,14 +489,31 @@ export class ServicesService {
       );
     }
 
+    const rejectionReason = reason?.trim() || null;
+
     const updated = await this.prisma.service.update({
       where: { id: serviceId },
-      data: { status: ServiceStatus.REJECTED, isActive: false },
+      data: {
+        status: ServiceStatus.REJECTED,
+        isActive: false,
+        // Fica no anúncio para o provider saber o que corrigir.
+        rejectionReason,
+        rejectedAt: new Date(),
+      },
       include: {
-        provider: { select: PROVIDER_SELECT },
+        provider: { select: { ...PROVIDER_SELECT, pushToken: true } },
         category: { select: CATEGORY_SELECT },
         photos: { orderBy: PHOTOS_ORDER },
+        _count: COMPLETED_JOBS,
       },
+    });
+
+    this.notifyProvider(updated.provider?.pushToken, {
+      title: 'Anúncio rejeitado',
+      body: rejectionReason
+        ? `"${updated.title}" não foi aprovado. Motivo: ${rejectionReason.replace(/\.+$/, '')}. Corrige o anúncio e guarda para pedir nova revisão.`
+        : `"${updated.title}" não foi aprovado. Corrige o anúncio e guarda para pedir nova revisão.`,
+      data: { type: 'service_rejected', serviceId },
     });
 
     await this.audit.record({
@@ -387,13 +524,13 @@ export class ServicesService {
       metadata: {
         previousStatus: service.status,
         title: updated.title,
-        reason: reason ?? null,
+        reason: rejectionReason,
       },
     });
 
     return {
-      message: reason
-        ? `Serviço rejeitado. Motivo: ${reason}`
+      message: rejectionReason
+        ? `Serviço rejeitado. Motivo: ${rejectionReason}`
         : 'Serviço rejeitado.',
       data: ServicePresenter.toProviderListingItem(updated),
     };
@@ -433,14 +570,14 @@ export class ServicesService {
       );
     }
 
+    if (!service.isActive && user.role !== UserRole.ADMIN) {
+      await this.assertProviderMayReopenListings(service.providerId);
+    }
+
     const updated = await this.prisma.service.update({
       where: { id: serviceId },
       data: { isActive: !service.isActive },
-      include: {
-        provider: { select: PROVIDER_SELECT },
-        category: { select: CATEGORY_SELECT },
-        photos: { orderBy: PHOTOS_ORDER },
-      },
+      include: LISTING_INCLUDE,
     });
 
     return {
@@ -451,56 +588,32 @@ export class ServicesService {
     };
   }
 
+  /**
+   * Edita um anúncio. Só conta o que muda de facto. Mudar o que um admin
+   * aprovou devolve o anúncio à revisão, e qualquer mudança num anúncio
+   * rejeitado pede nova revisão.
+   */
   async update(userId: string, id: string, dto: UpdateServiceDto) {
     const existing = await this.prisma.service.findUnique({
       where: { id },
-      select: {
-        id: true,
-        providerId: true,
-        acceptsUrgent: true,
-        urgentSurcharge: true,
-      },
+      select: EDITABLE_SELECT,
     });
 
-    if (!existing) {
-      throw new NotFoundException('Serviço não encontrado.');
+    if (!existing || existing.status === ServiceStatus.DELETED) {
+      throw new NotFoundException(NOT_FOUND);
     }
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, role: true },
-    });
+    const editorRole = await this.managerRoleOf(
+      userId,
+      existing.providerId,
+      'Não tens permissão para editar este serviço.',
+    );
 
-    if (!user) {
-      throw new NotFoundException('Utilizador não encontrado.');
-    }
+    const patch = this.toPatch(dto);
+    const changed = changedFields(existing, patch);
 
-    const canManage =
-      user.role === UserRole.ADMIN || existing.providerId === userId;
-
-    if (!canManage) {
-      throw new ForbiddenException(
-        'Não tens permissão para editar este serviço.',
-      );
-    }
-
-    if (dto.categoryId !== undefined) {
-      const category = await this.prisma.category.findFirst({
-        where: { id: dto.categoryId.trim(), isActive: true },
-      });
-
-      if (!category) {
-        throw new BadRequestException('Categoria não encontrada ou inativa.');
-      }
-
-      if (
-        category.kind !== CategoryKind.SERVICE &&
-        category.kind !== CategoryKind.BOTH
-      ) {
-        throw new BadRequestException(
-          'Esta categoria não está marcada para serviços.',
-        );
-      }
+    if (patch.categoryId !== undefined && changed.includes('categoryId')) {
+      await this.assertServiceCategory(patch.categoryId);
     }
 
     const willAcceptUrgent = dto.acceptsUrgent ?? existing.acceptsUrgent;
@@ -519,45 +632,219 @@ export class ServicesService {
       );
     }
 
+    const backToReview = returnsToReview({
+      status: existing.status,
+      editor: this.editorOf(editorRole),
+      changed: changed.length > 0,
+      moderatedContentChanged: changed.some((field) =>
+        MODERATED_FIELDS.includes(field),
+      ),
+    });
+
     const updated = await this.prisma.service.update({
       where: { id },
       data: {
-        title: dto.title?.trim(),
-        description: dto.description?.trim(),
-        categoryId: dto.categoryId?.trim(),
-        basePrice: dto.basePrice,
-        pricingType: dto.pricingType,
-        estimatedHours: dto.estimatedHours,
-        location: dto.location?.trim(),
-        latitude: dto.latitude,
-        longitude: dto.longitude,
-        acceptsUrgent: dto.acceptsUrgent,
+        ...patch,
         urgentSurcharge:
           dto.acceptsUrgent === false ? null : dto.urgentSurcharge,
+        ...(backToReview ? { status: ServiceStatus.PENDING_REVIEW } : {}),
       },
-      include: {
-        provider: { select: PROVIDER_SELECT },
-        category: { select: CATEGORY_SELECT },
-        photos: { orderBy: PHOTOS_ORDER },
-      },
+      include: LISTING_INCLUDE,
     });
 
+    if (backToReview) {
+      await this.audit.record({
+        action: AuditAction.SERVICE_SENT_TO_REVIEW,
+        actorId: userId,
+        targetType: 'Service',
+        targetId: id,
+        metadata: {
+          previousStatus: existing.status,
+          changed,
+          title: updated.title,
+        },
+      });
+    }
+
     return {
-      message: 'Serviço atualizado com sucesso.',
+      message: this.editMessage(backToReview, existing.status),
       data: ServicePresenter.toProviderListingItem(updated),
     };
+  }
+
+  /**
+   * As fotos de um anúncio mudaram. Uma foto nova é conteúdo que nenhum
+   * admin viu, por isso conta como mudar o que foi aprovado. Devolve true
+   * quando o anúncio voltou à revisão.
+   */
+  async reviewAfterPhotoChange(change: {
+    actorId: string;
+    actorRole: UserRole;
+    service: { id: string; status: ServiceStatus };
+    addedPhotos: boolean;
+  }): Promise<boolean> {
+    const { service } = change;
+
+    const backToReview = returnsToReview({
+      status: service.status,
+      editor: this.editorOf(change.actorRole),
+      changed: true,
+      moderatedContentChanged: change.addedPhotos,
+    });
+
+    if (!backToReview) {
+      return false;
+    }
+
+    await this.prisma.service.update({
+      where: { id: service.id },
+      data: { status: ServiceStatus.PENDING_REVIEW },
+    });
+
+    await this.audit.record({
+      action: AuditAction.SERVICE_SENT_TO_REVIEW,
+      actorId: change.actorId,
+      targetType: 'Service',
+      targetId: service.id,
+      metadata: { previousStatus: service.status, changed: ['photos'] },
+    });
+
+    return true;
   }
 
   async remove(userId: string, id: string) {
     const existing = await this.prisma.service.findUnique({
       where: { id },
-      select: { id: true, providerId: true },
+      select: { id: true, providerId: true, status: true },
     });
 
-    if (!existing) {
-      throw new NotFoundException('Serviço não encontrado.');
+    if (!existing || existing.status === ServiceStatus.DELETED) {
+      throw new NotFoundException(NOT_FOUND);
     }
 
+    const actorRole = await this.managerRoleOf(
+      userId,
+      existing.providerId,
+      'Não tens permissão para remover este serviço.',
+    );
+
+    // Dentro da transacção, para não se cruzar com um orçamento que é
+    // aceite ao mesmo tempo.
+    await runSerializable(
+      this.prisma,
+      async (tx) => {
+        const inProgress = await tx.serviceBooking.count({
+          where: { serviceId: id, status: { in: BOOKINGS_IN_PROGRESS } },
+        });
+
+        if (inProgress > 0) {
+          throw new BadRequestException(REMOVAL_BLOCKED);
+        }
+
+        await tx.service.update({
+          where: { id },
+          data: { status: ServiceStatus.DELETED, isActive: false },
+        });
+      },
+      () =>
+        new BadRequestException(
+          'Entrou uma reserva enquanto removias o serviço. Actualiza e tenta de novo.',
+        ),
+    );
+
+    await this.audit.record({
+      action: AuditAction.SERVICE_REMOVED,
+      actorId: userId,
+      targetType: 'Service',
+      targetId: id,
+      metadata: {
+        actorRole,
+        providerWasSelf: existing.providerId === userId,
+      },
+    });
+
+    return { message: 'Serviço removido com sucesso.' };
+  }
+
+  /** Uma página de anúncios no formato das listas do provider e do admin. */
+  private async listingsPage(
+    where: Prisma.ServiceWhereInput,
+    orderBy: Prisma.ServiceOrderByWithRelationInput,
+    query: ListingsPage,
+  ) {
+    const page = query.page && query.page > 0 ? query.page : 1;
+    const limit =
+      query.limit && query.limit > 0 ? query.limit : DEFAULT_LISTINGS_PAGE_SIZE;
+
+    const [items, total] = await Promise.all([
+      this.prisma.service.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy,
+        include: LISTING_INCLUDE,
+      }),
+      this.prisma.service.count({ where }),
+    ]);
+
+    const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
+
+    return {
+      data: items.map((item) => ServicePresenter.toProviderListingItem(item)),
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+      },
+    };
+  }
+
+  /** A categoria existe, está activa e serve para serviços. */
+  private async assertServiceCategory(categoryId: string) {
+    const category = await this.prisma.category.findFirst({
+      where: { id: categoryId, isActive: true },
+    });
+
+    if (!category) {
+      throw new BadRequestException('Categoria não encontrada ou inativa.');
+    }
+
+    if (
+      category.kind !== CategoryKind.SERVICE &&
+      category.kind !== CategoryKind.BOTH
+    ) {
+      throw new BadRequestException(
+        'Esta categoria não está marcada para serviços.',
+      );
+    }
+  }
+
+  /**
+   * Quem edita: um admin, um provider que publica sem revisão (com a
+   * auto-aprovação ligada no ambiente, em desenvolvimento) ou outro provider.
+   */
+  private editorOf(role: UserRole): ListingEditor {
+    if (role === UserRole.ADMIN) {
+      return 'admin';
+    }
+
+    return process.env.AUTO_APPROVE_SERVICES === 'true'
+      ? 'trusted-owner'
+      : 'owner';
+  }
+
+  /**
+   * Confirma que quem pede é o provider do anúncio ou um admin, e devolve o
+   * papel dele.
+   */
+  private async managerRoleOf(
+    userId: string,
+    providerId: string,
+    forbiddenMessage: string,
+  ): Promise<UserRole> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, role: true },
@@ -567,32 +854,47 @@ export class ServicesService {
       throw new NotFoundException('Utilizador não encontrado.');
     }
 
-    const canManage =
-      user.role === UserRole.ADMIN || existing.providerId === userId;
-
-    if (!canManage) {
-      throw new ForbiddenException(
-        'Não tens permissão para remover este serviço.',
-      );
+    if (user.role !== UserRole.ADMIN && providerId !== userId) {
+      throw new ForbiddenException(forbiddenMessage);
     }
 
-    await this.prisma.service.update({
-      where: { id },
-      data: { status: ServiceStatus.DELETED, isActive: false },
-    });
+    return user.role;
+  }
 
-    await this.audit.record({
-      action: AuditAction.SERVICE_REMOVED,
-      actorId: userId,
-      targetType: 'Service',
-      targetId: id,
-      metadata: {
-        actorRole: user.role,
-        providerWasSelf: existing.providerId === userId,
-      },
-    });
+  /** O pedido de edição com os nomes das colunas. O que não veio fica undefined. */
+  private toPatch(dto: UpdateServiceDto) {
+    return {
+      title: dto.title?.trim(),
+      description: dto.description?.trim(),
+      categoryId: dto.categoryId?.trim(),
+      basePrice: dto.basePrice,
+      pricingType: dto.pricingType,
+      estimatedHours: dto.estimatedHours,
+      location: dto.location?.trim(),
+      latitude: dto.latitude,
+      longitude: dto.longitude,
+      acceptsUrgent: dto.acceptsUrgent,
+    };
+  }
 
-    return { message: 'Serviço removido com sucesso.' };
+  private editMessage(backToReview: boolean, previous: ServiceStatus) {
+    if (!backToReview) {
+      return UPDATED;
+    }
+
+    return previous === ServiceStatus.REJECTED ? RESUBMITTED : SENT_TO_REVIEW;
+  }
+
+  /** Aviso ao provider sobre a moderação. Se falhar, não trava a operação. */
+  private notifyProvider(
+    pushToken: string | null | undefined,
+    notice: { title: string; body: string; data: Record<string, string> },
+  ) {
+    if (!pushToken) {
+      return;
+    }
+
+    this.push.send({ to: pushToken, ...notice }).catch(() => {});
   }
 
   private buildOrderBy(
@@ -606,7 +908,13 @@ export class ServicesService {
         return [{ basePrice: 'desc' }, { createdAt: 'desc' }];
 
       case ServiceSortBy.RELEVANT:
-        return [{ totalCompleted: 'desc' }, { createdAt: 'desc' }];
+        // Os mais avaliados e os de melhor nota primeiro. O contador de
+        // trabalhos concluídos nunca foi mantido.
+        return [
+          { totalReviews: 'desc' },
+          { totalRating: { sort: 'desc', nulls: 'last' } },
+          { createdAt: 'desc' },
+        ];
 
       case ServiceSortBy.NEAREST:
       case ServiceSortBy.NEWEST:
@@ -617,6 +925,26 @@ export class ServicesService {
 
   // Defesa em profundidade: além do RolesGuard no controller, os métodos
   // de moderação revalidam o role na base de dados.
+  /**
+   * Um provider com os anúncios suspensos por strikes não reabre um serviço
+   * antes de a suspensão acabar.
+   */
+  private async assertProviderMayReopenListings(providerId: string) {
+    const provider = await this.prisma.user.findUnique({
+      where: { id: providerId },
+      select: { listingsSuspendedUntil: true },
+    });
+
+    if (
+      provider?.listingsSuspendedUntil &&
+      provider.listingsSuspendedUntil > new Date()
+    ) {
+      throw new ForbiddenException(
+        'Os teus anúncios estão suspensos por cancelamentos de reservas e ainda não podem voltar a aceitar pedidos.',
+      );
+    }
+  }
+
   private async assertAdmin(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },

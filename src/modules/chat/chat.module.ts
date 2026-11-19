@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { AuthModule } from '../auth/auth.module';
+import { ChatRateLimiter } from './chat-rate-limit';
 import { ChatController } from './controllers/chat.controller';
 import { ChatGateway } from './gateways/chat.gateway';
 import { ChatService } from './services/chat.service';
@@ -20,7 +21,7 @@ import { ChatService } from './services/chat.service';
     }),
   ],
   controllers: [ChatController],
-  providers: [ChatGateway, ChatService],
+  providers: [ChatGateway, ChatService, ChatRateLimiter],
   exports: [ChatService],
 })
 export class ChatModule {}

@@ -1,3 +1,5 @@
+import { SERVICE_AUTO_RELEASE_DAYS } from '../../../shared/constants/policy';
+
 type ServiceBookingEntity = {
   id: string;
   clientId: string;
@@ -15,6 +17,8 @@ type ServiceBookingEntity = {
   completedAt: Date | null;
   cancelledAt: Date | null;
   cancellationReason: string | null;
+  /** Até quando a reserva pode ser paga. Null depois de o pagamento entrar. */
+  expiresAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
   service?: {
@@ -35,8 +39,29 @@ type ServiceBookingEntity = {
     id: string;
     status: string;
     receiptNumber: string;
+    /** Quando o cliente declarou que pagou. */
+    declaredAt?: Date | null;
   } | null;
 };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Quando o pagamento é libertado sozinho, se o cliente não o confirmar nem
+ * abrir disputa. Só existe com o serviço concluído e o dinheiro ainda retido.
+ */
+function autoReleaseAt(booking: ServiceBookingEntity): Date | null {
+  const awaitsClient =
+    booking.status === 'COMPLETED' && booking.payment?.status === 'HELD';
+
+  if (!awaitsClient || !booking.completedAt) {
+    return null;
+  }
+
+  return new Date(
+    booking.completedAt.getTime() + SERVICE_AUTO_RELEASE_DAYS * DAY_MS,
+  );
+}
 
 export class ServiceBookingPresenter {
   static toItem(booking: ServiceBookingEntity) {
@@ -57,6 +82,8 @@ export class ServiceBookingPresenter {
       completedAt: booking.completedAt,
       cancelledAt: booking.cancelledAt,
       cancellationReason: booking.cancellationReason,
+      expiresAt: booking.expiresAt ?? null,
+      autoReleaseAt: autoReleaseAt(booking),
       createdAt: booking.createdAt,
       updatedAt: booking.updatedAt,
       service: booking.service
@@ -81,6 +108,7 @@ export class ServiceBookingPresenter {
             id: booking.payment.id,
             status: booking.payment.status,
             receiptNumber: booking.payment.receiptNumber,
+            declaredAt: booking.payment.declaredAt ?? null,
           }
         : null,
     };

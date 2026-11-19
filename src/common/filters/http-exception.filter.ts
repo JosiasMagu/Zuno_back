@@ -91,6 +91,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
       message,
       ...(details !== undefined ? { details } : {}),
       path: request.url,
+      // O mesmo id que vai nos logs e no cabeçalho X-Request-Id.
+      requestId: (request as { id?: unknown }).id,
       timestamp: new Date().toISOString(),
       ...(isDev && exception instanceof Error
         ? { stack: exception.stack }

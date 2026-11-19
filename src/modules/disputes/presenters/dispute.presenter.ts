@@ -1,4 +1,4 @@
-type DisputeListEntity = {
+type DisputeEntity = {
   id: string;
   bookingId: string | null;
   serviceBookingId?: string | null;
@@ -7,12 +7,17 @@ type DisputeListEntity = {
   type?: string;
   reason: string;
   description: string;
-  ownerResponse: string | null;
+  evidenceUrls?: string[] | null;
+  response: string | null;
+  responseEvidenceUrls?: string[] | null;
+  respondedAt?: Date | null;
+  respondedBy?: string | null;
   status: string;
   resolution: string | null;
   refundPercent: number | null;
   autoResolvedAt: Date | null;
-  ownerDeadline: Date | null;
+  responseDeadline: Date | null;
+  closedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
   booking: {
@@ -36,6 +41,9 @@ type DisputeListEntity = {
     totalCharged: unknown;
     receiptNumber: string;
     refundAmount?: unknown;
+    rentalAmount?: unknown;
+    depositAmount?: unknown;
+    depositStatus?: string;
   };
   opener: {
     id: string;
@@ -44,29 +52,50 @@ type DisputeListEntity = {
   };
 };
 
-type DisputeDetailsEntity = DisputeListEntity;
-
 function toNumber(value: unknown): number | null {
   if (value === null || value === undefined) return null;
   return Number(value);
 }
 
+/** Quem tem de responder: a parte da reserva que não abriu a disputa. */
+function respondentIdOf(dispute: DisputeEntity): string | null {
+  const clientId =
+    dispute.booking?.clientId ?? dispute.serviceBooking?.clientId ?? null;
+  const providerId =
+    dispute.booking?.ownerId ?? dispute.serviceBooking?.providerId ?? null;
+
+  return dispute.openedBy === clientId ? providerId : clientId;
+}
+
 export class DisputePresenter {
-  static toListItem(dispute: DisputeListEntity) {
+  /**
+   * A disputa como a vêem as duas partes e o admin: o que foi dito de cada
+   * lado, com as provas, os prazos e o dinheiro em causa.
+   */
+  static toListItem(dispute: DisputeEntity) {
     return {
       id: dispute.id,
       bookingId: dispute.bookingId,
+      serviceBookingId: dispute.serviceBookingId ?? null,
       paymentId: dispute.paymentId,
       openedBy: dispute.openedBy,
+      respondentId: respondentIdOf(dispute),
       type: dispute.type ?? 'PAYMENT',
       reason: dispute.reason,
       description: dispute.description,
-      ownerResponse: dispute.ownerResponse,
+      evidenceUrls: dispute.evidenceUrls ?? [],
+      response: dispute.response,
+      responseEvidenceUrls: dispute.responseEvidenceUrls ?? [],
+      respondedAt: dispute.respondedAt ?? null,
+      responseDeadline: dispute.responseDeadline,
+      // Nomes antigos, mantidos para a app que já os lê.
+      ownerResponse: dispute.response,
+      ownerDeadline: dispute.responseDeadline,
       status: dispute.status,
       resolution: dispute.resolution,
       refundPercent: dispute.refundPercent,
       autoResolvedAt: dispute.autoResolvedAt,
-      ownerDeadline: dispute.ownerDeadline,
+      closedAt: dispute.closedAt ?? null,
       createdAt: dispute.createdAt,
       updatedAt: dispute.updatedAt,
       booking: dispute.booking
@@ -94,6 +123,9 @@ export class DisputePresenter {
         totalCharged: Number(dispute.payment.totalCharged),
         receiptNumber: dispute.payment.receiptNumber,
         refundAmount: toNumber(dispute.payment.refundAmount),
+        rentalAmount: toNumber(dispute.payment.rentalAmount),
+        depositAmount: toNumber(dispute.payment.depositAmount),
+        depositStatus: dispute.payment.depositStatus ?? null,
       },
       opener: {
         id: dispute.opener.id,
@@ -103,7 +135,7 @@ export class DisputePresenter {
     };
   }
 
-  static toDetails(dispute: DisputeDetailsEntity) {
+  static toDetails(dispute: DisputeEntity) {
     return this.toListItem(dispute);
   }
 }

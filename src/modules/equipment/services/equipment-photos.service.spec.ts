@@ -7,6 +7,7 @@ import {
 import { UserRole } from '@prisma/client';
 
 import { EquipmentPhotosService } from './equipment-photos.service';
+import { EquipmentService } from './equipment.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { CloudinaryService } from '../../../shared/cloudinary/cloudinary.service';
 
@@ -83,6 +84,13 @@ describe('EquipmentPhotosService', () => {
         EquipmentPhotosService,
         { provide: PrismaService, useValue: prisma },
         { provide: CloudinaryService, useValue: cloudinary },
+        // Por omissão a mudança de fotos não devolve o anúncio à revisão.
+        {
+          provide: EquipmentService,
+          useValue: {
+            reviewAfterPhotoChange: jest.fn().mockResolvedValue(false),
+          },
+        },
       ],
     }).compile();
 

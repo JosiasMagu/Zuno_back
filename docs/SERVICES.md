@@ -59,7 +59,12 @@ quote, o request, o serviço e ambas as partes; herda os valores do quote.
 - `platformFee` = 10% do serviceAmount (via `calculatePlatformFee` em
   `src/shared/constants/fees.ts`).
 - `totalAmount` = `serviceAmount + platformFee`.
-- `status: PENDING | CONFIRMED | IN_PROGRESS | COMPLETED | CANCELLED | DISPUTED`.
+- `status: PENDING | IN_PROGRESS | COMPLETED | CANCELLED | DISPUTED | EXPIRED`.
+  O valor `CONFIRMED` existe no enum e não é usado.
+- `expiresAt`: até quando a reserva pode ser paga. Fica a `null` quando o
+  pagamento entra no escrow.
+- `scheduledFor`: a data que o cliente indicou no pedido. É só informação,
+  porque o orçamento não a confirma. Nenhum prazo depende dela.
 
 ### `Payment` (partilhado com equipamento)
 
@@ -96,8 +101,12 @@ próprio pagamento.
 │              ─ Quote → ACCEPTED                                       │
 │              ─ Outras quotes do request → REJECTED                    │
 │              ─ Request → ACCEPTED                                     │
-│              ─ ServiceBooking criado (PENDING)                        │
+│              ─ ServiceBooking criado (PENDING), 24 h para pagar       │
 │              ─ Payment criado (PENDING)                               │
+│                       │                                               │
+│                       ▼                                               │
+│              CLIENT paga e declara o pagamento (declare)              │
+│              ─ a reserva espera 48 h pela confirmação                 │
 │                       │                                               │
 │                       ▼                                               │
 │              ADMIN marca Payment como HELD                            │
@@ -113,6 +122,7 @@ próprio pagamento.
 │                       ▼                                               │
 │              CLIENT liberta escrow (Payment release)                  │
 │              Payment → RELEASED, ServiceBooking → COMPLETED           │
+│              (sem resposta em 3 dias, o sistema liberta)              │
 │                       │                                               │
 │                       ▼                                               │
 │              CLIENT avalia serviço (Review com serviceBookingId)      │
@@ -220,11 +230,12 @@ Resposta `200`:
 
 ```json
 {
-  "message": "Orçamento aceite. Reserva e pagamento criados — aguarda confirmação M-Pesa.",
+  "message": "Orçamento aceite. A reserva fica à espera do pagamento por M-Pesa.",
   "data": {
     "quote": { "...": "...", "status": "ACCEPTED" },
     "serviceBookingId": "sb-001",
-    "paymentId": "pay-001"
+    "paymentId": "pay-001",
+    "payBy": "2026-11-17T10:00:00.000Z"
   }
 }
 ```
@@ -240,14 +251,36 @@ Atomicamente (em transacção Serializable):
   - `totalAmount = 7150`
 - Novo `Payment` em `PENDING` com `serviceBookingId = sb-001`.
 
+A reserva tem 24 horas para ser paga (`payBy`). A aceitação é recusada se
+o orçamento ou o pedido expirou, se o serviço saiu do catálogo ou se o
+provider está suspenso por strikes.
+
+Depois de pagar por M-Pesa, a Maria declara o pagamento:
+
+```http
+PATCH /api/v1/payments/pay-001/declare
+Authorization: Bearer <maria-access-token>
+Content-Type: application/json
+
+{ "mpesaReference": "CHK7H3ABCD", "payerMsisdn": "841234567" }
+```
+
+A declaração não move dinheiro. A reserva deixa de correr contra as 24
+horas e fica 48 horas à espera de o admin a confirmar no extracto.
+
 ### 5. M-Pesa confirma o pagamento (alpha: ADMIN marca manualmente)
 
 ```http
 PATCH /api/v1/payments/pay-001/mark-held
 Authorization: Bearer <admin-access-token>
+Content-Type: application/json
+
+{ "mpesaReference": "CHK7H3ABCD", "receivedAmount": 7150, "payerMsisdn": "841234567" }
 ```
 
-`Payment.status = HELD`. O dinheiro está retido na plataforma.
+`Payment.status = HELD`. O dinheiro está retido na plataforma, a reserva
+deixa de ter prazo de pagamento e as duas partes recebem um push. A fila do
+que está por confirmar está em `GET /payments/admin/declared`.
 
 ### 6. João executa o serviço
 
@@ -265,7 +298,9 @@ PATCH /api/v1/service-bookings/sb-001/complete
 Authorization: Bearer <joao-access-token>
 ```
 
-Estado → `COMPLETED`. Mas o dinheiro **ainda não foi libertado**.
+Estado → `COMPLETED`. Mas o dinheiro **ainda não foi libertado**. A resposta
+traz `autoReleaseAt`: a Maria tem 3 dias para libertar o pagamento ou abrir
+uma disputa. Sem resposta, o sistema liberta-o ao João.
 
 ### 7. Maria confirma a entrega — escrow liberado
 
@@ -353,14 +388,67 @@ linha liga a UM de equipamento OU serviço (XOR enforced via CHECK constraint).
 
 ---
 
+## Cancelamento
+
+Um serviço não tem data combinada: o pedido leva uma data preferida e o
+orçamento não a confirma. Por isso a regra não se apoia em horas antes de
+uma data, como no aluguer, e sim em dois factos que o sistema consegue
+verificar: se o dinheiro entrou e se o provider já começou.
+
+| Situação | Cliente | Provider | Admin |
+|---|---|---|---|
+| Por pagar | cancela, pagamento `FAILED` | igual | igual |
+| Paga, por começar | reembolso total | reembolso total e strike | reembolso total |
+| Em execução | recusado, abre disputa | reembolso total e strike | reembolso total |
+| Concluída, em disputa, expirada | recusado | recusado | recusado |
+
+- O cancelamento e o fecho do pagamento acontecem na mesma transacção
+  serializável (`ServiceBookingsService.cancel`), que relê a reserva e o
+  pagamento antes de escrever.
+- O reembolso total é o de `EscrowRefundService`, o mesmo do reembolso pelo
+  admin e do cancelamento de alugueres sem penalização.
+- O strike só existe quando havia dinheiro do cliente preso ao compromisso
+  que o provider quebrou. Ao terceiro em 90 dias, os anúncios (equipamentos
+  e serviços) ficam suspensos 30 dias.
+- Uma taxa por cancelamento tardio do cliente só faz sentido quando o
+  orçamento passar a fixar uma data. É uma decisão de produto em aberto.
+
+---
+
+## Prazos
+
+Os valores estão em `src/shared/constants/policy.ts`.
+
+| Prazo | Valor | Conta de | O que acontece no fim |
+|---|---|---|---|
+| Pagar a reserva | 24 horas | aceitação do orçamento | reserva `EXPIRED`, pagamento `FAILED` |
+| Confirmar um pagamento declarado | 48 horas | primeira declaração | o mesmo, com o motivo de pagamento por confirmar |
+| Confirmar o serviço concluído | 3 dias | `completedAt` | pagamento libertado ao provider |
+
+Cada prazo começa com um aviso push a quem tem de agir
+(`ServiceBookingNotifier` e `PaymentNotifier`). Um aviso que falha fica no
+log e não desfaz a operação.
+
+---
+
 ## Auto-expiração
 
-Um `ServicesScheduler` corre a cada 5 minutos:
+O `ServicesScheduler` tem dois crons. Em `NODE_ENV=test` não fazem nada.
+
+De 5 em 5 minutos:
 
 - `ServiceQuote.status = PENDING` com `expiresAt < now()` → `EXPIRED`.
 - `ServiceRequest.status ∈ {OPEN, QUOTED}` com `expiresAt < now()` → `EXPIRED`.
 
-Em `NODE_ENV=test` o cron é no-op (não interfere com E2E).
+De 10 em 10 minutos:
+
+- `ServiceBooking.status = PENDING` com `expiresAt` vencido e sem dinheiro no
+  escrow passa a `EXPIRED`, e o pagamento por entrar a `FAILED`. Fica em
+  auditoria como `SERVICE_BOOKING_EXPIRED`, com a referência declarada quando
+  existe.
+
+O auto-release dos serviços corre no job de hora a hora do
+`BookingsScheduler`, junto com o dos alugueres.
 
 ---
 

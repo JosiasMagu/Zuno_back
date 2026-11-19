@@ -1,14 +1,15 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsOptional } from 'class-validator';
+
+import { IsMzPhone } from '../../auth/dto/account-fields';
+import { IsMpesaReference } from './mpesa-reference';
 
 export class ExecutePayoutDto {
   @ApiProperty({
     description: 'Referência da transferência M-Pesa executada.',
     example: 'QGH7RT51XK',
   })
-  @IsString()
-  @IsNotEmpty({ message: 'A referência M-Pesa é obrigatória.' })
-  @MaxLength(64)
+  @IsMpesaReference()
   mpesaReference!: string;
 
   @ApiPropertyOptional({
@@ -17,7 +18,6 @@ export class ExecutePayoutDto {
     example: '+258841234567',
   })
   @IsOptional()
-  @IsString()
-  @MaxLength(20)
+  @IsMzPhone()
   msisdn?: string;
 }

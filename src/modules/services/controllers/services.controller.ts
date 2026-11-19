@@ -32,6 +32,7 @@ import {
 } from '../dto/find-services-query.dto';
 import { RejectServiceDto } from '../dto/reject-service.dto';
 import { UpdateServiceDto } from '../dto/update-service.dto';
+import { FindMyListingsQueryDto } from '../../equipment/dto/find-my-listings-query.dto';
 import { ServicesService } from '../services/services.service';
 
 @ApiTags('Services')
@@ -92,12 +93,33 @@ export class ServicesController {
   @ApiOperation({
     summary: 'Listar os meus serviços',
     description:
-      'PROVIDER vê os seus serviços em todos os estados. ADMIN vê todos.',
+      'PROVIDER vê os seus serviços em todos os estados menos removido. ADMIN vê todos. Paginado: page=1 e limit=50 por omissão (máx 100).',
   })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 50 })
   @ApiResponse({ status: 200, description: 'Serviços obtidos com sucesso.' })
   @ApiResponse({ status: 401, description: 'Não autenticado.' })
-  findMyListings(@CurrentUser() user: { id: string }) {
-    return this.servicesService.findMyListings(user.id);
+  findMyListings(
+    @CurrentUser() user: { id: string },
+    @Query() query: FindMyListingsQueryDto,
+  ) {
+    return this.servicesService.findMyListings(user.id, query);
+  }
+
+  @Get('me/listings/:id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Obter um dos meus serviços',
+    description:
+      'O anúncio como o provider o vê, em qualquer estado menos removido, com o motivo quando foi rejeitado. O ADMIN vê qualquer um.',
+  })
+  @ApiParam({ name: 'id', description: 'ID do serviço' })
+  @ApiResponse({ status: 200, description: 'Serviço obtido com sucesso.' })
+  @ApiResponse({ status: 403, description: 'O anúncio é de outra conta.' })
+  @ApiResponse({ status: 404, description: 'Serviço não encontrado.' })
+  findMine(@CurrentUser() user: { id: string }, @Param('id') id: string) {
+    return this.servicesService.findMine(user.id, id);
   }
 
   // Serviços pendentes de revisão (ADMIN)
@@ -108,14 +130,21 @@ export class ServicesController {
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: '[ADMIN] Listar serviços pendentes de aprovação',
+    description:
+      'Os anúncios novos e os que voltaram à revisão depois de editados, do mais antigo para o mais recente. Paginado: page=1 e limit=50 por omissão (máx 100).',
   })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 50 })
   @ApiResponse({
     status: 200,
     description: 'Serviços pendentes obtidos com sucesso.',
   })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
-  findPending(@CurrentUser() user: { id: string }) {
-    return this.servicesService.findPending(user.id);
+  findPending(
+    @CurrentUser() user: { id: string },
+    @Query() query: FindMyListingsQueryDto,
+  ) {
+    return this.servicesService.findPending(user.id, query);
   }
 
   // Detalhe público (só ACTIVE)

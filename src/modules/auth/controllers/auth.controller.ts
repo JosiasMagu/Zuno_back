@@ -21,6 +21,9 @@ import {
 } from '../dto/verification.dto';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { CurrentUser } from '../decorators/current-user.decorator';
+import type { CurrentAuthUser } from '../decorators/current-user.decorator';
+import { RequestOrigin } from '../decorators/session-origin.decorator';
+import type { SessionOrigin } from '../services/sessions.service';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -36,8 +39,8 @@ export class AuthController {
     description: 'Utilizador registrado com sucesso.',
   })
   @ApiResponse({ status: 400, description: 'Dados inválidos.' })
-  register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
+  register(@Body() dto: RegisterDto, @RequestOrigin() origin: SessionOrigin) {
+    return this.authService.register(dto, origin);
   }
 
   @Post('login')
@@ -46,8 +49,8 @@ export class AuthController {
   @ApiBody({ type: LoginDto })
   @ApiResponse({ status: 201, description: 'Login realizado com sucesso.' })
   @ApiResponse({ status: 401, description: 'Credenciais inválidas.' })
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  login(@Body() dto: LoginDto, @RequestOrigin() origin: SessionOrigin) {
+    return this.authService.login(dto, origin);
   }
 
   @Post('refresh')
@@ -56,7 +59,11 @@ export class AuthController {
   // token. 20 pedidos por minuto e suficiente para qualquer uso legitimo
   // (apps mobile com reconexao automatica) e bloqueia tentativas de ataque.
   @Throttle({ global: { ttl: 60_000, limit: 20 } })
-  @ApiOperation({ summary: 'Renovar access token' })
+  @ApiOperation({
+    summary: 'Renovar access token',
+    description:
+      'Devolve um par novo e invalida o refresh token apresentado. Um refresh token usado duas vezes termina a sessão.',
+  })
   @ApiBody({ type: RefreshTokenDto })
   @ApiResponse({ status: 201, description: 'Token renovado com sucesso.' })
   @ApiResponse({ status: 401, description: 'Refresh token inválido.' })
@@ -87,7 +94,8 @@ export class AuthController {
   @ApiOperation({ summary: 'Confirmar codigo de verificacao por telefone' })
   @ApiBody({ type: ConfirmPhoneVerificationDto })
   @ApiResponse({ status: 201, description: 'Conta verificada.' })
-  @ApiResponse({ status: 400, description: 'Codigo invalido ou expirado.' })
+  @ApiResponse({ status: 400, description: 'Código inválido ou expirado.' })
+  @ApiResponse({ status: 429, description: 'Demasiados códigos errados.' })
   confirmPhoneVerification(@Body() dto: ConfirmPhoneVerificationDto) {
     return this.authService.confirmPhoneVerification(dto);
   }
@@ -97,7 +105,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Iniciar redefinicao de password',
     description:
-      'Resposta generica para evitar enumeracao de utilizadores. O codigo so e enviado se a conta existir.',
+      'Resposta genérica para evitar enumeração de utilizadores. O código só é enviado se a conta existir, e no máximo um por minuto e cinco por hora.',
   })
   @ApiBody({ type: ForgotPasswordDto })
   @ApiResponse({ status: 201, description: 'Pedido aceite.' })
@@ -110,9 +118,13 @@ export class AuthController {
   @ApiOperation({ summary: 'Concluir redefinicao de password com codigo' })
   @ApiBody({ type: ResetPasswordDto })
   @ApiResponse({ status: 201, description: 'Password redefinida com sucesso.' })
-  @ApiResponse({ status: 400, description: 'Codigo invalido ou expirado.' })
-  resetPassword(@Body() dto: ResetPasswordDto) {
-    return this.authService.resetPassword(dto);
+  @ApiResponse({ status: 400, description: 'Código inválido ou expirado.' })
+  @ApiResponse({ status: 429, description: 'Demasiados códigos errados.' })
+  resetPassword(
+    @Body() dto: ResetPasswordDto,
+    @RequestOrigin() origin: SessionOrigin,
+  ) {
+    return this.authService.resetPassword(dto, origin);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -122,12 +134,16 @@ export class AuthController {
   @ApiOperation({ summary: 'Alterar password (requer password actual)' })
   @ApiBody({ type: ChangePasswordDto })
   @ApiResponse({ status: 201, description: 'Password alterada com sucesso.' })
-  @ApiResponse({ status: 401, description: 'Password actual incorrecta.' })
+  @ApiResponse({ status: 400, description: 'Password actual incorrecta.' })
+  @ApiResponse({
+    status: 429,
+    description: 'Número bloqueado por tentativas falhadas.',
+  })
   changePassword(
-    @CurrentUser() user: { id: string },
+    @CurrentUser() user: CurrentAuthUser,
     @Body() dto: ChangePasswordDto,
   ) {
-    return this.authService.changePassword(user.id, dto);
+    return this.authService.changePassword(user.id, user.sessionId, dto);
   }
 
   @UseGuards(JwtAuthGuard)

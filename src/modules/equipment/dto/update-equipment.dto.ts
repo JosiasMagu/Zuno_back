@@ -3,6 +3,7 @@ import { Type, Transform } from 'class-transformer';
 import {
   IsBoolean,
   IsEnum,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -13,6 +14,13 @@ import {
   MinLength,
 } from 'class-validator';
 import { EquipmentCondition } from '@prisma/client';
+
+import { toOptionalBoolean } from '../../../common/dto/transforms';
+import {
+  MAX_DEPOSIT_AMOUNT,
+  MAX_EQUIPMENT_UNITS,
+  MAX_LISTING_PRICE,
+} from '../../../shared/constants/policy';
 
 export class UpdateEquipmentDto {
   @ApiPropertyOptional({
@@ -59,6 +67,7 @@ export class UpdateEquipmentDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0.01)
+  @Max(MAX_LISTING_PRICE)
   pricePerDay?: number;
 
   @ApiPropertyOptional({
@@ -70,6 +79,7 @@ export class UpdateEquipmentDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0.01)
+  @Max(MAX_LISTING_PRICE)
   pricePerWeek?: number;
 
   @ApiPropertyOptional({
@@ -81,6 +91,7 @@ export class UpdateEquipmentDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0.01)
+  @Max(MAX_LISTING_PRICE)
   pricePerMonth?: number;
 
   @ApiPropertyOptional({
@@ -92,6 +103,7 @@ export class UpdateEquipmentDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @Max(MAX_DEPOSIT_AMOUNT)
   depositAmount?: number;
 
   @ApiPropertyOptional({
@@ -138,7 +150,7 @@ export class UpdateEquipmentDto {
     description: 'Indica se o owner disponibiliza entrega',
   })
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(({ value }: { value: unknown }) => toOptionalBoolean(value))
   @IsBoolean()
   deliveryAvailable?: boolean;
 
@@ -147,7 +159,7 @@ export class UpdateEquipmentDto {
     description: 'Indica se o owner disponibiliza operador',
   })
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(({ value }: { value: unknown }) => toOptionalBoolean(value))
   @IsBoolean()
   operatorAvailable?: boolean;
 
@@ -156,9 +168,22 @@ export class UpdateEquipmentDto {
     description: 'Indica se o equipamento está disponível para novas reservas',
   })
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(({ value }: { value: unknown }) => toOptionalBoolean(value))
   @IsBoolean()
   availableNow?: boolean;
+
+  @ApiPropertyOptional({
+    example: 2,
+    description:
+      'Número de unidades deste equipamento. Não pode ficar abaixo das que têm reserva ao mesmo tempo.',
+    minimum: 1,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(MAX_EQUIPMENT_UNITS)
+  quantity?: number;
 
   @ApiPropertyOptional({
     enum: EquipmentCondition,

@@ -108,6 +108,9 @@ describe('Chat WebSocket E2E', () => {
   let conversationId: string;
 
   beforeAll(async () => {
+    // O socket vem desligado por omissão. Estes testes são os que o ligam.
+    process.env.CHAT_GATEWAY_ENABLED = 'true';
+
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -235,4 +238,208 @@ describe('Chat WebSocket E2E', () => {
       providerSocket.close();
     }
   }, 30_000);
+
+  const chatUrl = () => `${baseUrl}/chat`;
+
+  /** Entra na conversa e espera pela confirmação do servidor. */
+  async function join(socket: Socket) {
+    const joined = waitForEvent(socket, 'joined_conversation');
+    socket.emit('join_conversation', { conversationId });
+    await joined;
+  }
+
+  describe('sessão terminada', () => {
+    it('fecha o socket de uma conta que é suspensa', async () => {
+      const socket = await connectSocket(chatUrl(), clientAuth.accessToken);
+
+      try {
+        const closed = waitForEvent(socket, 'disconnect');
+
+        await request(app.getHttpServer())
+          .patch(`/api/v1/users/${clientAuth.userId}/suspend`)
+          .set(authHeader(adminAuth.accessToken))
+          .send({ reason: 'Queixas de providers.' })
+          .expect(200);
+
+        await closed;
+        expect(socket.connected).toBe(false);
+      } finally {
+        socket.close();
+      }
+    });
+
+    it('fecha o socket no logout e recusa uma ligação nova com o token dessa sessão', async () => {
+      const socket = await connectSocket(chatUrl(), providerAuth.accessToken);
+
+      try {
+        const closed = waitForEvent(socket, 'disconnect');
+
+        await request(app.getHttpServer())
+          .post('/api/v1/auth/logout')
+          .send({ refreshToken: providerAuth.refreshToken })
+          .expect(201);
+
+        await closed;
+      } finally {
+        socket.close();
+      }
+
+      await expect(
+        expectAuthRejection(chatUrl(), providerAuth.accessToken),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('o que o socket aceita', () => {
+    it('recusa a entrada de quem não pertence à conversa', async () => {
+      const socket = await connectSocket(chatUrl(), adminAuth.accessToken);
+
+      try {
+        const refused = waitForEvent<{ message: string }>(socket, 'exception');
+        socket.emit('join_conversation', { conversationId });
+
+        expect((await refused).message).toBe(
+          'Não tens acesso a esta conversa.',
+        );
+      } finally {
+        socket.close();
+      }
+    });
+
+    it('não passa o aviso de escrita de quem não entrou na conversa', async () => {
+      const provider = await connectSocket(chatUrl(), providerAuth.accessToken);
+      const client = await connectSocket(chatUrl(), clientAuth.accessToken);
+      const intruder = await connectSocket(chatUrl(), adminAuth.accessToken);
+
+      try {
+        await join(provider);
+        await join(client);
+
+        const firstTyping = waitForEvent<{ userId: string }>(
+          provider,
+          'user_typing',
+        );
+        // O intruso tenta primeiro. Se o aviso dele passasse, chegava antes.
+        intruder.emit('typing', { conversationId });
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        client.emit('typing', { conversationId });
+
+        expect((await firstTyping).userId).toBe(clientAuth.userId);
+      } finally {
+        provider.close();
+        client.close();
+        intruder.close();
+      }
+    });
+
+    it.each([
+      [
+        'um conteúdo que não é texto',
+        { content: 12345 },
+        'content tem de ser texto.',
+      ],
+      ['um conteúdo em falta', {}, 'content tem de ser texto.'],
+    ])('recusa %s e não grava nada', async (_label, payload, message) => {
+      const socket = await connectSocket(chatUrl(), clientAuth.accessToken);
+
+      try {
+        const refused = waitForEvent<{ message: string }>(socket, 'exception');
+        socket.emit('send_message', { conversationId, ...payload });
+
+        expect((await refused).message).toBe(message);
+        expect(
+          await getTestPrisma().message.count({ where: { conversationId } }),
+        ).toBe(1);
+      } finally {
+        socket.close();
+      }
+    });
+
+    it('recusa um conversationId que não é um id', async () => {
+      const socket = await connectSocket(chatUrl(), clientAuth.accessToken);
+
+      try {
+        const refused = waitForEvent<{ message: string }>(socket, 'exception');
+        socket.emit('send_message', {
+          conversationId: { not: 'um id' },
+          content: 'Olá.',
+        });
+
+        expect((await refused).message).toBe('conversationId inválido.');
+      } finally {
+        socket.close();
+      }
+    });
+
+    it('trava quem passa o limite de mensagens por minuto', async () => {
+      const socket = await connectSocket(chatUrl(), clientAuth.accessToken);
+
+      try {
+        const refused = waitForEvent<{ message: string }>(
+          socket,
+          'exception',
+          15_000,
+        );
+        for (let sent = 1; sent <= 35; sent += 1) {
+          socket.emit('send_message', {
+            conversationId,
+            content: `Mensagem ${sent}`,
+          });
+        }
+
+        expect((await refused).message).toContain('depressa de mais');
+
+        // A primeira mensagem da conversa, enviada pelo REST, conta para o
+        // mesmo limite: ao todo ficam gravadas 30.
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        expect(
+          await getTestPrisma().message.count({
+            where: { senderId: clientAuth.userId },
+          }),
+        ).toBe(30);
+      } finally {
+        socket.close();
+      }
+    }, 30_000);
+
+    it('entrega a quem está no socket uma mensagem enviada pelo REST', async () => {
+      const provider = await connectSocket(chatUrl(), providerAuth.accessToken);
+
+      try {
+        await join(provider);
+        const received = waitForEvent<{
+          data: { content: string; senderId: string };
+        }>(provider, 'new_message');
+
+        await request(app.getHttpServer())
+          .post(`/api/v1/chat/conversations/${conversationId}/messages`)
+          .set(authHeader(clientAuth.accessToken))
+          .send({ content: 'Escrevi isto pela app.' })
+          .expect(201);
+
+        const payload = await received;
+        expect(payload.data).toMatchObject({
+          content: 'Escrevi isto pela app.',
+          senderId: clientAuth.userId,
+        });
+      } finally {
+        provider.close();
+      }
+    });
+
+    it('não marca mensagens como lidas ao entrar na conversa', async () => {
+      const provider = await connectSocket(chatUrl(), providerAuth.accessToken);
+
+      try {
+        await join(provider);
+
+        const unread = await getTestPrisma().message.count({
+          where: { conversationId, isRead: false },
+        });
+        expect(unread).toBe(1);
+      } finally {
+        provider.close();
+      }
+    });
+  });
 });

@@ -26,13 +26,17 @@ import { RolesGuard } from '../../auth/guards/roles.guard';
 import { ExecutePayoutDto } from '../dto/execute-payout.dto';
 import { FailPayoutDto } from '../dto/fail-payout.dto';
 import { FindPayoutsQueryDto } from '../dto/find-payouts-query.dto';
+import { PayoutDispatcher } from '../services/payout-dispatcher.service';
 import { PayoutsService } from '../services/payouts.service';
 
 @ApiTags('Payouts')
 @Controller('payouts')
 @UseGuards(JwtAuthGuard)
 export class PayoutsController {
-  constructor(private readonly payoutsService: PayoutsService) {}
+  constructor(
+    private readonly payoutsService: PayoutsService,
+    private readonly dispatcher: PayoutDispatcher,
+  ) {}
 
   @Get()
   @UseGuards(RolesGuard)
@@ -68,6 +72,28 @@ export class PayoutsController {
     return this.payoutsService.findMine(user.id, query);
   }
 
+  @Patch(':id/approve')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Throttle({ global: { ttl: 60_000, limit: 20 } })
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Aprovar payout acima do valor automático (ADMIN)',
+    description:
+      'Acima de PAYOUT_AUTO_MAX_AMOUNT um payout só sai depois de aprovado. Com o fornecedor a enviar, sai logo; no modo manual fica aprovado para ser executado. O admin não aprova um payout para si próprio e, com MONEY_FOUR_EYES ligado, quem confirmou a entrada do dinheiro também não.',
+  })
+  @ApiParam({ name: 'id', description: 'ID do payout' })
+  @ApiResponse({ status: 200, description: 'Payout aprovado.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Payout não pendente ou já aprovado.',
+  })
+  @ApiResponse({ status: 403, description: 'Controlo de dinheiro recusou.' })
+  @ApiResponse({ status: 404, description: 'Payout não encontrado.' })
+  approve(@CurrentUser() user: { id: string }, @Param('id') id: string) {
+    return this.dispatcher.approve(user.id, id);
+  }
+
   @Patch(':id/execute')
   @UseGuards(RolesGuard)
   @Roles(UserRole.ADMIN)
@@ -76,7 +102,7 @@ export class PayoutsController {
   @ApiOperation({
     summary: 'Marcar payout como executado (ADMIN)',
     description:
-      'Regista a execução manual da transferência M-Pesa com a referência real.',
+      'Regista a execução manual da transferência M-Pesa com a referência real. Recusa um payout que o fornecedor está a enviar (SENDING), um payout para o próprio admin e, com MONEY_FOUR_EYES ligado, um payout cujo dinheiro foi confirmado por este admin.',
   })
   @ApiParam({ name: 'id', description: 'ID do payout' })
   @ApiBody({ type: ExecutePayoutDto })

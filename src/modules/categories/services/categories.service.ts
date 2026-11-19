@@ -3,12 +3,40 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AuditAction, CategoryKind, Prisma } from '@prisma/client';
+import {
+  AuditAction,
+  Category,
+  CategoryKind,
+  EquipmentStatus,
+  Prisma,
+  ServiceStatus,
+} from '@prisma/client';
 
 import { AuditService } from '../../../shared/audit/audit.service';
+import {
+  kindFitsParent,
+  takesEquipment,
+  takesServices,
+  wouldCreateCycle,
+} from '../../../shared/categories/category-tree';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { CreateCategoryDto } from '../dto/create-category.dto';
 import { UpdateCategoryDto } from '../dto/update-category.dto';
+
+const WITH_PARENT = {
+  parent: { select: { id: true, name: true, slug: true } },
+} satisfies Prisma.CategoryInclude;
+
+const WITH_FAMILY = {
+  ...WITH_PARENT,
+  children: {
+    where: { isActive: true },
+    select: { id: true, name: true, slug: true, isActive: true },
+    orderBy: { name: 'asc' },
+  },
+} satisfies Prisma.CategoryInclude;
+
+const NOT_FOUND = 'Categoria não encontrada.';
 
 @Injectable()
 export class CategoriesService {
@@ -22,53 +50,21 @@ export class CategoriesService {
     const slug = this.slugify(name);
     const iconUrl = dto.iconUrl?.trim() || null;
     const parentId = dto.parentId?.trim() || null;
+    const kind = dto.kind ?? CategoryKind.EQUIPMENT;
 
     if (!slug) {
       throw new BadRequestException('Nome de categoria inválido.');
     }
 
-    const existingCategory = await this.prisma.category.findUnique({
-      where: { slug },
-    });
-
-    if (existingCategory) {
-      throw new BadRequestException('Já existe uma categoria com esse nome.');
-    }
+    await this.assertNameIsFree(slug);
 
     if (parentId) {
-      const parentCategory = await this.prisma.category.findUnique({
-        where: { id: parentId },
-      });
-
-      if (!parentCategory) {
-        throw new BadRequestException('Categoria pai não encontrada.');
-      }
-
-      if (!parentCategory.isActive) {
-        throw new BadRequestException(
-          'Não é permitido vincular a uma categoria pai inativa.',
-        );
-      }
+      await this.assertParentAccepts(parentId, kind);
     }
 
     const category = await this.prisma.category.create({
-      data: {
-        name,
-        slug,
-        iconUrl,
-        parentId,
-        isActive: true,
-        kind: dto.kind ?? CategoryKind.EQUIPMENT,
-      },
-      include: {
-        parent: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-          },
-        },
-      },
+      data: { name, slug, iconUrl, parentId, isActive: true, kind },
+      include: WITH_PARENT,
     });
 
     await this.audit.record({
@@ -108,15 +104,24 @@ export class CategoriesService {
     const items = await this.prisma.category.findMany({
       where,
       orderBy: [{ name: 'asc' }],
-      include: {
-        parent: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-          },
-        },
-      },
+      include: WITH_PARENT,
+    });
+
+    return {
+      message: 'Categorias obtidas com sucesso.',
+      data: items,
+    };
+  }
+
+  /**
+   * Todas as categorias, activas e desactivadas, para o painel do admin. A
+   * lista pública só traz as activas, e sem esta uma categoria desactivada
+   * deixava de se ver e não havia como a reactivar.
+   */
+  async findAllForAdmin() {
+    const items = await this.prisma.category.findMany({
+      orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+      include: WITH_PARENT,
     });
 
     return {
@@ -128,33 +133,11 @@ export class CategoriesService {
   async findOne(id: string) {
     const category = await this.prisma.category.findUnique({
       where: { id },
-      include: {
-        parent: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-          },
-        },
-        children: {
-          where: {
-            isActive: true,
-          },
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-            isActive: true,
-          },
-          orderBy: {
-            name: 'asc',
-          },
-        },
-      },
+      include: WITH_FAMILY,
     });
 
     if (!category || !category.isActive) {
-      throw new NotFoundException('Categoria não encontrada.');
+      throw new NotFoundException(NOT_FOUND);
     }
 
     return {
@@ -163,21 +146,18 @@ export class CategoriesService {
     };
   }
 
+  /**
+   * Edita uma categoria: nome, ícone, pai, tipo e se está activa. Uma
+   * categoria desactivada só aceita um pedido que a reactive.
+   */
   async update(adminId: string, id: string, dto: UpdateCategoryDto) {
-    const existingCategory = await this.prisma.category.findUnique({
-      where: { id },
-    });
+    const existing = await this.prisma.category.findUnique({ where: { id } });
 
-    if (!existingCategory || !existingCategory.isActive) {
-      throw new NotFoundException('Categoria não encontrada.');
+    if (!existing || (!existing.isActive && dto.isActive !== true)) {
+      throw new NotFoundException(NOT_FOUND);
     }
 
-    const data: {
-      name?: string;
-      slug?: string;
-      iconUrl?: string | null;
-      parentId?: string | null;
-    } = {};
+    const data: Prisma.CategoryUncheckedUpdateInput = {};
 
     if (dto.name !== undefined) {
       const name = dto.name.trim();
@@ -187,80 +167,62 @@ export class CategoriesService {
         throw new BadRequestException('Nome de categoria inválido.');
       }
 
-      const categoryWithSameSlug = await this.prisma.category.findUnique({
-        where: { slug },
-      });
-
-      if (categoryWithSameSlug && categoryWithSameSlug.id !== id) {
-        throw new BadRequestException('Já existe uma categoria com esse nome.');
-      }
+      await this.assertNameIsFree(slug, id);
 
       data.name = name;
       data.slug = slug;
     }
 
     if (dto.iconUrl !== undefined) {
-      data.iconUrl = dto.iconUrl.trim() || null;
+      // null ou vazio tiram o ícone.
+      data.iconUrl = dto.iconUrl?.trim() || null;
     }
 
-    if (dto.parentId !== undefined) {
-      const parentId = dto.parentId.trim() || null;
+    const kind = dto.kind ?? existing.kind;
+    const parentId =
+      dto.parentId === undefined
+        ? existing.parentId
+        : dto.parentId?.trim() || null;
+    const parentChanged = parentId !== existing.parentId;
+    const kindChanged = kind !== existing.kind;
 
-      if (parentId === id) {
-        throw new BadRequestException(
-          'Uma categoria não pode ser pai dela mesma.',
-        );
-      }
-
-      if (parentId) {
-        const parentCategory = await this.prisma.category.findUnique({
-          where: { id: parentId },
-        });
-
-        if (!parentCategory) {
-          throw new BadRequestException('Categoria pai não encontrada.');
-        }
-
-        if (!parentCategory.isActive) {
-          throw new BadRequestException(
-            'Não é permitido vincular a uma categoria pai inativa.',
-          );
-        }
-      }
-
+    if (parentChanged) {
+      await this.assertNoCycle(id, parentId);
       data.parentId = parentId;
+    }
+
+    if (kindChanged) {
+      await this.assertKindFitsContents(id, kind);
+      data.kind = kind;
+    }
+
+    // Só se volta a olhar para o pai quando a ligação ou o tipo mudam: uma
+    // categoria antiga que não cumpra a regra continua a poder mudar de nome.
+    if (parentId && (parentChanged || kindChanged)) {
+      await this.assertParentAccepts(parentId, kind);
+    }
+
+    const deactivating = dto.isActive === false && existing.isActive;
+    const reactivating = dto.isActive === true && !existing.isActive;
+
+    if (deactivating) {
+      await this.assertCanDeactivate(id);
+      data.isActive = false;
+    }
+
+    if (reactivating) {
+      await this.assertParentIsActive(parentId);
+      data.isActive = true;
     }
 
     const category = await this.prisma.category.update({
       where: { id },
       data,
-      include: {
-        parent: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-          },
-        },
-        children: {
-          where: {
-            isActive: true,
-          },
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-            isActive: true,
-          },
-          orderBy: {
-            name: 'asc',
-          },
-        },
-      },
+      include: WITH_FAMILY,
     });
 
     await this.audit.record({
-      action: AuditAction.CATEGORY_UPDATED,
+      action: this.auditActionFor({ deactivating, reactivating }),
       actorId: adminId,
       targetType: 'Category',
       targetId: category.id,
@@ -278,42 +240,17 @@ export class CategoriesService {
   }
 
   async remove(adminId: string, id: string) {
-    const existingCategory = await this.prisma.category.findUnique({
-      where: { id },
-      include: {
-        children: { where: { isActive: true } },
-        equipment: { where: { status: { not: 'DELETED' } } },
-        services: { where: { status: { not: 'DELETED' } } },
-      },
-    });
+    const existing = await this.prisma.category.findUnique({ where: { id } });
 
-    if (!existingCategory || !existingCategory.isActive) {
-      throw new NotFoundException('Categoria não encontrada.');
+    if (!existing || !existing.isActive) {
+      throw new NotFoundException(NOT_FOUND);
     }
 
-    if (existingCategory.children.length > 0) {
-      throw new BadRequestException(
-        'Não é possível remover uma categoria que possui subcategorias ativas.',
-      );
-    }
-
-    if (existingCategory.equipment.length > 0) {
-      throw new BadRequestException(
-        'Não é possível remover uma categoria que possui equipamentos vinculados.',
-      );
-    }
-
-    if (existingCategory.services.length > 0) {
-      throw new BadRequestException(
-        'Não é possível remover uma categoria que possui serviços vinculados.',
-      );
-    }
+    await this.assertCanDeactivate(id);
 
     await this.prisma.category.update({
       where: { id },
-      data: {
-        isActive: false,
-      },
+      data: { isActive: false },
     });
 
     await this.audit.record({
@@ -321,7 +258,7 @@ export class CategoriesService {
       actorId: adminId,
       targetType: 'Category',
       targetId: id,
-      metadata: { name: existingCategory.name, slug: existingCategory.slug },
+      metadata: { name: existing.name, slug: existing.slug },
     });
 
     return {
@@ -329,10 +266,174 @@ export class CategoriesService {
     };
   }
 
+  private auditActionFor(change: {
+    deactivating: boolean;
+    reactivating: boolean;
+  }): AuditAction {
+    if (change.reactivating) return AuditAction.CATEGORY_REACTIVATED;
+    if (change.deactivating) return AuditAction.CATEGORY_DEACTIVATED;
+    return AuditAction.CATEGORY_UPDATED;
+  }
+
+  /**
+   * O nome não pode repetir o de outra categoria. Quando a outra está
+   * desactivada, a mensagem diz que o caminho é reactivá-la.
+   */
+  private async assertNameIsFree(slug: string, exceptId?: string) {
+    const taken = await this.prisma.category.findUnique({ where: { slug } });
+
+    if (!taken || taken.id === exceptId) {
+      return;
+    }
+
+    throw new BadRequestException(
+      taken.isActive
+        ? 'Já existe uma categoria com esse nome.'
+        : 'Já existe uma categoria desactivada com esse nome. Reactiva-a em vez de criar outra.',
+    );
+  }
+
+  /** O pai existe, está activo e aceita subcategorias deste tipo. */
+  private async assertParentAccepts(parentId: string, kind: CategoryKind) {
+    const parent = await this.prisma.category.findUnique({
+      where: { id: parentId },
+    });
+
+    if (!parent) {
+      throw new BadRequestException('Categoria pai não encontrada.');
+    }
+
+    if (!parent.isActive) {
+      throw new BadRequestException(
+        'Não é permitido vincular a uma categoria pai inativa.',
+      );
+    }
+
+    if (!kindFitsParent(kind, parent.kind)) {
+      throw new BadRequestException(
+        'Uma subcategoria tem de ser do mesmo tipo da categoria pai, salvo se o pai servir para equipamentos e serviços.',
+      );
+    }
+  }
+
+  /**
+   * Uma categoria não pode ficar debaixo de si própria nem de uma das suas
+   * subcategorias. Com um ciclo, quem percorre a árvore nunca chega ao fim e
+   * nenhuma das categorias do ciclo se consegue remover.
+   */
+  private async assertNoCycle(id: string, parentId: string | null) {
+    if (!parentId) {
+      return;
+    }
+
+    if (parentId === id) {
+      throw new BadRequestException(
+        'Uma categoria não pode ser pai dela mesma.',
+      );
+    }
+
+    const categories = await this.prisma.category.findMany({
+      select: { id: true, parentId: true },
+    });
+
+    if (wouldCreateCycle(categories, id, parentId)) {
+      throw new BadRequestException(
+        'Uma categoria não pode ficar debaixo de uma das suas subcategorias.',
+      );
+    }
+  }
+
+  /**
+   * Mudar o tipo não pode deixar de fora o que a categoria já tem: as
+   * subcategorias activas, os equipamentos e os serviços.
+   */
+  private async assertKindFitsContents(id: string, kind: CategoryKind) {
+    const [children, equipment, services] = await Promise.all([
+      this.prisma.category.findMany({
+        where: { parentId: id, isActive: true },
+        select: { kind: true },
+      }),
+      this.prisma.equipment.count({
+        where: { categoryId: id, status: { not: EquipmentStatus.DELETED } },
+      }),
+      this.prisma.service.count({
+        where: { categoryId: id, status: { not: ServiceStatus.DELETED } },
+      }),
+    ]);
+
+    if (children.some((child) => !kindFitsParent(child.kind, kind))) {
+      throw new BadRequestException(
+        'Esta categoria tem subcategorias de outro tipo. Muda primeiro o tipo delas.',
+      );
+    }
+
+    if (equipment > 0 && !takesEquipment(kind)) {
+      throw new BadRequestException(
+        'Esta categoria tem equipamentos. Não pode passar a ser só de serviços.',
+      );
+    }
+
+    if (services > 0 && !takesServices(kind)) {
+      throw new BadRequestException(
+        'Esta categoria tem serviços. Não pode passar a ser só de equipamentos.',
+      );
+    }
+  }
+
+  /** Só se desactiva uma categoria vazia: sem subcategorias activas nem anúncios. */
+  private async assertCanDeactivate(id: string) {
+    const [children, equipment, services] = await Promise.all([
+      this.prisma.category.count({ where: { parentId: id, isActive: true } }),
+      this.prisma.equipment.count({
+        where: { categoryId: id, status: { not: EquipmentStatus.DELETED } },
+      }),
+      this.prisma.service.count({
+        where: { categoryId: id, status: { not: ServiceStatus.DELETED } },
+      }),
+    ]);
+
+    if (children > 0) {
+      throw new BadRequestException(
+        'Não é possível remover uma categoria que possui subcategorias ativas.',
+      );
+    }
+
+    if (equipment > 0) {
+      throw new BadRequestException(
+        'Não é possível remover uma categoria que possui equipamentos vinculados.',
+      );
+    }
+
+    if (services > 0) {
+      throw new BadRequestException(
+        'Não é possível remover uma categoria que possui serviços vinculados.',
+      );
+    }
+  }
+
+  /** Uma categoria só volta a ficar activa debaixo de um pai activo. */
+  private async assertParentIsActive(parentId: string | null) {
+    if (!parentId) {
+      return;
+    }
+
+    const parent: Pick<Category, 'isActive'> | null =
+      await this.prisma.category.findUnique({
+        where: { id: parentId },
+        select: { isActive: true },
+      });
+
+    if (!parent?.isActive) {
+      throw new BadRequestException(
+        'A categoria pai está desactivada. Reactiva-a primeiro, ou tira esta categoria de debaixo dela.',
+      );
+    }
+  }
+
   private slugify(value: string) {
     return value
       .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[̀-ͯ]/g, '')
       .toLowerCase()
       .trim()
       .replace(/\s+/g, '-')

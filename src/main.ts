@@ -1,5 +1,6 @@
-import { RequestMethod, ValidationPipe } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -7,29 +8,30 @@ import cookieParser from 'cookie-parser';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { applyApiPrefix } from './shared/http/api-prefix';
 import { initSentry } from './shared/sentry/sentry';
 
 async function bootstrap() {
   initSentry();
 
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: true,
+  });
   const logger = app.get(PinoLogger);
   app.useLogger(logger);
+
+  // Atrás de um proxy inverso, o IP do cliente chega em X-Forwarded-For.
+  // TRUST_PROXY_HOPS diz quantos proxies há à frente; com 0 (o valor por
+  // omissão) o cabeçalho é ignorado, para não poder ser forjado e usado
+  // para fugir ao rate limit.
+  app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 0));
 
   // enableShutdownHooks() faz com que SIGINT/SIGTERM disparem os
   // onApplicationShutdown() de todos os providers (incluindo o
   // SentryShutdownService que descarrega a fila do Sentry).
   app.enableShutdownHooks();
 
-  // Health/readiness ficam na raiz (fora de /api/v1), por convenção de
-  // orquestradores (k8s, Railway, Render, Fly).
-  app.setGlobalPrefix('api/v1', {
-    exclude: [
-      { path: 'health', method: RequestMethod.GET },
-      { path: 'ready', method: RequestMethod.GET },
-      { path: 'metrics', method: RequestMethod.GET },
-    ],
-  });
+  applyApiPrefix(app);
 
   app.use(helmet());
   app.use(compression());

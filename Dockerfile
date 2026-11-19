@@ -14,6 +14,13 @@ RUN npx prisma generate \
  && npm run build \
  && npm prune --omit=dev
 
+# Aplica as migrações pendentes e termina. Fica numa imagem à parte porque o
+# CLI do Prisma é devDependency e o `npm prune` tira-o da imagem da aplicação.
+FROM deps AS migrate
+COPY prisma.config.ts ./
+USER node
+CMD ["npx", "prisma", "migrate", "deploy"]
+
 FROM node:22-alpine AS runner
 WORKDIR /app
 
@@ -26,14 +33,13 @@ RUN apk add --no-cache curl tini \
 
 COPY --from=build --chown=zuno:zuno /app/node_modules ./node_modules
 COPY --from=build --chown=zuno:zuno /app/dist ./dist
-COPY --from=build --chown=zuno:zuno /app/prisma ./prisma
 COPY --from=build --chown=zuno:zuno /app/package.json ./package.json
 
 USER zuno
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD curl -fsS http://127.0.0.1:3000/api/v1/health || exit 1
+  CMD curl -fsS http://127.0.0.1:3000/health || exit 1
 
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main"]
+CMD ["node", "dist/main"]

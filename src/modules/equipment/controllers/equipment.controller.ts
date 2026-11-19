@@ -131,6 +131,22 @@ export class EquipmentController {
     return this.equipmentService.findMyListings(user.id, query);
   }
 
+  @Get('me/listings/:id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Obter um dos meus equipamentos',
+    description:
+      'O anúncio como o dono o vê, em qualquer estado menos removido, com o motivo quando foi rejeitado. É daqui que a app lê um anúncio em revisão ou rejeitado para o editar. O ADMIN vê qualquer um.',
+  })
+  @ApiParam({ name: 'id', description: 'ID do equipamento' })
+  @ApiResponse({ status: 200, description: 'Equipamento obtido com sucesso.' })
+  @ApiResponse({ status: 403, description: 'O anúncio é de outra conta.' })
+  @ApiResponse({ status: 404, description: 'Equipamento não encontrado.' })
+  findMine(@CurrentUser() user: { id: string }, @Param('id') id: string) {
+    return this.equipmentService.findMine(user.id, id);
+  }
+
   // Equipamentos pendentes de revisão (ADMIN)
 
   @Get('admin/pending')
@@ -139,14 +155,21 @@ export class EquipmentController {
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: '[ADMIN] Listar equipamentos pendentes de aprovação',
+    description:
+      'Os anúncios novos e os que voltaram à revisão depois de editados, do mais antigo para o mais recente. Paginado: page=1 e limit=50 por omissão (máx 100).',
   })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 50 })
   @ApiResponse({
     status: 200,
     description: 'Equipamentos pendentes obtidos com sucesso.',
   })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
-  findPending(@CurrentUser() user: { id: string }) {
-    return this.equipmentService.findPending(user.id);
+  findPending(
+    @CurrentUser() user: { id: string },
+    @Query() query: FindMyListingsQueryDto,
+  ) {
+    return this.equipmentService.findPending(user.id, query);
   }
 
   // Detalhe público (só ACTIVE)
@@ -223,7 +246,11 @@ export class EquipmentController {
   @UseGuards(JwtAuthGuard)
   @Patch(':id')
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Actualizar equipamento' })
+  @ApiOperation({
+    summary: 'Actualizar equipamento',
+    description:
+      'Só conta o que muda de facto. Mudar o título, a descrição ou a categoria de um anúncio aprovado devolve-o à revisão, salvo se o dono for um provider verificado. Qualquer mudança num anúncio rejeitado pede nova revisão. Preço, depósito, quantidade e localização não passam por revisão.',
+  })
   @ApiParam({ name: 'id', description: 'ID do equipamento' })
   @ApiBody({ type: UpdateEquipmentDto })
   @ApiResponse({
@@ -245,7 +272,11 @@ export class EquipmentController {
   @UseGuards(JwtAuthGuard)
   @Delete(':id')
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Remover equipamento (soft delete)' })
+  @ApiOperation({
+    summary: 'Remover equipamento (soft delete)',
+    description:
+      'Recusa com 400 enquanto o equipamento tiver reservas em curso (pendentes, confirmadas, activas ou em disputa).',
+  })
   @ApiParam({ name: 'id', description: 'ID do equipamento' })
   @ApiResponse({
     status: 200,

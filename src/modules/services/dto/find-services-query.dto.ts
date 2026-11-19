@@ -7,9 +7,13 @@ import {
   IsOptional,
   IsString,
   Min,
+  MaxLength,
 } from 'class-validator';
 
-import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
+import {
+  MAX_SEARCH_LENGTH,
+  PaginationQueryDto,
+} from '../../../common/dto/pagination-query.dto';
 
 export enum ServiceSortBy {
   RELEVANT = 'relevant',
@@ -37,6 +41,7 @@ export class FindServicesQueryDto extends PaginationQueryDto {
   @IsOptional()
   @Transform(({ value }) => toOptionalTrimmedString(value))
   @IsString()
+  @MaxLength(MAX_SEARCH_LENGTH)
   search?: string;
 
   @ApiPropertyOptional()

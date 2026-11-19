@@ -26,7 +26,6 @@ import { PrismaService } from '../../shared/db/prisma.service';
 export class HealthController {
   constructor(private readonly prisma: PrismaService) {}
 
-  // ─── Liveness ──────────────────────────────────────────────────────────────
   @Get('health')
   @HttpCode(200)
   @ApiOperation({
@@ -40,7 +39,6 @@ export class HealthController {
     };
   }
 
-  // ─── Readiness ─────────────────────────────────────────────────────────────
   @Get('ready')
   @HttpCode(200)
   @ApiOperation({

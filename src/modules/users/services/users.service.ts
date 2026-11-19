@@ -8,6 +8,10 @@ import { AuditAction } from '@prisma/client';
 
 import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { PushService } from '../../../shared/push/push.service';
+import { PasswordConfirmationService } from '../../auth/services/password-confirmation.service';
+import { SessionsService } from '../../auth/services/sessions.service';
+import { ChangePayoutNumberDto } from '../dto/change-payout-number.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { UserPresenter } from '../presenters/user.presenter';
 
@@ -16,6 +20,9 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly sessions: SessionsService,
+    private readonly passwordConfirmation: PasswordConfirmationService,
+    private readonly push: PushService,
   ) {}
 
   async getMe(userId: string) {
@@ -55,15 +62,10 @@ export class UsersService {
       email?: string | null;
       bio?: string | null;
       avatarUrl?: string | null;
-      payoutMsisdn?: string | null;
     } = {};
 
     if (dto.name !== undefined) {
       data.name = dto.name.trim();
-    }
-
-    if (dto.payoutMsisdn !== undefined) {
-      data.payoutMsisdn = dto.payoutMsisdn.trim() || null;
     }
 
     if (dto.bio !== undefined) {
@@ -105,6 +107,53 @@ export class UsersService {
     };
   }
 
+  /**
+   * Muda o número onde a conta recebe pagamentos e reembolsos. Pede a
+   * password actual: sem ela, uma sessão roubada bastava para desviar o
+   * dinheiro dos pagamentos seguintes.
+   */
+  async changePayoutNumber(
+    userId: string,
+    sessionId: string,
+    dto: ChangePayoutNumberDto,
+  ) {
+    await this.passwordConfirmation.confirm(
+      userId,
+      dto.currentPassword,
+      'PAYOUT_NUMBER_CHANGE',
+    );
+
+    const account = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+    });
+    const message = 'Número de recebimento actualizado.';
+
+    if (account.payoutMsisdn === dto.payoutMsisdn) {
+      return { message, data: UserPresenter.toMe(account) };
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: { payoutMsisdn: dto.payoutMsisdn },
+    });
+
+    await this.audit.record({
+      action: AuditAction.USER_PAYOUT_NUMBER_CHANGED,
+      actorId: userId,
+      targetType: 'User',
+      targetId: userId,
+      metadata: {
+        previous: account.payoutMsisdn,
+        current: dto.payoutMsisdn,
+        sessionId,
+      },
+    });
+
+    this.warnOwnerOfNewPayoutNumber(account.pushToken, dto.payoutMsisdn);
+
+    return { message, data: UserPresenter.toMe(updated) };
+  }
+
   async getPublicProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -115,8 +164,10 @@ export class UsersService {
         bio: true,
         role: true,
         isActive: true,
-        totalRating: true,
-        totalReviews: true,
+        providerRating: true,
+        providerReviews: true,
+        clientRating: true,
+        clientReviews: true,
         createdAt: true,
       },
     });
@@ -142,7 +193,27 @@ export class UsersService {
     };
   }
 
-  // ─── Moderação (ADMIN) ────────────────────────────────────────────────────
+  /**
+   * Avisa o dono da conta no telemóvel dele. Se a mudança não foi feita por
+   * ele, fica a saber a tempo de trocar a password.
+   */
+  private warnOwnerOfNewPayoutNumber(
+    pushToken: string | null,
+    payoutMsisdn: string,
+  ) {
+    if (!pushToken) {
+      return;
+    }
+
+    void this.push.send({
+      to: pushToken,
+      title: 'Número de recebimento alterado',
+      body: `Os teus pagamentos passam a ir para o número terminado em ${payoutMsisdn.slice(-4)}. Se não foste tu, muda já a password.`,
+      data: { type: 'payout_number_changed' },
+    });
+  }
+
+  // Moderação (ADMIN)
 
   /**
    * Suspende um utilizador (isActive=false). O JwtAuthGuard / serviços
@@ -177,6 +248,9 @@ export class UsersService {
       where: { id: targetUserId },
       data: { isActive: false },
     });
+
+    // Sem isto, reactivar a conta devolvia a vida às sessões antigas.
+    await this.sessions.revokeAllForUser(targetUserId);
 
     await this.audit.record({
       action: AuditAction.USER_SUSPENDED,

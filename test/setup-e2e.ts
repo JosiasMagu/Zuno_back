@@ -45,11 +45,12 @@ if (!testDbUrl.includes('zuno_db_test')) {
 process.env.DATABASE_URL = testDbUrl;
 process.env.NODE_ENV = 'test';
 
+// Custo mínimo do bcrypt: cada teste faz vários logins, e com o custo de
+// produção a suite demorava vários minutos a mais.
+process.env.PASSWORD_HASH_ROUNDS = '4';
+
 if (!process.env.JWT_ACCESS_SECRET) {
   process.env.JWT_ACCESS_SECRET = 'e2e-test-access-secret';
-}
-if (!process.env.JWT_REFRESH_SECRET) {
-  process.env.JWT_REFRESH_SECRET = 'e2e-test-refresh-secret';
 }
 if (!process.env.JWT_ACCESS_EXPIRES_IN) {
   process.env.JWT_ACCESS_EXPIRES_IN = '15m';

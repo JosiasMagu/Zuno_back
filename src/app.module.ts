@@ -18,17 +18,20 @@ import { ServicesModule } from './modules/services/services.module';
 import { UsersModule } from './modules/users/users.module';
 import { VerificationsModule } from './modules/verifications/verifications.module';
 import { AuditModule } from './shared/audit/audit.module';
+import { validateEnv } from './shared/config/env.validation';
 import { DatabaseModule } from './shared/db/database.module';
 import { IdempotencyModule } from './common/idempotency/idempotency.module';
 import { LoggerModule } from './shared/logger/logger.module';
 import { MetricsModule } from './shared/metrics/metrics.module';
 import { NotificationsModule } from './shared/notifications/notifications.module';
+import { RealtimeModule } from './shared/realtime/live-connections';
 import { SentryModule } from './shared/sentry/sentry.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      validate: validateEnv,
     }),
     LoggerModule,
     SentryModule,
@@ -42,6 +45,7 @@ import { SentryModule } from './shared/sentry/sentry.module';
       },
     ]),
     DatabaseModule,
+    RealtimeModule,
     AuditModule,
     IdempotencyModule,
     NotificationsModule,

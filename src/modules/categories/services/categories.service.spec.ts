@@ -41,10 +41,15 @@ const auditMock = { record: jest.fn() };
 const makePrisma = () => ({
   category: {
     findUnique: jest.fn(),
-    findMany: jest.fn(),
+    // Por omissão a árvore está vazia e a categoria não tem subcategorias.
+    findMany: jest.fn().mockResolvedValue([]),
+    count: jest.fn().mockResolvedValue(0),
     create: jest.fn(),
     update: jest.fn(),
   },
+  // Por omissão a categoria não tem anúncios.
+  equipment: { count: jest.fn().mockResolvedValue(0) },
+  service: { count: jest.fn().mockResolvedValue(0) },
 });
 
 // SUITE
@@ -607,14 +612,8 @@ describe('CategoriesService', () => {
     });
 
     it('lança BadRequestException se categoria tem subcategorias activas', async () => {
-      prisma.category.findUnique.mockResolvedValue(
-        makeCategory({
-          children: [
-            { id: 'child-1', name: 'Sub', slug: 'sub', isActive: true },
-          ],
-          equipment: [],
-        }),
-      );
+      prisma.category.findUnique.mockResolvedValue(makeCategory());
+      prisma.category.count.mockResolvedValue(1);
 
       await expect(service.remove(ADMIN_ID, CAT_ID)).rejects.toThrow(
         new BadRequestException(
@@ -625,12 +624,8 @@ describe('CategoriesService', () => {
     });
 
     it('lança BadRequestException se categoria tem equipamentos vinculados', async () => {
-      prisma.category.findUnique.mockResolvedValue(
-        makeCategory({
-          children: [],
-          equipment: [{ id: 'equip-1', status: 'ACTIVE' }],
-        }),
-      );
+      prisma.category.findUnique.mockResolvedValue(makeCategory());
+      prisma.equipment.count.mockResolvedValue(1);
 
       await expect(service.remove(ADMIN_ID, CAT_ID)).rejects.toThrow(
         new BadRequestException(
@@ -641,13 +636,8 @@ describe('CategoriesService', () => {
     });
 
     it('lança BadRequestException se categoria tem serviços vinculados', async () => {
-      prisma.category.findUnique.mockResolvedValue(
-        makeCategory({
-          children: [],
-          equipment: [],
-          services: [{ id: 'service-1', status: 'ACTIVE' }],
-        }),
-      );
+      prisma.category.findUnique.mockResolvedValue(makeCategory());
+      prisma.service.count.mockResolvedValue(1);
 
       await expect(service.remove(ADMIN_ID, CAT_ID)).rejects.toThrow(
         new BadRequestException(
@@ -672,6 +662,320 @@ describe('CategoriesService', () => {
           targetId: CAT_ID,
         }),
       );
+    });
+  });
+
+  // A árvore, o tipo e a reactivação
+
+  describe('árvore de categorias', () => {
+    const CHILD_ID = 'child-uuid-001';
+    const GRANDCHILD_ID = 'grandchild-uuid-001';
+
+    /** construcao > betoneiras > betoneiras eléctricas */
+    const tree = [
+      { id: CAT_ID, parentId: null },
+      { id: CHILD_ID, parentId: CAT_ID },
+      { id: GRANDCHILD_ID, parentId: CHILD_ID },
+    ];
+
+    it('recusa pôr uma categoria debaixo de uma das suas subcategorias', async () => {
+      prisma.category.findUnique.mockResolvedValue(makeCategory());
+      prisma.category.findMany.mockResolvedValue(tree);
+
+      await expect(
+        service.update(ADMIN_ID, CAT_ID, { parentId: GRANDCHILD_ID }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Uma categoria não pode ficar debaixo de uma das suas subcategorias.',
+        ),
+      );
+      expect(prisma.category.update).not.toHaveBeenCalled();
+    });
+
+    it('aceita mudar uma subcategoria para outro ramo', async () => {
+      const OTHER_ID = 'other-uuid-001';
+      prisma.category.findUnique
+        .mockResolvedValueOnce(makeCategory({ id: CHILD_ID, parentId: CAT_ID }))
+        .mockResolvedValueOnce(makeCategory({ id: OTHER_ID }));
+      prisma.category.findMany.mockResolvedValue([
+        ...tree,
+        { id: OTHER_ID, parentId: null },
+      ]);
+      prisma.category.update.mockResolvedValue(makeCategory({ id: CHILD_ID }));
+
+      await service.update(ADMIN_ID, CHILD_ID, { parentId: OTHER_ID });
+
+      expect(prisma.category.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { parentId: OTHER_ID } }),
+      );
+    });
+
+    it('tira a categoria de debaixo do pai com parentId null', async () => {
+      prisma.category.findUnique.mockResolvedValue(
+        makeCategory({ id: CHILD_ID, parentId: CAT_ID }),
+      );
+      prisma.category.update.mockResolvedValue(makeCategory({ id: CHILD_ID }));
+
+      await service.update(ADMIN_ID, CHILD_ID, { parentId: null });
+
+      expect(prisma.category.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { parentId: null } }),
+      );
+    });
+
+    it('tira o ícone com iconUrl null', async () => {
+      prisma.category.findUnique.mockResolvedValue(
+        makeCategory({ iconUrl: 'https://exemplo.com/icone.png' }),
+      );
+      prisma.category.update.mockResolvedValue(makeCategory());
+
+      await service.update(ADMIN_ID, CAT_ID, { iconUrl: null });
+
+      expect(prisma.category.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { iconUrl: null } }),
+      );
+    });
+
+    it('não volta a olhar para o pai quando só muda o nome', async () => {
+      prisma.category.findUnique
+        .mockResolvedValueOnce(makeCategory({ id: CHILD_ID, parentId: CAT_ID }))
+        .mockResolvedValueOnce(null);
+      prisma.category.update.mockResolvedValue(makeCategory({ id: CHILD_ID }));
+
+      await service.update(ADMIN_ID, CHILD_ID, { name: 'Betoneiras e afins' });
+
+      // Só a categoria e a verificação do nome: o pai não é lido.
+      expect(prisma.category.findUnique).toHaveBeenCalledTimes(2);
+      expect(prisma.category.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('tipo da categoria', () => {
+    const PARENT_ID = 'parent-uuid-001';
+
+    it('recusa criar uma subcategoria de serviços debaixo de um pai de equipamentos', async () => {
+      prisma.category.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(
+          makeCategory({ id: PARENT_ID, kind: CategoryKind.EQUIPMENT }),
+        );
+
+      await expect(
+        service.create(ADMIN_ID, {
+          name: 'Canalização',
+          parentId: PARENT_ID,
+          kind: CategoryKind.SERVICE,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Uma subcategoria tem de ser do mesmo tipo da categoria pai, salvo se o pai servir para equipamentos e serviços.',
+        ),
+      );
+      expect(prisma.category.create).not.toHaveBeenCalled();
+    });
+
+    it('aceita qualquer subcategoria debaixo de um pai que serve para os dois', async () => {
+      prisma.category.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(
+          makeCategory({ id: PARENT_ID, kind: CategoryKind.BOTH }),
+        );
+      prisma.category.create.mockResolvedValue(makeCategory());
+
+      await expect(
+        service.create(ADMIN_ID, {
+          name: 'Canalização',
+          parentId: PARENT_ID,
+          kind: CategoryKind.SERVICE,
+        }),
+      ).resolves.toBeDefined();
+    });
+
+    it('muda o tipo de uma categoria vazia', async () => {
+      prisma.category.findUnique.mockResolvedValue(makeCategory());
+      prisma.category.update.mockResolvedValue(
+        makeCategory({ kind: CategoryKind.BOTH }),
+      );
+
+      await service.update(ADMIN_ID, CAT_ID, { kind: CategoryKind.BOTH });
+
+      expect(prisma.category.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { kind: CategoryKind.BOTH } }),
+      );
+    });
+
+    it('recusa passar a só de serviços uma categoria com equipamentos', async () => {
+      prisma.category.findUnique.mockResolvedValue(makeCategory());
+      prisma.equipment.count.mockResolvedValue(3);
+
+      await expect(
+        service.update(ADMIN_ID, CAT_ID, { kind: CategoryKind.SERVICE }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Esta categoria tem equipamentos. Não pode passar a ser só de serviços.',
+        ),
+      );
+    });
+
+    it('recusa passar a só de equipamentos uma categoria com serviços', async () => {
+      prisma.category.findUnique.mockResolvedValue(
+        makeCategory({ kind: CategoryKind.BOTH }),
+      );
+      prisma.service.count.mockResolvedValue(1);
+
+      await expect(
+        service.update(ADMIN_ID, CAT_ID, { kind: CategoryKind.EQUIPMENT }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Esta categoria tem serviços. Não pode passar a ser só de equipamentos.',
+        ),
+      );
+    });
+
+    it('recusa um tipo que deixa de fora as subcategorias', async () => {
+      prisma.category.findUnique.mockResolvedValue(
+        makeCategory({ kind: CategoryKind.BOTH }),
+      );
+      prisma.category.findMany.mockResolvedValue([
+        { kind: CategoryKind.SERVICE },
+      ]);
+
+      await expect(
+        service.update(ADMIN_ID, CAT_ID, { kind: CategoryKind.EQUIPMENT }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Esta categoria tem subcategorias de outro tipo. Muda primeiro o tipo delas.',
+        ),
+      );
+    });
+
+    it('guarda o nome e o tipo juntos, como o painel do admin os envia', async () => {
+      prisma.category.findUnique
+        .mockResolvedValueOnce(makeCategory())
+        .mockResolvedValueOnce(null);
+      prisma.category.update.mockResolvedValue(makeCategory());
+
+      await service.update(ADMIN_ID, CAT_ID, {
+        name: 'Construção civil',
+        kind: CategoryKind.BOTH,
+      });
+
+      expect(prisma.category.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            name: 'Construção civil',
+            slug: 'construcao-civil',
+            kind: CategoryKind.BOTH,
+          },
+        }),
+      );
+    });
+  });
+
+  describe('activar e desactivar', () => {
+    it('desactiva pela edição com as mesmas condições da remoção', async () => {
+      prisma.category.findUnique.mockResolvedValue(makeCategory());
+      prisma.equipment.count.mockResolvedValue(2);
+
+      await expect(
+        service.update(ADMIN_ID, CAT_ID, { isActive: false }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Não é possível remover uma categoria que possui equipamentos vinculados.',
+        ),
+      );
+    });
+
+    it('desactiva uma categoria vazia e fica em auditoria como desactivação', async () => {
+      prisma.category.findUnique.mockResolvedValue(makeCategory());
+      prisma.category.update.mockResolvedValue(
+        makeCategory({ isActive: false }),
+      );
+
+      await service.update(ADMIN_ID, CAT_ID, { isActive: false });
+
+      expect(prisma.category.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { isActive: false } }),
+      );
+      expect(auditMock.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'CATEGORY_DEACTIVATED' }),
+      );
+    });
+
+    it('reactiva uma categoria desactivada', async () => {
+      prisma.category.findUnique.mockResolvedValue(
+        makeCategory({ isActive: false }),
+      );
+      prisma.category.update.mockResolvedValue(makeCategory());
+
+      await service.update(ADMIN_ID, CAT_ID, { isActive: true });
+
+      expect(prisma.category.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { isActive: true } }),
+      );
+      expect(auditMock.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'CATEGORY_REACTIVATED' }),
+      );
+    });
+
+    it('recusa reactivar debaixo de um pai desactivado', async () => {
+      prisma.category.findUnique
+        .mockResolvedValueOnce(
+          makeCategory({ isActive: false, parentId: 'parent-uuid-001' }),
+        )
+        .mockResolvedValueOnce({ isActive: false });
+
+      await expect(
+        service.update(ADMIN_ID, CAT_ID, { isActive: true }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'A categoria pai está desactivada. Reactiva-a primeiro, ou tira esta categoria de debaixo dela.',
+        ),
+      );
+    });
+
+    it('continua a responder 404 a outra edição de uma categoria desactivada', async () => {
+      prisma.category.findUnique.mockResolvedValue(
+        makeCategory({ isActive: false }),
+      );
+
+      await expect(
+        service.update(ADMIN_ID, CAT_ID, { name: 'Outro nome' }),
+      ).rejects.toThrow(new NotFoundException('Categoria não encontrada.'));
+    });
+
+    it('diz que o nome pertence a uma categoria desactivada', async () => {
+      prisma.category.findUnique.mockResolvedValue(
+        makeCategory({ id: 'outra-uuid', isActive: false }),
+      );
+
+      await expect(
+        service.create(ADMIN_ID, { name: 'Construção' }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Já existe uma categoria desactivada com esse nome. Reactiva-a em vez de criar outra.',
+        ),
+      );
+    });
+
+    it('a lista do admin traz também as desactivadas, com as activas primeiro', async () => {
+      prisma.category.findMany.mockResolvedValue([
+        makeCategory(),
+        makeCategory({ id: 'outra-uuid', isActive: false }),
+      ]);
+
+      const result = await service.findAllForAdmin();
+
+      expect(result.data).toHaveLength(2);
+      expect(prisma.category.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+        }),
+      );
+      expect(
+        (prisma.category.findMany.mock.calls[0][0] as { where?: unknown })
+          .where,
+      ).toBeUndefined();
     });
   });
 });

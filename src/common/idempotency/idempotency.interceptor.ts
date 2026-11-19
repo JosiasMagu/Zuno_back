@@ -7,8 +7,8 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request, Response } from 'express';
-import { Observable, of, throwError } from 'rxjs';
-import { catchError, tap } from 'rxjs/operators';
+import { from, Observable, of, throwError } from 'rxjs';
+import { catchError, concatMap } from 'rxjs/operators';
 
 import { ApiErrors, ApiException } from '../exceptions/api.exception';
 import { ErrorCode } from '../exceptions/error-codes';
@@ -16,17 +16,16 @@ import { IDEMPOTENT_KEY, type IdempotentOptions } from './idempotent.decorator';
 import { IdempotencyService } from './idempotency.service';
 
 /**
- * Interceptor global que torna endpoints marcados com `@Idempotent()`
- * resilientes a retries. Fluxo:
+ * Torna as rotas marcadas com `@Idempotent()` seguras de repetir.
  *
- *  1. Lê `Idempotency-Key` do header — obrigatório se decorator presente.
- *  2. Hash do body para detectar reuso da mesma key com payload diferente.
- *  3. Tenta adquirir lock optimista na tabela IdempotencyKey:
- *     - acquired → processa handler e cacheia a resposta no fim
- *     - replay   → devolve a resposta cacheada (200 vira 200, etc.)
- *     - in-progress → 409 (cliente deve fazer backoff e retry)
- *     - mismatch → 409 com IDEMPOTENCY_KEY_MISMATCH
- *  4. Se o handler der erro, liberta o lock para permitir retry imediato.
+ *  1. Exige o cabeçalho `Idempotency-Key`.
+ *  2. Identifica o pedido pela chave, por quem o envia e pelo caminho real,
+ *     com os ids. A mesma chave em dois recursos são dois pedidos.
+ *  3. Com a chave livre, o pedido corre e a resposta fica guardada antes de
+ *     seguir para o cliente.
+ *  4. Com a chave já usada: repete a resposta guardada, ou responde 409 se o
+ *     primeiro pedido ainda corre ou se os dados mudaram.
+ *  5. Se o pedido falhar, a chave fica livre para uma nova tentativa.
  */
 @Injectable()
 export class IdempotencyInterceptor implements NestInterceptor {
@@ -71,15 +70,14 @@ export class IdempotencyInterceptor implements NestInterceptor {
       );
     }
 
-    const routePath = (request as { route?: { path?: string } }).route?.path;
-    const endpoint = `${request.method} ${routePath ?? request.url}`;
-    const requestHash = this.idempotency.hashRequestBody(request.body);
+    // O caminho real, e não o padrão da rota: `PATCH /payments/A/release` e
+    // `PATCH /payments/B/release` são pedidos diferentes.
+    const path = (request.originalUrl ?? request.url).split('?')[0];
+    const idempotent = { key, userId, endpoint: `${request.method} ${path}` };
 
     const result = await this.idempotency.tryAcquire({
-      key,
-      userId,
-      endpoint,
-      requestHash,
+      ...idempotent,
+      requestHash: this.idempotency.hashRequest(request.body, request.query),
       ttlHours: options.ttlHours ?? 24,
     });
 
@@ -104,24 +102,22 @@ export class IdempotencyInterceptor implements NestInterceptor {
       return of(result.response.body);
     }
 
-    // 'acquired' — processar handler e cachear resposta
     return next.handle().pipe(
-      tap((body: unknown) => {
-        const statusCode = response.statusCode || HttpStatus.OK;
-        // fire-and-forget: não bloqueia a resposta ao cliente
-        void this.idempotency.complete({
-          key,
-          userId,
-          endpoint,
-          statusCode,
+      // A resposta só segue depois de guardada. Se seguisse antes, uma falha
+      // ao guardar deixava a chave "em curso" sem ninguém dar por isso.
+      concatMap(async (body: unknown) => {
+        await this.idempotency.complete({
+          ...idempotent,
+          statusCode: response.statusCode || HttpStatus.OK,
           body,
         });
+        return body;
       }),
-      catchError((err: unknown) => {
-        // Liberta o lock para o cliente poder retentar de imediato
-        void this.idempotency.release({ key, userId, endpoint });
-        return throwError(() => err);
-      }),
+      catchError((error: unknown) =>
+        from(this.idempotency.release(idempotent)).pipe(
+          concatMap(() => throwError(() => error)),
+        ),
+      ),
     );
   }
 }

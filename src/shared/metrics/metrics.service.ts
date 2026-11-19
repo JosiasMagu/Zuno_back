@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import {
   collectDefaultMetrics,
   Counter,
+  Gauge,
   Histogram,
   Registry,
 } from 'prom-client';
@@ -39,6 +40,48 @@ export class MetricsService implements OnModuleInit {
     name: 'zuno_business_events_total',
     help: 'Counter for domain events (bookings, payments, reviews, disputes...).',
     labelNames: ['event'] as const,
+    registers: [this.registry],
+  });
+
+  /**
+   * Divergências que a última reconciliação do dinheiro encontrou. Qualquer
+   * valor acima de zero pede um humano.
+   */
+  readonly reconciliationFindings = new Gauge({
+    name: 'zuno_reconciliation_findings',
+    help: 'Mismatches found by the last money reconciliation run. Anything above zero needs a human.',
+    registers: [this.registry],
+  });
+
+  /** Dinheiro no escrow segundo o ledger: entradas menos saídas. */
+  readonly escrowHeld = new Gauge({
+    name: 'zuno_escrow_held_mzn',
+    help: 'Money held in escrow according to the ledger (inflows minus outflows), in MZN.',
+    registers: [this.registry],
+  });
+
+  /** Payouts já decididos e ainda por executar. */
+  readonly payoutsOwed = new Gauge({
+    name: 'zuno_payouts_owed_mzn',
+    help: 'Payouts decided but not executed yet, in MZN.',
+    registers: [this.registry],
+  });
+
+  /**
+   * O que a última reconciliação encontrou parado tempo demais, por tipo:
+   * OPERATION_STUCK, PAYOUT_STALE, UNALLOCATED_OPEN.
+   */
+  readonly reconciliationAlerts = new Gauge({
+    name: 'zuno_reconciliation_alerts',
+    help: 'Items waiting too long found by the last money reconciliation run, by kind.',
+    labelNames: ['kind'],
+    registers: [this.registry],
+  });
+
+  /** Dinheiro na conta que não fecha nenhum pagamento e ainda não foi devolvido. */
+  readonly unallocatedFunds = new Gauge({
+    name: 'zuno_unallocated_funds_mzn',
+    help: 'Money received that closes no payment and has not been returned yet, in MZN.',
     registers: [this.registry],
   });
 

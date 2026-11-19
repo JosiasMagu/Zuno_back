@@ -3,6 +3,7 @@ import { Type, Transform } from 'class-transformer';
 import {
   IsBoolean,
   IsEnum,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -13,6 +14,13 @@ import {
   MinLength,
 } from 'class-validator';
 import { EquipmentCondition } from '@prisma/client';
+
+import { toOptionalBoolean } from '../../../common/dto/transforms';
+import {
+  MAX_DEPOSIT_AMOUNT,
+  MAX_EQUIPMENT_UNITS,
+  MAX_LISTING_PRICE,
+} from '../../../shared/constants/policy';
 
 export class CreateEquipmentDto {
   @ApiProperty({
@@ -55,6 +63,7 @@ export class CreateEquipmentDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0.01)
+  @Max(MAX_LISTING_PRICE)
   pricePerDay!: number;
 
   @ApiPropertyOptional({
@@ -66,6 +75,7 @@ export class CreateEquipmentDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0.01)
+  @Max(MAX_LISTING_PRICE)
   pricePerWeek?: number;
 
   @ApiPropertyOptional({
@@ -77,6 +87,7 @@ export class CreateEquipmentDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0.01)
+  @Max(MAX_LISTING_PRICE)
   pricePerMonth?: number;
 
   @ApiProperty({
@@ -87,6 +98,7 @@ export class CreateEquipmentDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @Max(MAX_DEPOSIT_AMOUNT)
   depositAmount!: number;
 
   @ApiProperty({
@@ -133,7 +145,7 @@ export class CreateEquipmentDto {
     default: false,
   })
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(({ value }: { value: unknown }) => toOptionalBoolean(value))
   @IsBoolean()
   deliveryAvailable?: boolean;
 
@@ -143,7 +155,7 @@ export class CreateEquipmentDto {
     default: false,
   })
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(({ value }: { value: unknown }) => toOptionalBoolean(value))
   @IsBoolean()
   operatorAvailable?: boolean;
 
@@ -155,8 +167,9 @@ export class CreateEquipmentDto {
   })
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsInt()
   @Min(1)
+  @Max(MAX_EQUIPMENT_UNITS)
   quantity?: number;
 
   @ApiPropertyOptional({

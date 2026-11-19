@@ -2,7 +2,6 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { DisputeReason } from '@prisma/client';
 import {
-  IsArray,
   IsEnum,
   IsOptional,
   IsString,
@@ -10,6 +9,8 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+
+import { IsEvidenceUrls } from './evidence-urls';
 
 export class CreateDisputeDto {
   @ApiPropertyOptional({
@@ -51,8 +52,6 @@ export class CreateDisputeDto {
       'URLs das fotos de evidência (já carregadas via POST /disputes/upload-evidence)',
     type: [String],
   })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
+  @IsEvidenceUrls()
   evidenceUrls?: string[];
 }

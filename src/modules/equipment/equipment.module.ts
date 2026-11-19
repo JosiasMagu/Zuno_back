@@ -5,13 +5,18 @@ import { CloudinaryModule } from '../../shared/cloudinary/cloudinary.module';
 import { VerificationsModule } from '../verifications/verifications.module';
 import { EquipmentController } from './controllers/equipment.controller';
 import { EquipmentPhotosController } from './controllers/equipment-photos.controller';
+import { EquipmentAvailabilityService } from './services/equipment-availability.service';
 import { EquipmentService } from './services/equipment.service';
 import { EquipmentPhotosService } from './services/equipment-photos.service';
 
 @Module({
   imports: [AuthModule, CloudinaryModule, VerificationsModule],
   controllers: [EquipmentController, EquipmentPhotosController],
-  providers: [EquipmentService, EquipmentPhotosService],
+  providers: [
+    EquipmentService,
+    EquipmentAvailabilityService,
+    EquipmentPhotosService,
+  ],
   exports: [EquipmentService],
 })
 export class EquipmentModule {}

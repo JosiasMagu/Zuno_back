@@ -15,13 +15,18 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
+
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import {
+  FindConversationsQueryDto,
   FindMessagesQueryDto,
   SendMessageDto,
   StartConversationDto,
 } from '../dto/chat.dto';
+import { ChatGateway } from '../gateways/chat.gateway';
+import { ChatPresenter } from '../presenters/chat.presenter';
 import { ChatService } from '../services/chat.service';
 
 @ApiTags('Chat')
@@ -29,27 +34,39 @@ import { ChatService } from '../services/chat.service';
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth('access-token')
 export class ChatController {
-  constructor(private readonly chatService: ChatService) {}
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly gateway: ChatGateway,
+  ) {}
 
-  // Iniciar conversa (CLIENT)
+  // Iniciar conversa
 
   @Post('conversations')
+  // O limite por conta está no serviço. Este é a rede por IP.
+  @Throttle({ global: { ttl: 60_000, limit: 20 } })
   @ApiOperation({
-    summary: 'Iniciar conversa sobre um equipamento',
+    summary: 'Iniciar conversa sobre um equipamento ou um serviço',
     description:
-      'Só CLIENTs podem iniciar. Se já existe conversa com o mesmo owner ' +
-      'sobre o mesmo equipment, envia a mensagem na conversa existente.',
+      'Quem pede fala com o dono do anúncio. Com clientId, é o dono do ' +
+      'anúncio a falar com um cliente que tem uma reserva ou um pedido nele. ' +
+      'Se a conversa já existe, a mensagem vai para ela. Há um limite diário ' +
+      'de conversas novas por conta (429).',
   })
   @ApiBody({ type: StartConversationDto })
   @ApiResponse({ status: 201, description: 'Conversa iniciada com sucesso.' })
   @ApiResponse({ status: 400, description: 'Dados inválidos.' })
   @ApiResponse({ status: 403, description: 'Sem permissão.' })
-  @ApiResponse({ status: 404, description: 'Equipamento não encontrado.' })
-  startConversation(
+  @ApiResponse({ status: 404, description: 'Anúncio não encontrado.' })
+  @ApiResponse({ status: 429, description: 'Conversas ou mensagens a mais.' })
+  async startConversation(
     @CurrentUser() user: { id: string },
     @Body() dto: StartConversationDto,
   ) {
-    return this.chatService.startConversation(user.id, dto);
+    const result = await this.chatService.startConversation(user.id, dto);
+
+    this.gateway.broadcastMessage(result.data.message);
+
+    return result;
   }
 
   // Listar conversas do utilizador
@@ -58,11 +75,15 @@ export class ChatController {
   @ApiOperation({
     summary: 'Listar as minhas conversas',
     description:
-      'Devolve todas as conversas do utilizador ordenadas pela última mensagem.',
+      'As conversas do utilizador, da mais recente para a mais antiga, ' +
+      'paginadas (30 por omissão, 100 no máximo). Cada uma traz unreadCount.',
   })
   @ApiResponse({ status: 200, description: 'Conversas obtidas com sucesso.' })
-  findMyConversations(@CurrentUser() user: { id: string }) {
-    return this.chatService.findMyConversations(user.id);
+  findMyConversations(
+    @CurrentUser() user: { id: string },
+    @Query() query: FindConversationsQueryDto,
+  ) {
+    return this.chatService.findMyConversations(user.id, query);
   }
 
   // Detalhe de uma conversa + mensagens
@@ -72,7 +93,7 @@ export class ChatController {
     summary: 'Obter conversa com mensagens',
     description:
       'Devolve os detalhes da conversa e as mensagens paginadas. ' +
-      'Marca automaticamente as mensagens do outro como lidas.',
+      'Ficam lidas as mensagens do outro até à mais recente desta página.',
   })
   @ApiParam({ name: 'id', description: 'ID da conversa' })
   @ApiResponse({ status: 200, description: 'Conversa obtida com sucesso.' })
@@ -86,20 +107,21 @@ export class ChatController {
     return this.chatService.findConversation(user.id, id, query);
   }
 
-  // Enviar mensagem via REST (fallback quando WebSocket nao disponivel)
+  // Enviar mensagem
 
   @Post('conversations/:id/messages')
   @ApiOperation({
-    summary: 'Enviar mensagem via REST (fallback)',
+    summary: 'Enviar mensagem',
     description:
-      'Alternativa ao WebSocket para ambientes sem suporte a sockets. ' +
-      'O front deve preferir o WebSocket para tempo real.',
+      'É por aqui que a app envia. Cada conta tem um limite de mensagens ' +
+      'por minuto (429). Quem estiver ligado pelo socket recebe-a também.',
   })
   @ApiParam({ name: 'id', description: 'ID da conversa' })
   @ApiBody({ type: SendMessageDto })
   @ApiResponse({ status: 201, description: 'Mensagem enviada com sucesso.' })
   @ApiResponse({ status: 403, description: 'Sem acesso a esta conversa.' })
   @ApiResponse({ status: 404, description: 'Conversa não encontrada.' })
+  @ApiResponse({ status: 429, description: 'Mensagens a mais num minuto.' })
   async sendMessage(
     @CurrentUser() user: { id: string },
     @Param('id') conversationId: string,
@@ -110,14 +132,17 @@ export class ChatController {
       conversationId,
       dto.content,
     );
+    const formatted = ChatPresenter.toMessage(message);
+
+    this.gateway.broadcastMessage(formatted);
 
     return {
       message: 'Mensagem enviada com sucesso.',
-      data: message,
+      data: formatted,
     };
   }
 
-  // Contar mensagens nao lidas
+  // Contar mensagens não lidas
 
   @Get('unread-count')
   @ApiOperation({

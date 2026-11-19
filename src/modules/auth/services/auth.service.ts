@@ -3,15 +3,14 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { AuthSession, UserRole, VerificationPurpose } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
-import type { StringValue } from 'ms';
+import { UserRole, VerificationPurpose } from '@prisma/client';
 
 import { ApiErrors } from '../../../common/exceptions/api.exception';
 import { ErrorCode } from '../../../common/exceptions/error-codes';
 import { PrismaService } from '../../../shared/db/prisma.service';
+import { normalizeMzPhone } from '../../../shared/phone/mz-phone';
+import { ACCESS_TOKEN_TYPE, AccessTokenPayload } from '../access-token';
 import {
   ChangePasswordDto,
   ConfirmPhoneVerificationDto,
@@ -21,22 +20,29 @@ import {
 } from '../dto/verification.dto';
 import { LoginDto } from '../dto/login.dto';
 import { RegisterDto } from '../dto/register.dto';
-import { VerificationService } from './verification.service';
-
-const PASSWORD_BCRYPT_ROUNDS = 12;
+import { AuthAuditService } from './auth-audit.service';
+import { LoginThrottleService } from './login-throttle.service';
+import { PasswordConfirmationService } from './password-confirmation.service';
+import { PasswordHasher } from './password-hasher.service';
+import { SessionOrigin, SessionsService } from './sessions.service';
+import { invalidCodeError, VerificationService } from './verification.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
-    private readonly configService: ConfigService,
+    private readonly sessions: SessionsService,
+    private readonly passwords: PasswordHasher,
+    private readonly loginThrottle: LoginThrottleService,
     private readonly verification: VerificationService,
+    private readonly passwordConfirmation: PasswordConfirmationService,
+    private readonly audit: AuthAuditService,
   ) {}
 
   async requestPhoneVerification(dto: RequestPhoneVerificationDto) {
     const user = await this.prisma.user.findUnique({
-      where: { phone: dto.phone.trim() },
+      where: { phone: dto.phone },
       select: { id: true, phone: true, email: true, isVerified: true },
     });
 
@@ -49,21 +55,21 @@ export class AuthService {
       });
     }
 
-    return { message: 'Se a conta existir, foi enviado um codigo.' };
+    return { message: 'Se a conta existir, foi enviado um código.' };
   }
 
   async confirmPhoneVerification(dto: ConfirmPhoneVerificationDto) {
     const user = await this.prisma.user.findUnique({
-      where: { phone: dto.phone.trim() },
+      where: { phone: dto.phone },
       select: { id: true, isVerified: true },
     });
 
     if (!user) {
-      throw new BadRequestException('Codigo invalido ou expirado.');
+      throw invalidCodeError();
     }
 
     if (user.isVerified) {
-      return { message: 'Conta ja verificada.' };
+      return { message: 'Conta já verificada.' };
     }
 
     await this.verification.consumeCode({
@@ -82,7 +88,7 @@ export class AuthService {
 
   async forgotPassword(dto: ForgotPasswordDto) {
     const user = await this.prisma.user.findUnique({
-      where: { phone: dto.phone.trim() },
+      where: { phone: dto.phone },
       select: { id: true, phone: true, email: true, isActive: true },
     });
 
@@ -97,19 +103,22 @@ export class AuthService {
 
     return {
       message:
-        'Se a conta existir, foi enviado um codigo para redefinir a password.',
+        'Se a conta existir, foi enviado um código para redefinir a password.',
     };
   }
 
-  async resetPassword(dto: ResetPasswordDto) {
+  async resetPassword(dto: ResetPasswordDto, origin: SessionOrigin = {}) {
     const user = await this.prisma.user.findUnique({
-      where: { phone: dto.phone.trim() },
+      where: { phone: dto.phone },
       select: { id: true, isActive: true },
     });
 
     if (!user || !user.isActive) {
-      throw new BadRequestException('Codigo invalido ou expirado.');
+      throw invalidCodeError();
     }
+
+    // Antes de gastar o código: uma password recusada não o deve queimar.
+    this.assertNotPhoneNumber(dto.newPassword, dto.phone);
 
     await this.verification.consumeCode({
       userId: user.id,
@@ -117,10 +126,7 @@ export class AuthService {
       purpose: VerificationPurpose.PASSWORD_RESET,
     });
 
-    const passwordHash = await bcrypt.hash(
-      dto.newPassword,
-      PASSWORD_BCRYPT_ROUNDS,
-    );
+    const passwordHash = await this.passwords.hash(dto.newPassword);
 
     await this.prisma.$transaction([
       this.prisma.user.update({
@@ -133,45 +139,51 @@ export class AuthService {
       }),
     ]);
 
+    await this.audit.passwordReset(user.id, origin);
+
     return {
       message:
-        'Password redefinida com sucesso. As sessoes activas foram revogadas.',
+        'Password redefinida com sucesso. As sessões activas foram revogadas.',
     };
   }
 
-  async changePassword(userId: string, dto: ChangePasswordDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, passwordHash: true },
-    });
-
-    if (!user) {
-      throw new UnauthorizedException('Sessao invalida.');
-    }
-
-    const ok = await bcrypt.compare(dto.currentPassword, user.passwordHash);
-
-    if (!ok) {
-      throw new UnauthorizedException('Password actual incorrecta.');
-    }
-
-    const passwordHash = await bcrypt.hash(
-      dto.newPassword,
-      PASSWORD_BCRYPT_ROUNDS,
+  /**
+   * Troca a password de quem está autenticado. As outras sessões da conta
+   * terminam; a sessão de onde veio o pedido continua.
+   */
+  async changePassword(
+    userId: string,
+    sessionId: string,
+    dto: ChangePasswordDto,
+  ) {
+    const { phone } = await this.passwordConfirmation.confirm(
+      userId,
+      dto.currentPassword,
+      'PASSWORD_CHANGE',
     );
 
+    this.assertNotPhoneNumber(dto.newPassword, phone);
+
     await this.prisma.user.update({
-      where: { id: user.id },
-      data: { passwordHash },
+      where: { id: userId },
+      data: { passwordHash: await this.passwords.hash(dto.newPassword) },
     });
+
+    await this.sessions.revokeAllForUser(userId, {
+      exceptSessionId: sessionId,
+    });
+
+    await this.audit.passwordChanged(userId, sessionId);
 
     return { message: 'Password alterada com sucesso.' };
   }
 
-  async register(dto: RegisterDto) {
-    const phone = dto.phone.trim();
+  async register(dto: RegisterDto, origin: SessionOrigin = {}) {
+    const { phone } = dto;
     const email = dto.email?.trim().toLowerCase();
     const name = dto.name.trim();
+
+    this.assertNotPhoneNumber(dto.password, phone);
 
     const existingByPhone = await this.prisma.user.findUnique({
       where: { phone },
@@ -191,24 +203,16 @@ export class AuthService {
       }
     }
 
-    const passwordHash = await bcrypt.hash(dto.password, 10);
-
     const createdUser = await this.prisma.user.create({
       data: {
         name,
         phone,
         email,
-        passwordHash,
+        passwordHash: await this.passwords.hash(dto.password),
       },
     });
 
-    const tokens = await this.generateTokens(
-      createdUser.id,
-      createdUser.phone,
-      createdUser.role,
-    );
-
-    await this.createSession(createdUser.id, tokens.refreshToken);
+    const { tokens } = await this.startSession(createdUser.id, origin);
 
     return {
       message: 'Conta criada com sucesso.',
@@ -217,40 +221,46 @@ export class AuthService {
     };
   }
 
-  async login(dto: LoginDto) {
-    const phone = dto.phone.trim();
+  async login(dto: LoginDto, origin: SessionOrigin = {}) {
+    const { phone } = dto;
+
+    await this.loginThrottle.assertNotLocked(phone);
 
     const user = await this.prisma.user.findUnique({
       where: { phone },
     });
 
-    // Devolvemos o mesmo erro para "utilizador não existe" e "senha errada"
-    // — evita revelar a quem invasores quais números têm conta.
-    if (!user) {
+    // A password é comparada exista ou não a conta, e a resposta é a mesma
+    // nos dois casos: quem tenta não fica a saber que números têm conta.
+    const passwordMatches = await this.passwords.matches(
+      dto.password,
+      user?.passwordHash,
+    );
+
+    if (!user || !passwordMatches) {
+      await this.loginThrottle.recordFailure(phone);
+
+      if (user) {
+        await this.audit.loginFailed(user.id, 'WRONG_PASSWORD', origin);
+      }
+
       throw ApiErrors.unauthorized(
         ErrorCode.AUTH_INVALID_CREDENTIALS,
         'Credenciais inválidas.',
       );
     }
 
+    // Só quem acertou na password fica a saber que a conta está desactivada.
     if (!user.isActive) {
+      await this.audit.loginFailed(user.id, 'ACCOUNT_SUSPENDED', origin);
       throw ApiErrors.forbidden(ErrorCode.FORBIDDEN, 'Conta desativada.');
     }
 
-    const passwordMatches = await bcrypt.compare(
-      dto.password,
-      user.passwordHash,
-    );
+    await this.loginThrottle.clear(phone);
+    await this.upgradePasswordHash(user.id, dto.password, user.passwordHash);
 
-    if (!passwordMatches) {
-      throw ApiErrors.unauthorized(
-        ErrorCode.AUTH_INVALID_CREDENTIALS,
-        'Credenciais inválidas.',
-      );
-    }
-
-    const tokens = await this.generateTokens(user.id, user.phone, user.role);
-    await this.createSession(user.id, tokens.refreshToken);
+    const { sessionId, tokens } = await this.startSession(user.id, origin);
+    await this.audit.loginSucceeded(user.id, sessionId, origin);
 
     return {
       message: 'Login realizado com sucesso.',
@@ -260,106 +270,20 @@ export class AuthService {
   }
 
   async refreshToken(refreshToken: string) {
-    if (!refreshToken?.trim()) {
-      throw new UnauthorizedException('Refresh token é obrigatório.');
-    }
-
-    const payload = await this.verifyRefreshToken(refreshToken);
-
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
-    });
-
-    if (!user) {
-      throw new UnauthorizedException('Utilizador não encontrado.');
-    }
-
-    if (!user.isActive) {
-      throw new UnauthorizedException('Conta desativada.');
-    }
-
-    const sessions = await this.prisma.authSession.findMany({
-      where: {
-        userId: user.id,
-        revokedAt: null,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
-
-    const matchedSession = await this.findMatchingSession(
-      sessions,
-      refreshToken,
-    );
-
-    if (!matchedSession) {
-      throw new UnauthorizedException('Sessão inválida ou revogada.');
-    }
-
-    if (matchedSession.expiresAt.getTime() < Date.now()) {
-      await this.prisma.authSession.update({
-        where: { id: matchedSession.id },
-        data: {
-          revokedAt: new Date(),
-        },
-      });
-
-      throw new UnauthorizedException('Refresh token expirado.');
-    }
-
-    const tokens = await this.generateTokens(user.id, user.phone, user.role);
-
-    const newRefreshTokenHash = await bcrypt.hash(tokens.refreshToken, 10);
-
-    await this.prisma.authSession.update({
-      where: { id: matchedSession.id },
-      data: {
-        refreshTokenHash: newRefreshTokenHash,
-        expiresAt: this.getRefreshTokenExpiryDate(),
-        revokedAt: null,
-      },
-    });
+    const session = await this.sessions.rotate(refreshToken);
 
     return {
       message: 'Token renovado com sucesso.',
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
+      accessToken: await this.signAccessToken(
+        session.userId,
+        session.sessionId,
+      ),
+      refreshToken: session.refreshToken,
     };
   }
 
   async logout(refreshToken: string) {
-    if (!refreshToken?.trim()) {
-      throw new UnauthorizedException('Refresh token é obrigatório.');
-    }
-
-    const payload = await this.verifyRefreshToken(refreshToken);
-
-    const sessions = await this.prisma.authSession.findMany({
-      where: {
-        userId: payload.sub,
-        revokedAt: null,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
-
-    const matchedSession = await this.findMatchingSession(
-      sessions,
-      refreshToken,
-    );
-
-    if (!matchedSession) {
-      throw new UnauthorizedException('Sessão inválida ou já revogada.');
-    }
-
-    await this.prisma.authSession.update({
-      where: { id: matchedSession.id },
-      data: {
-        revokedAt: new Date(),
-      },
-    });
+    await this.sessions.revokeByToken(refreshToken);
 
     return {
       message: 'Logout realizado com sucesso.',
@@ -382,96 +306,60 @@ export class AuthService {
     return this.toSafeUser(user);
   }
 
-  private async generateTokens(userId: string, phone: string, role: UserRole) {
-    // getOrThrow lanca InternalServerErrorException se a variavel nao existir.
-    // Nunca usar fallback com string hardcoded - seria uma vulnerabilidade critica.
-    const accessSecret =
-      this.configService.getOrThrow<string>('JWT_ACCESS_SECRET');
+  /** Usar o próprio telefone como password é das primeiras coisas que se tentam. */
+  private assertNotPhoneNumber(password: string, phone: string) {
+    if (normalizeMzPhone(password) === phone) {
+      throw new BadRequestException(
+        'A password não pode ser o teu número de telefone.',
+      );
+    }
+  }
 
-    const refreshSecret =
-      this.configService.getOrThrow<string>('JWT_REFRESH_SECRET');
+  /**
+   * Refaz o hash de uma password guardada com um custo de bcrypt mais baixo
+   * do que o actual. Só se pode fazer no login, que é quando se tem a
+   * password em claro.
+   */
+  private async upgradePasswordHash(
+    userId: string,
+    password: string,
+    storedHash: string,
+  ) {
+    if (!this.passwords.needsRehash(storedHash)) {
+      return;
+    }
 
-    const accessExpiresIn = (this.configService.get<string>(
-      'JWT_ACCESS_EXPIRES_IN',
-    ) ?? '15m') as StringValue;
-
-    const refreshExpiresIn = (this.configService.get<string>(
-      'JWT_REFRESH_EXPIRES_IN',
-    ) ?? '7d') as StringValue;
-
-    const payload = {
-      sub: userId,
-      phone,
-      role,
-    };
-
-    const accessToken = await this.jwtService.signAsync(payload, {
-      secret: accessSecret,
-      expiresIn: accessExpiresIn,
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: await this.passwords.hash(password) },
     });
+  }
 
-    const refreshToken = await this.jwtService.signAsync(payload, {
-      secret: refreshSecret,
-      expiresIn: refreshExpiresIn,
-    });
+  /** Abre a sessão de quem acabou de se autenticar. Devolve o id dela e o par de tokens. */
+  private async startSession(userId: string, origin: SessionOrigin) {
+    const session = await this.sessions.open(userId, origin);
 
     return {
-      accessToken,
-      refreshToken,
+      sessionId: session.sessionId,
+      tokens: {
+        accessToken: await this.signAccessToken(userId, session.sessionId),
+        refreshToken: session.refreshToken,
+      },
     };
   }
 
-  private async createSession(userId: string, refreshToken: string) {
-    const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
+  /**
+   * O access token leva o id da sessão, para deixar de ser aceite assim que
+   * a sessão for revogada. O segredo e a validade vêm do JwtModule.
+   */
+  private signAccessToken(userId: string, sessionId: string) {
+    const payload: AccessTokenPayload = {
+      sub: userId,
+      sid: sessionId,
+      typ: ACCESS_TOKEN_TYPE,
+    };
 
-    await this.prisma.authSession.create({
-      data: {
-        userId,
-        refreshTokenHash,
-        expiresAt: this.getRefreshTokenExpiryDate(),
-      },
-    });
-  }
-
-  private getRefreshTokenExpiryDate() {
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
-    return expiresAt;
-  }
-
-  private async verifyRefreshToken(refreshToken: string) {
-    const refreshSecret =
-      this.configService.getOrThrow<string>('JWT_REFRESH_SECRET');
-
-    try {
-      return await this.jwtService.verifyAsync<{
-        sub: string;
-        phone: string;
-        role: UserRole;
-      }>(refreshToken, {
-        secret: refreshSecret,
-      });
-    } catch {
-      throw new UnauthorizedException('Refresh token inválido ou expirado.');
-    }
-  }
-
-  private async findMatchingSession(
-    sessions: AuthSession[],
-    refreshToken: string,
-  ) {
-    for (const session of sessions) {
-      const isMatch = await bcrypt.compare(
-        refreshToken,
-        session.refreshTokenHash,
-      );
-
-      if (isMatch) {
-        return session;
-      }
-    }
-
-    return null;
+    return this.jwtService.signAsync(payload);
   }
 
   private toSafeUser(user: {
