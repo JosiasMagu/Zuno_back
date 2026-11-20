@@ -653,7 +653,7 @@ O que o backend aceita por compatibilidade são nomes e formatos antigos. O cód
 
 O que falta na app, por ordem de gravidade:
 
-1. Pagamento. A app paga por `POST /payments/booking/:id/mock-pay`, que responde 403 em produção. O caminho real são `GET /payments/instructions`, `PATCH /payments/:id/declare` e `POST /payments/:id/collect` (secções 8 e 14).
+1. Pagamento. A app paga por `POST /payments/booking/:id/mock-pay`, que responde 403 em produção. O caminho real são `GET /payments/instructions`, `PATCH /payments/:id/declare` e `POST /payments/:id/collect` (secções 8 e 14). No modo manual de hoje falta também o lado do admin: o painel não tem a fila `GET /payments/admin/declared` nem a confirmação `PATCH /payments/:id/mark-held`, e sem elas um pagamento declarado nunca fica retido. Os payouts (`/payouts`, secção 5) também não têm ecrã.
 2. Estado `EXPIRED`. Uma reserva por pagar expira (secção 7). `getStatusColors` não tem esse caso e devolve `undefined`, por isso rebentam os quatro ecrãs que lêem `colors.bg`: `(tabs)/bookings`, `(tabs)/requests`, `booking/my-bookings` e `booking/[id]`.
 3. Devolução. O botão com que o proprietário conclui a reserva aparece em `CONFIRMED`, e o backend só aceita a conclusão em `ACTIVE`. Falta também a reclamação do depósito, `POST /disputes/deposit-claim` (secção 1).
 4. Serviços. Depois de aceitar um orçamento, a app não tem ecrã para a reserva de serviço: o pagamento e as rotas `start`, `complete` e `cancel` de `/service-bookings` (secção 8).
