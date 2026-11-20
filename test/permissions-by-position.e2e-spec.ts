@@ -8,6 +8,7 @@ import {
   assertStatus,
   BookingFlowActors,
   createApprovedEquipment,
+  createBooking,
   paymentReceipt,
   resetBookingFlow,
 } from './helpers/booking-flow';
@@ -212,6 +213,26 @@ describe('Permissions by position E2E', () => {
         where: { id: paymentId },
       });
       expect(payment.status).toBe('HELD');
+    });
+  });
+
+  describe('an account with nothing published', () => {
+    // A app pede as reservas recebidas a todas as contas, para o contador do
+    // separador de pedidos.
+    it('gets an empty list of received bookings, and never the bookings of someone else', async () => {
+      const equipmentId = await createApprovedEquipment(actors);
+      await createBooking(actors, equipmentId, 5);
+      const receivedBy = (token: string) =>
+        request(actors.httpServer)
+          .get('/api/v1/bookings/owner')
+          .set(authHeader(token));
+
+      const asClient = await receivedBy(actors.client.accessToken);
+      const asOwner = await receivedBy(actors.provider.accessToken);
+
+      expect(asClient.status).toBe(200);
+      expect(asClient.body.data).toEqual([]);
+      expect(asOwner.body.data).toHaveLength(1);
     });
   });
 });

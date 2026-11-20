@@ -642,7 +642,7 @@ O M-Pesa ainda não está ligado. Esta secção descreve o que a API já aceita 
 
 ## 15. Estado da app e compatibilidade (2026-11-20)
 
-A app em `feature/new-design` (commit `75209c6`) ainda segue o contrato antigo. O backend aceita quatro coisas que ela já faz, para não dar erro em uso normal, e há cinco faltas que só se resolvem na app.
+A app em `feature/new-design` (commit `75209c6`) ainda segue o contrato antigo. O backend aceita cinco coisas que ela já faz, para não dar erro em uso normal, e há cinco faltas que só se resolvem na app. A lista vem da leitura do código e de um ensaio da app web contra o backend local, com contas de cliente, proprietário e admin.
 
 O que o backend aceita por compatibilidade são nomes e formatos antigos. O código novo da app deve usar os actuais.
 
@@ -650,6 +650,7 @@ O que o backend aceita por compatibilidade são nomes e formatos antigos. O cód
 - `GET /equipment` aceita o filtro `deliveryIncluded` com o efeito de `deliveryAvailable`. Quando chegam os dois, vale `deliveryAvailable`.
 - `GET /equipment` devolve `total`, `page`, `limit` e `totalPages` também no topo da resposta, com os valores de `meta`. As outras listas só têm `meta`.
 - `GET /equipment/:id` e `GET /services/:id` continuam públicos e só mostram anúncios activos a quem não os gere. Com a sessão do dono ou de um admin no cabeçalho `Authorization`, um anúncio em revisão ou rejeitado responde como em `me/listings/:id`. Um anúncio removido responde 404 a todos. Um token inválido ou expirado nestas duas rotas responde 401, para a app renovar a sessão e repetir o pedido.
+- `GET /bookings/owner` responde a qualquer conta com sessão. A app pede-o a todas, para o contador do separador de pedidos, e uma conta sem anúncios recebe uma lista vazia em vez de 403.
 
 O que falta na app, por ordem de gravidade:
 
@@ -659,4 +660,4 @@ O que falta na app, por ordem de gravidade:
 4. Serviços. Depois de aceitar um orçamento, a app não tem ecrã para a reserva de serviço: o pagamento e as rotas `start`, `complete` e `cancel` de `/service-bookings` (secção 8).
 5. Disputas. Falta a resposta da outra parte (`PATCH /disputes/:id/respond`) e a retirada (`withdraw`). O painel de admin mostra os botões de resolver em `OPEN` e `AWAITING_OWNER`, e o backend só resolve em `UNDER_REVIEW` (secção 10).
 
-Mais pequeno: o ecrã de registo aceita passwords de 6 caracteres e o backend exige 8.
+Mais pequeno: o ecrã de registo aceita passwords de 6 caracteres e o backend exige 8. Ao abrir a app directamente num endereço, antes de a sessão carregar, o perfil mostra os dados pessoais como «Não definido» e `/admin` volta ao início.

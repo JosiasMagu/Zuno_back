@@ -88,9 +88,11 @@ export class BookingsController {
     return this.bookingsService.findMyBookings(user.id, query);
   }
 
+  // Qualquer conta pode perguntar: a app pede isto a todas, para o contador do
+  // separador de pedidos. Quem não tem anúncios recebe uma lista vazia.
   @Get('owner')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.PROVIDER, UserRole.ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.PROVIDER, UserRole.ADMIN)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Listar reservas como proprietário' })
   @ApiQuery({ name: 'page', required: false, example: 1 })
