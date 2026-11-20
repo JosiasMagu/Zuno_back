@@ -1531,6 +1531,20 @@ describe('EquipmentService', () => {
       expect(result.data).toHaveLength(1);
     });
 
+    it('traz a data de criação, que o painel de admin mostra em cada pendente', async () => {
+      const createdAt = new Date('2026-11-20T08:00:00Z');
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(ADMIN_ID, UserRole.ADMIN),
+      );
+      prisma.equipment.findMany.mockResolvedValue([
+        makeEquipment({ status: EquipmentStatus.PENDING_REVIEW, createdAt }),
+      ]);
+
+      const result = await service.findPending(ADMIN_ID);
+
+      expect(result.data[0].createdAt).toEqual(createdAt);
+    });
+
     it('filtra apenas PENDING_REVIEW na query', async () => {
       prisma.user.findUnique.mockResolvedValue(
         makeUser(ADMIN_ID, UserRole.ADMIN),

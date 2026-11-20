@@ -525,6 +525,16 @@ describe('ServicesService', () => {
       expect(result.data).toHaveLength(1);
     });
 
+    it('findPending traz a data de criação, que o painel de admin mostra', async () => {
+      const createdAt = new Date('2026-11-20T08:00:00Z');
+      prisma.user.findUnique.mockResolvedValue(makeAdmin());
+      prisma.service.findMany.mockResolvedValue([makeService({ createdAt })]);
+
+      const result = await service.findPending(ADMIN_ID);
+
+      expect(result.data[0].createdAt).toEqual(createdAt);
+    });
+
     it('findMyListings: user inexistente -> NotFound', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
       await expect(service.findMyListings('x')).rejects.toThrow(

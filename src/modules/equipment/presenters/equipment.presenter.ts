@@ -179,6 +179,7 @@ export class EquipmentPresenter {
       pricePerMonth?: unknown;
       depositAmount?: unknown;
       isPremium?: boolean;
+      createdAt?: Date;
     },
     freeUnitsToday: number,
   ) {
@@ -203,6 +204,7 @@ export class EquipmentPresenter {
       totalRating: toNumber(equipment.totalRating),
       totalReviews: equipment.totalReviews ?? 0,
       totalBookings: equipment._count?.bookings ?? 0,
+      createdAt: equipment.createdAt ?? null,
       category: {
         id: equipment.category.id,
         name: equipment.category.name,

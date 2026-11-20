@@ -148,6 +148,7 @@ export class ServicePresenter {
       latitude?: unknown;
       longitude?: unknown;
       estimatedHours?: number | null;
+      createdAt?: Date;
     },
   ) {
     return {
@@ -172,6 +173,7 @@ export class ServicePresenter {
       totalRating: toNumber(service.totalRating),
       totalReviews: service.totalReviews ?? 0,
       totalCompleted: service._count?.bookings ?? 0,
+      createdAt: service.createdAt ?? null,
       provider: {
         id: service.provider.id,
         name: service.provider.name,
