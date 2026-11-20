@@ -543,6 +543,43 @@ describe('EquipmentService', () => {
       expect(whereArg).toMatchObject({ deliveryIncluded: true });
     });
 
+    describe('deliveryIncluded, o nome antigo do filtro de entrega', () => {
+      const deliveryFilterOf = async (query: {
+        deliveryAvailable?: boolean;
+        deliveryIncluded?: boolean;
+      }) => {
+        prisma.equipment.findMany.mockResolvedValue([]);
+
+        await service.findAll({ page: 1, limit: 10, ...query });
+
+        const { where } = prisma.equipment.findMany.mock.calls[0][0] as {
+          where: { deliveryIncluded?: boolean };
+        };
+        return where.deliveryIncluded;
+      };
+
+      it('filtra como deliveryAvailable', async () => {
+        expect(await deliveryFilterOf({ deliveryIncluded: true })).toBe(true);
+      });
+
+      it('aceita false, que pede os anúncios sem entrega', async () => {
+        expect(await deliveryFilterOf({ deliveryIncluded: false })).toBe(false);
+      });
+
+      it('perde para deliveryAvailable quando chegam os dois', async () => {
+        expect(
+          await deliveryFilterOf({
+            deliveryAvailable: false,
+            deliveryIncluded: true,
+          }),
+        ).toBe(false);
+      });
+
+      it('não filtra quando não chega nenhum', async () => {
+        expect(await deliveryFilterOf({})).toBeUndefined();
+      });
+    });
+
     it('filtra por condition quando fornecido', async () => {
       prisma.equipment.findMany.mockResolvedValue([]);
       prisma.equipment.count.mockResolvedValue(0);
@@ -596,6 +633,20 @@ describe('EquipmentService', () => {
         totalPages: 3,
         hasNextPage: true,
         hasPreviousPage: true,
+      });
+    });
+
+    it('repete a paginação no topo da resposta, onde a app ainda a lê', async () => {
+      prisma.equipment.findMany.mockResolvedValue([makeEquipment()]);
+      prisma.equipment.count.mockResolvedValue(25);
+
+      const result = await service.findAll({ page: 2, limit: 10 });
+
+      expect(result).toMatchObject({
+        page: 2,
+        limit: 10,
+        total: 25,
+        totalPages: 3,
       });
     });
 
@@ -705,6 +756,79 @@ describe('EquipmentService', () => {
         id: EQUIPMENT_ID,
         status: EquipmentStatus.ACTIVE,
       });
+    });
+
+    describe('anúncio fora do catálogo, pedido com sessão', () => {
+      const underReview = () =>
+        makeEquipment({ status: EquipmentStatus.PENDING_REVIEW });
+
+      beforeEach(() => {
+        // O detalhe público não o encontra: não está activo.
+        prisma.equipment.findFirst.mockResolvedValue(null);
+        prisma.equipment.findUnique.mockResolvedValue(underReview());
+      });
+
+      it('responde ao dono como em findMine', async () => {
+        prisma.user.findUnique.mockResolvedValue(
+          makeUser(OWNER_ID, UserRole.PROVIDER),
+        );
+
+        const result = await service.findOne(EQUIPMENT_ID, OWNER_ID);
+
+        expect(result.data).toMatchObject({
+          id: EQUIPMENT_ID,
+          status: EquipmentStatus.PENDING_REVIEW,
+          rejectionReason: null,
+        });
+      });
+
+      it('responde a um admin', async () => {
+        prisma.user.findUnique.mockResolvedValue(
+          makeUser(ADMIN_ID, UserRole.ADMIN),
+        );
+
+        const result = await service.findOne(EQUIPMENT_ID, ADMIN_ID);
+
+        expect(result.data.status).toBe(EquipmentStatus.PENDING_REVIEW);
+      });
+
+      it('responde 404 a outra conta, sem dizer que o anúncio existe', async () => {
+        prisma.user.findUnique.mockResolvedValue(
+          makeUser(STRANGER_ID, UserRole.CLIENT),
+        );
+
+        await expect(
+          service.findOne(EQUIPMENT_ID, STRANGER_ID),
+        ).rejects.toThrow(new NotFoundException('Equipamento não encontrado.'));
+      });
+
+      it('responde 404 ao dono quando o anúncio foi removido', async () => {
+        prisma.equipment.findUnique.mockResolvedValue(
+          makeEquipment({ status: EquipmentStatus.DELETED }),
+        );
+
+        await expect(service.findOne(EQUIPMENT_ID, OWNER_ID)).rejects.toThrow(
+          NotFoundException,
+        );
+      });
+    });
+
+    it('sem sessão não procura fora do catálogo', async () => {
+      prisma.equipment.findFirst.mockResolvedValue(null);
+
+      await expect(service.findOne(EQUIPMENT_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(prisma.equipment.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('um anúncio activo responde ao dono como a toda a gente', async () => {
+      prisma.equipment.findFirst.mockResolvedValue(makeEquipment());
+
+      const result = await service.findOne(EQUIPMENT_ID, OWNER_ID);
+
+      expect(result.data).not.toHaveProperty('rejectionReason');
+      expect(prisma.equipment.findUnique).not.toHaveBeenCalled();
     });
   });
 

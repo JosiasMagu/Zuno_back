@@ -24,6 +24,7 @@ import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../../auth/guards/optional-jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { CreateEquipmentDto } from '../dto/create-equipment.dto';
 import {
@@ -172,15 +173,21 @@ export class EquipmentController {
     return this.equipmentService.findPending(user.id, query);
   }
 
-  // Detalhe público (só ACTIVE)
+  // Detalhe público (só ACTIVE, salvo para quem gere o anúncio)
 
   @Get(':id')
-  @ApiOperation({ summary: 'Obter equipamento por ID' })
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({
+    summary: 'Obter equipamento por ID',
+    description:
+      'Público: só anúncios activos. Com a sessão do dono ou de um admin, um anúncio em revisão ou rejeitado responde como em `me/listings/:id`.',
+  })
   @ApiParam({ name: 'id', description: 'ID do equipamento' })
   @ApiResponse({ status: 200, description: 'Equipamento obtido com sucesso.' })
+  @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
   @ApiResponse({ status: 404, description: 'Equipamento não encontrado.' })
-  findOne(@Param('id') id: string) {
-    return this.equipmentService.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() viewer?: { id: string }) {
+    return this.equipmentService.findOne(id, viewer?.id);
   }
 
   // Aprovar equipamento (ADMIN)

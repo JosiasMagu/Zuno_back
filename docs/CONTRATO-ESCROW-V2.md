@@ -3,6 +3,11 @@
 > Guia para a equipa de frontend. Estas mudanças entram com a migration
 > `20260702122709_escrow_two_checkpoints_ledger_payout`.
 > Contexto completo: `D:\Project\ZUNO\DECISOES-FASE-0.md`.
+>
+> O que a app tem hoje e o que lhe falta está na secção 15. As notas «Na app»
+> das secções 8 a 14 descrevem uma adaptação que não está no repositório da
+> app: existe como patch sobre o commit `75209c6`, e a equipa de frontend
+> decide se a aproveita.
 
 ## 1. Novo ciclo de vida do aluguer (BREAKING de semântica)
 
@@ -100,6 +105,9 @@ O dinheiro que sai do escrow agora é rastreado:
 3. Paginação de bookings/equipment: ler `meta.totalPages`, não o topo.
 4. Filtro `deliveryIncluded` → `deliveryAvailable`.
 5. Base URL hardcoded → `EXPO_PUBLIC_API_URL`.
+
+Desde 2026-11-20 o backend aceita os itens 1 e 4, e o item 3 na lista de
+equipamentos (secção 15). Os itens 2 e 5 continuam por fazer na app.
 
 ## 7. Reservas e disponibilidade (lote 4)
 
@@ -631,3 +639,24 @@ O M-Pesa ainda não está ligado. Esta secção descreve o que a API já aceita 
 - O detalhe da reserva (`app/booking/[id].tsx`) paga pelo `BookingPaymentPanel` (`components/payments/`). O painel lê `instructions`: no modo manual mostra o número da plataforma e o valor, e envia a referência com `declare`. No automático pede a cobrança com `collect` e volta a ler o pagamento de 4 em 4 segundos enquanto a cobrança estiver em curso, até 3 minutos. O `mock-pay` ficou só como ligação em desenvolvimento (`__DEV__`).
 - No mesmo ecrã, o botão do provider passou a ser "Confirmar devolução do equipamento" e aparece com a reserva `ACTIVE`. Antes aparecia com a reserva `CONFIRMED`, quando o backend ainda recusa a conclusão.
 - As reservas de serviço continuam sem ecrã de pagamento. O painel abre o pagamento por `initiateBookingPayment`, que só serve alugueres, por isso um ecrã de serviço passa-lhe o pagamento que nasce com a aceitação do orçamento.
+
+## 15. Estado da app e compatibilidade (2026-11-20)
+
+A app em `feature/new-design` (commit `75209c6`) ainda segue o contrato antigo. O backend aceita quatro coisas que ela já faz, para não dar erro em uso normal, e há cinco faltas que só se resolvem na app.
+
+O que o backend aceita por compatibilidade são nomes e formatos antigos. O código novo da app deve usar os actuais.
+
+- `POST /reviews` aceita `authorRole: "OWNER"` e grava `PROVIDER`. O filtro `authorRole=OWNER` das listas de avaliações segue a mesma regra. As respostas trazem sempre `PROVIDER`.
+- `GET /equipment` aceita o filtro `deliveryIncluded` com o efeito de `deliveryAvailable`. Quando chegam os dois, vale `deliveryAvailable`.
+- `GET /equipment` devolve `total`, `page`, `limit` e `totalPages` também no topo da resposta, com os valores de `meta`. As outras listas só têm `meta`.
+- `GET /equipment/:id` e `GET /services/:id` continuam públicos e só mostram anúncios activos a quem não os gere. Com a sessão do dono ou de um admin no cabeçalho `Authorization`, um anúncio em revisão ou rejeitado responde como em `me/listings/:id`. Um anúncio removido responde 404 a todos. Um token inválido ou expirado nestas duas rotas responde 401, para a app renovar a sessão e repetir o pedido.
+
+O que falta na app, por ordem de gravidade:
+
+1. Pagamento. A app paga por `POST /payments/booking/:id/mock-pay`, que responde 403 em produção. O caminho real são `GET /payments/instructions`, `PATCH /payments/:id/declare` e `POST /payments/:id/collect` (secções 8 e 14).
+2. Estado `EXPIRED`. Uma reserva por pagar expira (secção 7). `getStatusColors` não tem esse caso e devolve `undefined`, por isso rebentam os quatro ecrãs que lêem `colors.bg`: `(tabs)/bookings`, `(tabs)/requests`, `booking/my-bookings` e `booking/[id]`.
+3. Devolução. O botão com que o proprietário conclui a reserva aparece em `CONFIRMED`, e o backend só aceita a conclusão em `ACTIVE`. Falta também a reclamação do depósito, `POST /disputes/deposit-claim` (secção 1).
+4. Serviços. Depois de aceitar um orçamento, a app não tem ecrã para a reserva de serviço: o pagamento e as rotas `start`, `complete` e `cancel` de `/service-bookings` (secção 8).
+5. Disputas. Falta a resposta da outra parte (`PATCH /disputes/:id/respond`) e a retirada (`withdraw`). O painel de admin mostra os botões de resolver em `OPEN` e `AWAITING_OWNER`, e o backend só resolve em `UNDER_REVIEW` (secção 10).
+
+Mais pequeno: o ecrã de registo aceita passwords de 6 caracteres e o backend exige 8.

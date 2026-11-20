@@ -169,6 +169,29 @@ describe('Reviews and categories E2E', () => {
       expect(ratings(fromClients)).toEqual([5]);
       expect(ratings(fromProviders)).toEqual([1]);
     });
+
+    // A app actual ainda envia o nome antigo do papel (secção 15 do contrato).
+    it('takes OWNER, the old name of the provider role, when writing and when filtering', async () => {
+      const equipmentId = await createApprovedEquipment(actors);
+      const rental = await completeRental(actors, equipmentId, 5);
+
+      const written = await as(actors.provider.accessToken).post('/reviews', {
+        bookingId: rental,
+        authorRole: 'OWNER',
+        rating: 4,
+      });
+      const listed = await publicGet(
+        `/users/${actors.client.userId}/reviews?authorRole=OWNER`,
+      );
+
+      expect(written.status).toBe(201);
+      const saved = await prisma().review.findFirstOrThrow({
+        where: { bookingId: rental },
+      });
+      expect(saved.authorRole).toBe('PROVIDER');
+      expect(listed.status).toBe(200);
+      expect(listed.body.data).toHaveLength(1);
+    });
   });
 
   describe('ratings in the catalog', () => {

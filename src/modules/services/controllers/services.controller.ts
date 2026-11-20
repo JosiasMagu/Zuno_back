@@ -24,6 +24,7 @@ import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../../auth/guards/optional-jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { CreateServiceDto } from '../dto/create-service.dto';
 import {
@@ -147,18 +148,21 @@ export class ServicesController {
     return this.servicesService.findPending(user.id, query);
   }
 
-  // Detalhe público (só ACTIVE)
+  // Detalhe público (só ACTIVE, salvo para quem gere o anúncio)
 
   @Get(':id')
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({
     summary: 'Obter serviço por ID',
-    description: 'Detalhe completo. Apenas serviços ACTIVE.',
+    description:
+      'Público: só serviços activos. Com a sessão do provider ou de um admin, um anúncio em revisão ou rejeitado responde como em `me/listings/:id`.',
   })
   @ApiParam({ name: 'id' })
   @ApiResponse({ status: 200, description: 'Serviço obtido com sucesso.' })
+  @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
   @ApiResponse({ status: 404, description: 'Serviço não encontrado.' })
-  findOne(@Param('id') id: string) {
-    return this.servicesService.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() viewer?: { id: string }) {
+    return this.servicesService.findOne(id, viewer?.id);
   }
 
   // Aprovar serviço (ADMIN)

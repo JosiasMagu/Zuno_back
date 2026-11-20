@@ -19,6 +19,7 @@ import { categoryScope } from '../../../shared/categories/category-scope';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { runSerializable } from '../../../shared/db/serializable-transaction';
 import { MetricsService } from '../../../shared/metrics/metrics.service';
+import { hideFromOutsiders } from '../../../shared/moderation/hide-from-outsiders';
 import {
   changedFields,
   ListingEditor,
@@ -251,8 +252,10 @@ export class EquipmentService {
       where.location = { contains: query.location.trim(), mode: 'insensitive' };
     }
 
-    if (query.deliveryAvailable !== undefined) {
-      where.deliveryIncluded = query.deliveryAvailable;
+    // `deliveryIncluded` é o nome antigo do filtro, que a app ainda envia.
+    const delivery = query.deliveryAvailable ?? query.deliveryIncluded;
+    if (delivery !== undefined) {
+      where.deliveryIncluded = delivery;
     }
 
     if (query.operatorAvailable !== undefined) {
@@ -284,6 +287,8 @@ export class EquipmentService {
       this.prisma.equipment.count({ where }),
     ]);
 
+    const totalPages = Math.ceil(total / limit);
+
     return {
       message: 'Equipamentos obtidos com sucesso.',
       data: await this.withFreeUnits(items, (item, freeUnitsToday) =>
@@ -293,14 +298,23 @@ export class EquipmentService {
         page,
         limit,
         total,
-        totalPages: Math.ceil(total / limit),
+        totalPages,
         hasNextPage: page * limit < total,
         hasPreviousPage: page > 1,
       },
+      // A app ainda lê a paginação desta lista no topo; repete-se a de `meta`.
+      total,
+      page,
+      limit,
+      totalPages,
     };
   }
 
-  async findOne(id: string) {
+  /**
+   * Detalhe público: só anúncios activos. Quem gere o anúncio também o recebe
+   * fora do catálogo, como em `findMine`: a app edita a partir desta rota.
+   */
+  async findOne(id: string, viewerId?: string) {
     const equipment = await this.prisma.equipment.findFirst({
       where: {
         id,
@@ -316,7 +330,8 @@ export class EquipmentService {
     });
 
     if (!equipment) {
-      throw new NotFoundException(NOT_FOUND);
+      if (!viewerId) throw new NotFoundException(NOT_FOUND);
+      return hideFromOutsiders(() => this.findMine(viewerId, id), NOT_FOUND);
     }
 
     return {

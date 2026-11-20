@@ -18,6 +18,7 @@ import { AuditService } from '../../../shared/audit/audit.service';
 import { categoryScope } from '../../../shared/categories/category-scope';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { runSerializable } from '../../../shared/db/serializable-transaction';
+import { hideFromOutsiders } from '../../../shared/moderation/hide-from-outsiders';
 import {
   changedFields,
   ListingEditor,
@@ -308,7 +309,11 @@ export class ServicesService {
     };
   }
 
-  async findOne(id: string) {
+  /**
+   * Detalhe público: só anúncios activos. Quem gere o anúncio também o recebe
+   * fora do catálogo, como em `findMine`: a app abre-o por esta rota.
+   */
+  async findOne(id: string, viewerId?: string) {
     const service = await this.prisma.service.findFirst({
       where: {
         id,
@@ -324,7 +329,8 @@ export class ServicesService {
     });
 
     if (!service) {
-      throw new NotFoundException('Serviço não encontrado.');
+      if (!viewerId) throw new NotFoundException(NOT_FOUND);
+      return hideFromOutsiders(() => this.findMine(viewerId, id), NOT_FOUND);
     }
 
     return {

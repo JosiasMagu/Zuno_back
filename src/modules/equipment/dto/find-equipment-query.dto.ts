@@ -119,6 +119,17 @@ export class FindEquipmentQueryDto extends PaginationQueryDto {
 
   @ApiPropertyOptional({
     example: true,
+    deprecated: true,
+    description:
+      'Nome antigo de `deliveryAvailable`, que a app ainda envia. Quando chegam os dois, vale `deliveryAvailable`.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => toOptionalBoolean(value))
+  @IsBoolean()
+  deliveryIncluded?: boolean;
+
+  @ApiPropertyOptional({
+    example: true,
     description: 'Filtrar apenas equipamentos com operador disponível',
   })
   @IsOptional()

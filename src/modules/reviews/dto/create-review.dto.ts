@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
   IsEnum,
   IsInt,
@@ -10,6 +11,8 @@ import {
   Min,
 } from 'class-validator';
 import { ReviewAuthorRole } from '@prisma/client';
+
+import { toAuthorRole } from './author-role';
 
 export class CreateReviewDto {
   @ApiPropertyOptional({
@@ -32,8 +35,9 @@ export class CreateReviewDto {
     enum: ReviewAuthorRole,
     example: ReviewAuthorRole.CLIENT,
     description:
-      'Papel do autor: CLIENT (avalia equipment + owner) ou OWNER (avalia cliente)',
+      'Papel do autor: CLIENT (avalia o anúncio e quem o publicou) ou PROVIDER (avalia o cliente). OWNER, o nome antigo de PROVIDER, ainda é aceite.',
   })
+  @Transform(({ value }: { value: unknown }) => toAuthorRole(value))
   @IsEnum(ReviewAuthorRole)
   authorRole: ReviewAuthorRole;
 

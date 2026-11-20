@@ -1,7 +1,9 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { IsEnum, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
 import { ReviewAuthorRole } from '@prisma/client';
+
+import { toAuthorRole } from './author-role';
 
 export class FindReviewsQueryDto {
   @ApiPropertyOptional({ example: 1, description: 'Página', default: 1 })
@@ -25,9 +27,11 @@ export class FindReviewsQueryDto {
 
   @ApiPropertyOptional({
     enum: ReviewAuthorRole,
-    description: 'Filtrar por tipo de avaliação',
+    description:
+      'Filtrar por tipo de avaliação. OWNER, o nome antigo de PROVIDER, ainda é aceite.',
   })
   @IsOptional()
+  @Transform(({ value }: { value: unknown }) => toAuthorRole(value))
   @IsEnum(ReviewAuthorRole)
   authorRole?: ReviewAuthorRole;
 

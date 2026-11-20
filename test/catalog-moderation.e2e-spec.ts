@@ -184,6 +184,41 @@ describe('Catalog and moderation E2E', () => {
       });
       expect(theirs.status).toBe(403);
     });
+
+    // A app abre o ecrã de edição pelo detalhe público, com a sessão do dono.
+    it('answers the public detail of a listing under review to its owner and to an admin, and 404 to everyone else', async () => {
+      const equipmentId = await createApprovedEquipment(actors);
+      await provider()
+        .patch(`/equipment/${equipmentId}`, { title: 'Gerador 50 kVA' })
+        .expect(200);
+      const path = `/equipment/${equipmentId}`;
+
+      const owner = await provider().get(path);
+      const moderator = await admin().get(path);
+      const visitor = await publicGet(path);
+      const otherAccount = await client().get(path);
+
+      expect(owner.status).toBe(200);
+      expect(owner.body.data).toMatchObject({
+        id: equipmentId,
+        status: 'PENDING_REVIEW',
+        title: 'Gerador 50 kVA',
+      });
+      expect(moderator.status).toBe(200);
+      expect(visitor.status).toBe(404);
+      expect(otherAccount.status).toBe(404);
+    });
+
+    it('returns 401 on the public detail for a token that is not valid, so the app renews the session', async () => {
+      const equipmentId = await createApprovedEquipment(actors);
+
+      const response = await publicGet(`/equipment/${equipmentId}`).set(
+        'Authorization',
+        'Bearer not-a-token',
+      );
+
+      expect(response.status).toBe(401);
+    });
   });
 
   describe('bookings of a listing that went back to review', () => {
@@ -451,6 +486,37 @@ describe('Catalog and moderation E2E', () => {
       await publicGet('/equipment?page=1000&limit=100').expect(200);
     });
 
+    // O que a app actual ainda envia e lê (secção 15 do contrato).
+    it('takes deliveryIncluded, the old name of the delivery filter, like deliveryAvailable', async () => {
+      const withoutDelivery = await createApprovedEquipment(actors);
+      const created = await provider()
+        .post('/equipment', wholeForm({ deliveryAvailable: true }))
+        .expect(201);
+      const withDelivery = created.body.data.id as string;
+      await admin().patch(`/equipment/${withDelivery}/approve`).expect(200);
+
+      const idsOf = async (query: string) => {
+        const response = await publicGet(`/equipment?${query}`).expect(200);
+        return (response.body.data as Array<{ id: string }>).map(
+          (listed) => listed.id,
+        );
+      };
+
+      expect(await idsOf('deliveryIncluded=true')).toEqual([withDelivery]);
+      expect(await idsOf('deliveryIncluded=false')).toEqual([withoutDelivery]);
+      expect(await idsOf('deliveryAvailable=true')).toEqual([withDelivery]);
+    });
+
+    it('gives the page count of the equipment list at the top of the answer as well as in meta', async () => {
+      await createApprovedEquipment(actors);
+
+      const response = await publicGet('/equipment?limit=1').expect(200);
+
+      const counts = { total: 1, page: 1, limit: 1, totalPages: 1 };
+      expect(response.body).toMatchObject(counts);
+      expect(response.body.meta).toMatchObject(counts);
+    });
+
     it('gives the location of an equipment to the zone, and the exact one only to its owner', async () => {
       const created = await provider()
         .post('/equipment', {
@@ -583,6 +649,28 @@ describe('Catalog and moderation E2E', () => {
         expect.objectContaining({ action: 'SERVICE_SENT_TO_REVIEW' }),
       );
       await publicGet(`/services/${serviceId}`).expect(404);
+    });
+
+    // A app abre o serviço do próprio provider pelo detalhe público.
+    it('answers the public detail of a listing under review to its provider, and 404 to everyone else', async () => {
+      const { serviceId } = await createQuotedService();
+      await provider()
+        .patch(`/services/${serviceId}`, { description: NEW_DESCRIPTION })
+        .expect(200);
+      const path = `/services/${serviceId}`;
+
+      const mine = await provider().get(path);
+      const visitor = await publicGet(path);
+      const otherAccount = await client().get(path);
+
+      expect(mine.status).toBe(200);
+      expect(mine.body.data).toMatchObject({
+        id: serviceId,
+        status: 'PENDING_REVIEW',
+        description: NEW_DESCRIPTION,
+      });
+      expect(visitor.status).toBe(404);
+      expect(otherAccount.status).toBe(404);
     });
 
     it('lets the client accept a quote sent before the listing went back to review', async () => {

@@ -309,6 +309,52 @@ describe('ServicesService', () => {
         NotFoundException,
       );
     });
+
+    describe('anúncio fora do catálogo, pedido com sessão', () => {
+      beforeEach(() => {
+        // O detalhe público não o encontra: não está activo.
+        prisma.service.findFirst.mockResolvedValue(null);
+        prisma.service.findUnique.mockResolvedValue(
+          makeService({ status: ServiceStatus.PENDING_REVIEW }),
+        );
+      });
+
+      it('responde ao provider como em findMine', async () => {
+        prisma.user.findUnique.mockResolvedValue(makeProvider());
+
+        const result = await service.findOne(SERVICE_ID, PROVIDER_ID);
+
+        expect(result.data).toMatchObject({
+          id: SERVICE_ID,
+          status: ServiceStatus.PENDING_REVIEW,
+        });
+      });
+
+      it('responde a um admin', async () => {
+        prisma.user.findUnique.mockResolvedValue(makeAdmin());
+
+        const result = await service.findOne(SERVICE_ID, ADMIN_ID);
+
+        expect(result.data.status).toBe(ServiceStatus.PENDING_REVIEW);
+      });
+
+      it('responde 404 a outra conta, sem dizer que o anúncio existe', async () => {
+        prisma.user.findUnique.mockResolvedValue(makeClient());
+
+        await expect(service.findOne(SERVICE_ID, CLIENT_ID)).rejects.toThrow(
+          new NotFoundException('Serviço não encontrado.'),
+        );
+      });
+    });
+
+    it('sem sessão não procura fora do catálogo', async () => {
+      prisma.service.findFirst.mockResolvedValue(null);
+
+      await expect(service.findOne(SERVICE_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(prisma.service.findUnique).not.toHaveBeenCalled();
+    });
   });
 
   // -------------------------------------------------------------------------
