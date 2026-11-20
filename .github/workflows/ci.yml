@@ -156,13 +156,17 @@ jobs:
       - name: Apply migrations with the migrate image
         run: docker run --rm --network host --env DATABASE_URL zuno-back-migrate:ci
 
-      # A imagem corre com NODE_ENV=production, que exige segredos JWT de 64
-      # caracteres ou mais. Sao gerados na hora e nao servem para mais nada.
+      # A imagem corre com NODE_ENV=production, que exige um segredo JWT de 64
+      # caracteres ou mais, o token do /metrics e o numero para onde os
+      # clientes pagam no modo manual. Os segredos sao gerados na hora e nao
+      # servem para mais nada.
       - name: Start app image
         run: |
           docker run --detach --name zuno-back --network host \
             --env DATABASE_URL \
             --env JWT_ACCESS_SECRET="$(openssl rand -hex 64)" \
+            --env METRICS_TOKEN="$(openssl rand -hex 32)" \
+            --env PAYMENTS_MANUAL_RECEIVER_NUMBER=840000000 \
             --env CLOUDINARY_CLOUD_NAME=ci-dummy \
             --env CLOUDINARY_API_KEY=ci-dummy-key \
             --env CLOUDINARY_API_SECRET=ci-dummy-secret \
