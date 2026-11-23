@@ -34,6 +34,8 @@ export enum CancelledPaymentOutcome {
   VOIDED = 'VOIDED',
   /** O dinheiro estava no escrow e voltou todo ao cliente. */
   REFUNDED = 'REFUNDED',
+  /** O cliente cancelou um aluguer tarde e parte do valor ficou com o provider. */
+  REFUNDED_WITH_RETENTION = 'REFUNDED_WITH_RETENTION',
 }
 
 /**

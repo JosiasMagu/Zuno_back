@@ -25,6 +25,7 @@ import {
   describeError,
   processDue,
 } from '../../../shared/scheduling/process-due';
+import type { CancellingParty } from '../../../shared/bookings/cancelling-party';
 import { issueProviderStrike } from '../../../shared/strikes/provider-strikes';
 import {
   CancelledPaymentOutcome,
@@ -34,10 +35,7 @@ import { expiryReason } from '../../payments/unpaid-reservation';
 import { CancelServiceBookingDto } from '../dto/cancel-service-booking.dto';
 import { FindServiceBookingsQueryDto } from '../dto/find-service-bookings-query.dto';
 import { ServiceBookingPresenter } from '../presenters/service-booking.presenter';
-import {
-  CancellingParty,
-  ServiceBookingNotifier,
-} from './service-booking-notifier.service';
+import { ServiceBookingNotifier } from './service-booking-notifier.service';
 
 const USER_SELECT = {
   id: true,
@@ -222,18 +220,6 @@ export class ServiceBookingsService {
         (tx) => this.applyCancellation(tx, cancellation),
         8000,
       );
-
-    await this.audit.record({
-      action: AuditAction.SERVICE_BOOKING_CANCELLED,
-      actorId: userId,
-      targetType: 'ServiceBooking',
-      targetId: bookingId,
-      metadata: {
-        reason: cancellation.reason,
-        cancelledBy: party,
-        paymentOutcome,
-      },
-    });
 
     if (providerStruck) {
       await this.audit.record({
@@ -458,6 +444,21 @@ export class ServiceBookingsService {
       },
       include: BOOKING_INCLUDE,
     });
+
+    await this.audit.record(
+      {
+        action: AuditAction.SERVICE_BOOKING_CANCELLED,
+        actorId: cancellation.actorId,
+        targetType: 'ServiceBooking',
+        targetId: cancellation.bookingId,
+        metadata: {
+          reason: cancellation.reason,
+          cancelledBy: cancellation.party,
+          paymentOutcome,
+        },
+      },
+      tx,
+    );
 
     return { cancelled, paymentOutcome, providerStruck, suspendedUntil };
   }

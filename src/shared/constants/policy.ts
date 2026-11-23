@@ -68,6 +68,13 @@ export const SERVICE_AUTO_RELEASE_DAYS = 3;
  */
 export const DISPUTE_RESPONSE_WINDOW_DAYS = 3;
 
+/**
+ * Disputas de cada tipo que a mesma pessoa abre sobre um pagamento. A segunda
+ * serve a quem retirou a primeira de boa-fé e voltou a ser enganado. Sem
+ * tecto, abrir e retirar adiava sem fim a libertação automática do dinheiro.
+ */
+export const DISPUTES_PER_OPENER = 2;
+
 /** Strikes de provider que resultam em suspensão de listagens. */
 export const PROVIDER_STRIKE_LIMIT = 3;
 

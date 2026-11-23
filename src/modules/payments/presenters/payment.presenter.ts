@@ -76,6 +76,7 @@ export class PaymentPresenter {
     return {
       id: payment.id,
       bookingId: payment.bookingId,
+      serviceBookingId: payment.serviceBookingId ?? null,
       rentalAmount: Number(payment.rentalAmount),
       depositAmount: Number(payment.depositAmount),
       platformFee: Number(payment.platformFee),
@@ -90,6 +91,7 @@ export class PaymentPresenter {
       releasedAt: payment.releasedAt,
       refundedAt: payment.refundedAt,
       refundAmount: toNumber(payment.refundAmount),
+      depositStatus: payment.depositStatus ?? null,
       depositReleasedAt: payment.depositReleasedAt,
       depositHeldAmount: toNumber(payment.depositHeldAmount),
       receiptNumber: payment.receiptNumber,
@@ -183,29 +185,22 @@ export class PaymentPresenter {
     };
   }
 
-  static toDetails(payment: PaymentDetailsEntity) {
+  /**
+   * `seesPayerNumber`: o número de onde saiu o dinheiro é do cliente. Só ele
+   * e um admin o vêem; para o provider sai vazio.
+   */
+  static toDetails(
+    payment: PaymentDetailsEntity,
+    viewer: { seesPayerNumber: boolean },
+  ) {
+    const [lastCollection] = payment.providerOperations ?? [];
+    const collection = lastCollection
+      ? CollectionPresenter.toItem(lastCollection)
+      : null;
+    const [dispute] = payment.disputes ?? [];
+
     return {
-      id: payment.id,
-      bookingId: payment.bookingId,
-      rentalAmount: Number(payment.rentalAmount),
-      depositAmount: Number(payment.depositAmount),
-      platformFee: Number(payment.platformFee),
-      totalCharged: Number(payment.totalCharged),
-      ownerPayout: toNumber(payment.ownerPayout),
-      currency: payment.currency,
-      method: payment.method,
-      mpesaReference: payment.mpesaReference,
-      status: payment.status,
-      heldAt: payment.heldAt,
-      declaredAt: payment.declaredAt ?? null,
-      releasedAt: payment.releasedAt,
-      refundedAt: payment.refundedAt,
-      refundAmount: toNumber(payment.refundAmount),
-      depositReleasedAt: payment.depositReleasedAt,
-      depositHeldAmount: toNumber(payment.depositHeldAmount),
-      receiptNumber: payment.receiptNumber,
-      createdAt: payment.createdAt,
-      updatedAt: payment.updatedAt,
+      ...PaymentPresenter.toListItem(payment),
       booking: payment.booking
         ? {
             id: payment.booking.id,
@@ -217,38 +212,12 @@ export class PaymentPresenter {
             clientNote: payment.booking.clientNote,
           }
         : null,
-      serviceBooking: payment.serviceBooking
-        ? {
-            id: payment.serviceBooking.id,
-            status: payment.serviceBooking.status,
-            scheduledFor: payment.serviceBooking.scheduledFor,
-          }
-        : null,
-      client: payment.client
-        ? {
-            id: payment.client.id,
-            name: payment.client.name,
-            avatarUrl: payment.client.avatarUrl,
-          }
-        : undefined,
-      owner: payment.owner
-        ? {
-            id: payment.owner.id,
-            name: payment.owner.name,
-            avatarUrl: payment.owner.avatarUrl,
-          }
-        : undefined,
-      ownerId: payment.ownerId,
-      dispute: payment.disputes?.[0]
-        ? {
-            id: payment.disputes[0].id,
-            status: payment.disputes[0].status,
-          }
-        : null,
+      dispute: dispute ? { id: dispute.id, status: dispute.status } : null,
       // A cobrança mais recente no telemóvel: em curso, confirmada ou falhada.
-      collection: payment.providerOperations?.[0]
-        ? CollectionPresenter.toItem(payment.providerOperations[0])
-        : null,
+      collection:
+        collection && !viewer.seesPayerNumber
+          ? { ...collection, msisdn: null }
+          : collection,
     };
   }
 }

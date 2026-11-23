@@ -182,6 +182,19 @@ describe('Booking cancellation E2E', () => {
         `CLIENT_REFUND:${clientRefund}:PENDING`,
         `PROVIDER_PAYOUT:${providerCompensation}:PENDING`,
       ]);
+
+      const audit = await prisma().auditLog.findFirstOrThrow({
+        where: { action: 'BOOKING_CANCELLED', targetId: bookingId },
+      });
+      expect(audit.actorId).toBe(actors.client.userId);
+      expect(Number(audit.amount)).toBe(clientRefund);
+      expect(audit.metadata).toEqual({
+        reason: null,
+        cancelledBy: 'CLIENT',
+        paymentOutcome: 'REFUNDED_WITH_RETENTION',
+        providerCompensation,
+        platformCut,
+      });
     });
 
     it('refunds the client in full and gives the provider a strike when the provider cancels', async () => {

@@ -25,6 +25,7 @@ import {
   AuditService,
   SYSTEM_ACTOR_ID,
 } from '../../../shared/audit/audit.service';
+import type { CancellingParty } from '../../../shared/bookings/cancelling-party';
 import { calculatePlatformFee } from '../../../shared/constants/fees';
 import {
   BOOKING_MAX_DAYS,
@@ -46,7 +47,10 @@ import {
   processDue,
 } from '../../../shared/scheduling/process-due';
 import { issueProviderStrike } from '../../../shared/strikes/provider-strikes';
-import { EscrowRefundService } from '../../payments/services/escrow-refund.service';
+import {
+  CancelledPaymentOutcome,
+  EscrowRefundService,
+} from '../../payments/services/escrow-refund.service';
 import { RENTAL_PAID_OUT_STATUSES } from '../../payments/payment-states';
 import { LedgerService } from '../../payments/services/ledger.service';
 import { PayoutsService } from '../../payments/services/payouts.service';
@@ -148,12 +152,25 @@ interface BookingToConfirm {
 interface BookingCancellation {
   actorId: string;
   reason: string | null;
-  cancelledByClient: boolean;
+  cancelledBy: CancellingParty;
   /** O cliente cancela a menos de CANCELLATION_FREE_WINDOW_HOURS do início. */
   isLateClientCancellation: boolean;
   /** O provider cancela uma reserva que ele próprio já tinha confirmado. */
   issuesProviderStrike: boolean;
 }
+
+/** O que o cancelamento fez ao dinheiro. É o que fica em auditoria. */
+interface CancellationMoney {
+  paymentOutcome: CancelledPaymentOutcome;
+  clientRefund?: number;
+  /** Os dois seguintes só existem no cancelamento tardio do cliente. */
+  providerCompensation?: number;
+  platformCut?: number;
+}
+
+const NOTHING_TO_SETTLE: CancellationMoney = {
+  paymentOutcome: CancelledPaymentOutcome.NOTHING_TO_SETTLE,
+};
 
 /** Pagamento retido de uma reserva cancelada, com o que é preciso para o devolver. */
 interface CancelledPayment {
@@ -464,7 +481,11 @@ export class BookingsService {
     const cancellation: BookingCancellation = {
       actorId: userId,
       reason: dto.reason?.trim() || null,
-      cancelledByClient,
+      cancelledBy: cancelledByClient
+        ? 'CLIENT'
+        : cancelledByProvider
+          ? 'PROVIDER'
+          : 'ADMIN',
       isLateClientCancellation:
         cancelledByClient &&
         this.hoursUntil(booking.startDate) < CANCELLATION_FREE_WINDOW_HOURS,
@@ -1237,9 +1258,25 @@ export class BookingsService {
       },
     });
 
-    if (booking.payment) {
-      await this.settleCancelledPayment(tx, booking.payment.id, cancellation);
-    }
+    const { clientRefund, ...money } = booking.payment
+      ? await this.settleCancelledPayment(tx, booking.payment.id, cancellation)
+      : NOTHING_TO_SETTLE;
+
+    await this.audit.record(
+      {
+        action: AuditAction.BOOKING_CANCELLED,
+        actorId: cancellation.actorId,
+        targetType: 'Booking',
+        targetId: booking.id,
+        amount: clientRefund,
+        metadata: {
+          reason: cancellation.reason,
+          cancelledBy: cancellation.cancelledBy,
+          ...money,
+        },
+      },
+      tx,
+    );
 
     const suspendedUntil = cancellation.issuesProviderStrike
       ? await issueProviderStrike(tx, {
@@ -1266,7 +1303,7 @@ export class BookingsService {
     const rentalHasStarted = this.hoursUntil(booking.startDate) <= 0;
 
     if (
-      !cancellation.cancelledByClient ||
+      cancellation.cancelledBy !== 'CLIENT' ||
       !rentalHasStarted ||
       !booking.payment
     ) {
@@ -1295,7 +1332,7 @@ export class BookingsService {
     tx: Prisma.TransactionClient,
     paymentId: string,
     cancellation: BookingCancellation,
-  ) {
+  ): Promise<CancellationMoney> {
     const payment = await tx.payment.findUnique({
       where: { id: paymentId },
       select: {
@@ -1314,21 +1351,25 @@ export class BookingsService {
         where: { id: payment.id },
         data: { status: PaymentStatus.FAILED },
       });
-      return;
+      return { paymentOutcome: CancelledPaymentOutcome.VOIDED };
     }
 
-    if (payment?.status !== PaymentStatus.HELD) return;
+    if (payment?.status !== PaymentStatus.HELD) return NOTHING_TO_SETTLE;
 
     if (cancellation.isLateClientCancellation) {
-      await this.refundWithLateRetention(tx, payment, cancellation.actorId);
-    } else {
-      // Sem penalização (cliente dentro da janela gratuita, provider ou
-      // admin), tudo volta ao cliente, incluindo a taxa da plataforma.
-      await this.escrowRefunds.refundInFull(tx, payment, {
-        actorId: cancellation.actorId,
-        reason: 'Reembolso total por cancelamento da reserva.',
-      });
+      return this.refundWithLateRetention(tx, payment, cancellation.actorId);
     }
+
+    // Sem penalização (cliente dentro da janela gratuita, provider ou
+    // admin), tudo volta ao cliente, incluindo a taxa da plataforma.
+    await this.escrowRefunds.refundInFull(tx, payment, {
+      actorId: cancellation.actorId,
+      reason: 'Reembolso total por cancelamento da reserva.',
+    });
+    return {
+      paymentOutcome: CancelledPaymentOutcome.REFUNDED,
+      clientRefund: Number(payment.totalCharged),
+    };
   }
 
   /**
@@ -1340,9 +1381,9 @@ export class BookingsService {
     tx: Prisma.TransactionClient,
     payment: CancelledPayment,
     actorId: string,
-  ) {
-    const { clientRefund, providerCompensation, platformCut } =
-      this.splitLateCancellation(payment);
+  ): Promise<CancellationMoney> {
+    const split = this.splitLateCancellation(payment);
+    const { clientRefund, providerCompensation, platformCut } = split;
 
     await this.ledger.recordMany(tx, [
       {
@@ -1394,6 +1435,11 @@ export class BookingsService {
         ...this.depositReturnedIfHeld(payment.depositStatus),
       },
     });
+
+    return {
+      paymentOutcome: CancelledPaymentOutcome.REFUNDED_WITH_RETENTION,
+      ...split,
+    };
   }
 
   /** Como se reparte o que foi cobrado quando o cliente cancela tarde. */

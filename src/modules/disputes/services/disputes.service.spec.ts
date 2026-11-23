@@ -25,9 +25,13 @@ import { DisputeNotifier } from './dispute-notifier.service';
 import { DisputesService } from './disputes.service';
 import { AuditService } from '../../../shared/audit/audit.service';
 import { MetricsService } from '../../../shared/metrics/metrics.service';
-import { DEPOSIT_CLAIM_WINDOW_HOURS } from '../../../shared/constants/policy';
+import {
+  DEPOSIT_CLAIM_WINDOW_HOURS,
+  DISPUTES_PER_OPENER,
+} from '../../../shared/constants/policy';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { ApiException } from '../../../common/exceptions/api.exception';
+import { ErrorCode } from '../../../common/exceptions/error-codes';
 import { EscrowRefundService } from '../../payments/services/escrow-refund.service';
 import { LedgerService } from '../../payments/services/ledger.service';
 import { PayoutsService } from '../../payments/services/payouts.service';
@@ -394,6 +398,24 @@ describe('DisputesService', () => {
       );
     });
 
+    it('recusa mais uma disputa de pagamento a quem já abriu as que podia', async () => {
+      prisma.booking.findUnique.mockResolvedValue(makeBooking());
+      prisma.dispute.count.mockResolvedValue(DISPUTES_PER_OPENER);
+
+      await expect(service.create(CLIENT_ID, validDto)).rejects.toMatchObject({
+        errorCode: ErrorCode.DISPUTE_LIMIT_REACHED,
+        message: 'Já abriste o máximo de disputas deste tipo nesta reserva.',
+      });
+      expect(prisma.dispute.count).toHaveBeenCalledWith({
+        where: {
+          paymentId: PAYMENT_ID,
+          openedBy: CLIENT_ID,
+          type: DisputeType.PAYMENT,
+        },
+      });
+      expect(prisma.dispute.create).not.toHaveBeenCalled();
+    });
+
     it('lança BadRequestException se pagamento está PENDING — não pode abrir disputa', async () => {
       prisma.booking.findUnique.mockResolvedValue(
         makeBooking({
@@ -662,6 +684,24 @@ describe('DisputesService', () => {
           'Esta reserva não tem depósito retido para reclamar.',
         ),
       );
+    });
+
+    it('recusa mais uma reclamação do depósito a quem já abriu as que podia', async () => {
+      prisma.booking.findUnique.mockResolvedValue(makeClaimableBooking());
+      prisma.dispute.count.mockResolvedValue(DISPUTES_PER_OPENER);
+
+      await expect(service.claimDeposit(OWNER_ID, dto)).rejects.toMatchObject({
+        errorCode: ErrorCode.DISPUTE_LIMIT_REACHED,
+        message: 'Já abriste o máximo de disputas deste tipo nesta reserva.',
+      });
+      expect(prisma.dispute.count).toHaveBeenCalledWith({
+        where: {
+          paymentId: PAYMENT_ID,
+          openedBy: OWNER_ID,
+          type: DisputeType.DEPOSIT,
+        },
+      });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('lança BadRequestException se a janela de reclamação já expirou', async () => {

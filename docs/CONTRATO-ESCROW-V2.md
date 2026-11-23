@@ -361,7 +361,8 @@ operação.
   conforme o provider já tinha começado ou concluído.
 - Depois de uma retirada, a libertação automática do pagamento espera 3 dias
   a contar da retirada, para a outra parte ter tempo de abrir a sua disputa.
-- Depois de retirada, pode abrir-se outra disputa na mesma reserva.
+- Depois de retirada, pode abrir-se outra disputa na mesma reserva, até ao
+  limite de duas do mesmo tipo por pessoa (secção 16).
 
 ### Provas
 - `POST /disputes/upload-evidence` aceita qualquer conta autenticada, até 30
@@ -680,6 +681,24 @@ Uma segunda revisão do backend procurou o que funcionava no caso feliz e falhav
 
 ### Dinheiro
 - A libertação automática e o envio automático de payouts não correm para uma conta suspensa. O dinheiro fica retido até um admin decidir. Para a app nada muda: o pagamento continua `HELD`.
+- `GET /payments/:id` e as listas de pagamentos trazem dois campos novos: `depositStatus` (`NONE`, `HELD`, `RETURNED`, `CLAIMED` ou `SPLIT`) e `serviceBookingId`, que vem `null` num aluguer.
+- Em `GET /payments/:id`, o número de onde saiu o dinheiro (`collection.msisdn`) só chega ao cliente que pagou e a um admin. O proprietário recebe `null` nesse campo e o resto da cobrança como antes.
+- Um admin deixa de conseguir reembolsar um pagamento em que uma disputa foi aberta no mesmo instante. Responde o 400 que já existia, «Este pagamento tem uma disputa aberta», e o reembolso decide-se na disputa.
+
+### Disputas
+- Cada pessoa abre no máximo duas disputas do mesmo tipo (pagamento ou depósito) sobre a mesma reserva, e as que retirou contam. A terceira responde 400 com `errorCode: DISPUTE_LIMIT_REACHED`.
+- A segunda existe para quem retirou a primeira por ter chegado a acordo e viu o acordo falhar. Sem tecto, abrir e retirar adiava sem fim a libertação automática do pagamento.
+
+### Contas
+- `avatarUrl` em `PATCH /users/me` e as imagens de `POST /users/me/verification` têm de ser endereços do Cloudinary do projecto. Um endereço de outro sítio responde 400. O backend ainda não tem rota para carregar o avatar nem os documentos de identidade, e a app também não tem esses ecrãs.
+- O token de push sai da conta quando ela fica sem sessões abertas: no logout da última sessão, na troca ou reposição de password e na suspensão. O telemóvel de onde se saiu deixa de receber avisos, e a app volta a registar o token com `POST /users/push-token` depois do login.
+- A reposição de password apaga o número de recebimento. O provider volta a indicá-lo em `PUT /users/me/payout-number`.
+
+### Serviços
+- `GET /services` devolve `category` (`id`, `name`, `slug`) e `provider` (`id`, `name`, `avatarUrl`) como objectos, como o detalhe e a lista de equipamentos. Antes vinham os dois nomes em texto. O cartão de `(tabs)/service` já lê as duas formas.
+- Um provider com a identidade verificada publica serviços sem esperar pela revisão, e editar o título, a descrição ou as fotos não devolve o anúncio à revisão. Os equipamentos já seguiam esta regra.
+- `PATCH /service-requests/:id/cancel` responde 409 quando um orçamento é aceite no mesmo instante. O pedido já tem reserva e pagamento, por isso a app deve voltar a lê-lo.
+- No carregamento de fotos de um serviço (`POST /service-photos/upload`), `isPrimary=false` era lido como verdadeiro. Passa a valer o que foi enviado.
 
 ### Infra-estrutura
 - Um pedido de um browser com uma origem fora de `ALLOWED_ORIGINS` deixa de receber 500. Fica sem os cabeçalhos CORS e é o browser que o bloqueia.

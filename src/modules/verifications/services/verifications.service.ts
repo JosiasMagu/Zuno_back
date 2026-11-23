@@ -202,8 +202,8 @@ export class VerificationsService {
   }
 
   /**
-   * Helper interno usado pelo EquipmentService para decidir auto-approve.
-   * Devolve true sse o utilizador tem KYC aprovado.
+   * True quando o utilizador tem o KYC aprovado. É o que decide se os
+   * anúncios dele (equipamentos e serviços) se publicam sem revisão.
    */
   async isVerified(userId: string): Promise<boolean> {
     const v = await this.prisma.userVerification.findUnique({

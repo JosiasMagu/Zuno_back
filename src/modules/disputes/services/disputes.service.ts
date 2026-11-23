@@ -29,7 +29,11 @@ import {
   SYSTEM_ACTOR_ID,
 } from '../../../shared/audit/audit.service';
 import { MetricsService } from '../../../shared/metrics/metrics.service';
-import { percentOf, roundMoney } from '../../../shared/constants/policy';
+import {
+  DISPUTES_PER_OPENER,
+  percentOf,
+  roundMoney,
+} from '../../../shared/constants/policy';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { runSerializable } from '../../../shared/db/serializable-transaction';
 import {
@@ -171,6 +175,8 @@ const ACCEPTS_RESPONSE = {
 const JOB_BATCH_SIZE = 50;
 
 const ALREADY_OPEN = 'Já existe uma disputa aberta nesta reserva.';
+const DISPUTE_LIMIT_REACHED =
+  'Já abriste o máximo de disputas deste tipo nesta reserva.';
 const RESPONSE_CLOSED = 'Esta disputa já não aceita resposta.';
 
 /** Resposta a quem perdeu a corrida: a reserva mudou enquanto a disputa era aberta. */
@@ -257,6 +263,11 @@ export class DisputesService {
     if (booking.disputes.length > 0) {
       throw new BadRequestException(ALREADY_OPEN);
     }
+    await this.assertDisputesWithinLimit(
+      userId,
+      payment.id,
+      DisputeType.PAYMENT,
+    );
 
     if (payment.status !== PaymentStatus.HELD) {
       throw new BadRequestException(
@@ -350,6 +361,11 @@ export class DisputesService {
     if (booking.disputes.length > 0) {
       throw new BadRequestException(ALREADY_OPEN);
     }
+    await this.assertDisputesWithinLimit(
+      userId,
+      payment.id,
+      DisputeType.PAYMENT,
+    );
 
     if (payment.status !== PaymentStatus.HELD) {
       throw new BadRequestException(
@@ -455,6 +471,11 @@ export class DisputesService {
         'Esta reserva não tem depósito retido para reclamar.',
       );
     }
+    await this.assertDisputesWithinLimit(
+      userId,
+      payment.id,
+      DisputeType.DEPOSIT,
+    );
 
     if (new Date() > depositClaimDeadline(booking)) {
       throw new BadRequestException(
@@ -1047,6 +1068,23 @@ export class DisputesService {
     this.assertPaymentResolvable(fresh.type, fresh.payment);
 
     return fresh;
+  }
+
+  /** Conta também as disputas retiradas: é a reabertura que o tecto trava. */
+  private async assertDisputesWithinLimit(
+    userId: string,
+    paymentId: string,
+    type: DisputeType,
+  ) {
+    const opened = await this.prisma.dispute.count({
+      where: { paymentId, openedBy: userId, type },
+    });
+    if (opened >= DISPUTES_PER_OPENER) {
+      throw ApiErrors.badRequest(
+        ErrorCode.DISPUTE_LIMIT_REACHED,
+        DISPUTE_LIMIT_REACHED,
+      );
+    }
   }
 
   /**

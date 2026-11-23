@@ -84,7 +84,8 @@ const PAYMENT_WITH_PARTIES_INCLUDE = {
   owner: { select: { id: true, name: true, avatarUrl: true } },
 } satisfies Prisma.PaymentInclude;
 
-interface ReleasablePayment {
+/** O que a libertação e o reembolso precisam de saber do pagamento. */
+interface PaymentToDecide {
   status: PaymentStatus;
   /** A disputa aberta do pagamento, se houver. */
   disputes: { id: string }[];
@@ -328,7 +329,10 @@ export class PaymentsService {
 
     return {
       message: 'Pagamento obtido com sucesso.',
-      data: PaymentPresenter.toDetails(payment),
+      data: PaymentPresenter.toDetails(payment, {
+        seesPayerNumber:
+          user.role === UserRole.ADMIN || payment.clientId === userId,
+      }),
     };
   }
 
@@ -498,12 +502,6 @@ export class PaymentsService {
 
     assertNotPartyToPayment(userId, payment);
     this.assertRefundable(payment);
-
-    if (payment.disputes.length > 0) {
-      throw new BadRequestException(
-        'Este pagamento tem uma disputa aberta. O reembolso decide-se na resolução da disputa.',
-      );
-    }
 
     if (!payment.booking && !payment.serviceBooking) {
       throw new BadRequestException('Pagamento sem reserva associada.');
@@ -802,8 +800,8 @@ export class PaymentsService {
   }
 
   private assertReleasable(
-    payment: ReleasablePayment | null,
-  ): asserts payment is ReleasablePayment {
+    payment: PaymentToDecide | null,
+  ): asserts payment is PaymentToDecide {
     if (payment?.status !== PaymentStatus.HELD) {
       throw new BadRequestException(
         'Apenas pagamentos retidos podem ser liberados.',
@@ -988,15 +986,21 @@ export class PaymentsService {
     }
   }
 
-  private assertRefundable(
-    payment: { status: PaymentStatus } | null,
-  ): asserts payment is { status: PaymentStatus } {
+  private assertRefundable<T extends PaymentToDecide>(
+    payment: T | null,
+  ): asserts payment is T {
     if (
       payment?.status !== PaymentStatus.PENDING &&
       payment?.status !== PaymentStatus.HELD
     ) {
       throw new BadRequestException(
         'Apenas pagamentos pendentes ou retidos podem ser reembolsados.',
+      );
+    }
+
+    if (payment.disputes.length > 0) {
+      throw new BadRequestException(
+        'Este pagamento tem uma disputa aberta. O reembolso decide-se na resolução da disputa.',
       );
     }
   }
@@ -1019,6 +1023,8 @@ export class PaymentsService {
         totalCharged: true,
         depositStatus: true,
         clientId: true,
+        // Uma disputa pode ter sido aberta entre a leitura de fora e aqui.
+        disputes: OPEN_DISPUTE_SELECT,
       },
     });
     this.assertRefundable(fresh);

@@ -55,6 +55,18 @@ function toNumber(value: unknown): number | null {
   return Number(value);
 }
 
+const categoryOf = ({ category }: ServiceListEntity) => ({
+  id: category.id,
+  name: category.name,
+  slug: category.slug,
+});
+
+const providerOf = ({ provider }: ServiceListEntity) => ({
+  id: provider.id,
+  name: provider.name,
+  avatarUrl: provider.avatarUrl,
+});
+
 /** O motivo da rejeição só interessa enquanto o anúncio está rejeitado. */
 function rejectionOf(service: {
   status: string;
@@ -70,12 +82,12 @@ export class ServicePresenter {
     return {
       id: service.id,
       title: service.title,
-      category: service.category.name,
+      category: categoryOf(service),
       location: service.location,
       basePrice: Number(service.basePrice),
       pricingType: service.pricingType,
       image: service.photos?.[0]?.url ?? null,
-      provider: service.provider.name,
+      provider: providerOf(service),
       description: service.description,
       acceptsUrgent: service.acceptsUrgent,
       urgentSurcharge: toNumber(service.urgentSurcharge),
@@ -91,11 +103,7 @@ export class ServicePresenter {
       id: service.id,
       title: service.title,
       description: service.description,
-      category: {
-        id: service.category.id,
-        name: service.category.name,
-        slug: service.category.slug,
-      },
+      category: categoryOf(service),
       location: service.location,
       basePrice: Number(service.basePrice),
       pricingType: service.pricingType,
@@ -116,9 +124,7 @@ export class ServicePresenter {
         order: photo.order,
       })),
       provider: {
-        id: service.provider.id,
-        name: service.provider.name,
-        avatarUrl: service.provider.avatarUrl,
+        ...providerOf(service),
         bio: service.provider.bio ?? null,
         totalRating: toNumber(service.provider.providerRating),
         totalReviews: service.provider.providerReviews ?? 0,
@@ -154,11 +160,7 @@ export class ServicePresenter {
     return {
       id: service.id,
       title: service.title,
-      category: {
-        id: service.category.id,
-        name: service.category.name,
-        slug: service.category.slug,
-      },
+      category: categoryOf(service),
       location: service.location,
       basePrice: Number(service.basePrice),
       pricingType: service.pricingType,
@@ -174,11 +176,7 @@ export class ServicePresenter {
       totalReviews: service.totalReviews ?? 0,
       totalCompleted: service._count?.bookings ?? 0,
       createdAt: service.createdAt ?? null,
-      provider: {
-        id: service.provider.id,
-        name: service.provider.name,
-        avatarUrl: service.provider.avatarUrl,
-      },
+      provider: providerOf(service),
     };
   }
 }

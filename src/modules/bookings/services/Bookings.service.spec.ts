@@ -1293,6 +1293,20 @@ describe('BookingsService', () => {
       expect(ledger.recordMany).not.toHaveBeenCalled();
       expect(payouts.createPending).not.toHaveBeenCalled();
       expect(prisma.providerStrike.create).not.toHaveBeenCalled();
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: AuditAction.BOOKING_CANCELLED,
+          actorId: CLIENT_ID,
+          targetType: 'Booking',
+          targetId: BOOKING_ID,
+          metadata: {
+            reason: 'Já não preciso.',
+            cancelledBy: 'CLIENT',
+            paymentOutcome: 'NOTHING_TO_SETTLE',
+          },
+        }),
+        prisma,
+      );
     });
 
     it('ADMIN cancela qualquer reserva PENDING', async () => {
@@ -1419,6 +1433,18 @@ describe('BookingsService', () => {
           depositStatus: DepositStatus.RETURNED,
         }),
       });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: AuditAction.BOOKING_CANCELLED,
+          amount: 1600,
+          metadata: {
+            reason: null,
+            cancelledBy: 'CLIENT',
+            paymentOutcome: 'REFUNDED',
+          },
+        }),
+        prisma,
+      );
     });
 
     describe('com o aluguer já começado', () => {
@@ -1572,6 +1598,20 @@ describe('BookingsService', () => {
           depositStatus: DepositStatus.RETURNED,
         }),
       });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: AuditAction.BOOKING_CANCELLED,
+          amount: 1300,
+          metadata: {
+            reason: null,
+            cancelledBy: 'CLIENT',
+            paymentOutcome: 'REFUNDED_WITH_RETENTION',
+            providerCompensation: 270,
+            platformCut: 30,
+          },
+        }),
+        prisma,
+      );
     });
 
     it('PROVIDER que cancela a menos de 48h NÃO sofre retenção — reembolso total ao cliente', async () => {
@@ -1670,7 +1710,15 @@ describe('BookingsService', () => {
       await service.cancel(ADMIN_ID, BOOKING_ID, {});
 
       expect(prisma.providerStrike.create).not.toHaveBeenCalled();
-      expect(audit.record).not.toHaveBeenCalled();
+      // Só o cancelamento fica em auditoria.
+      expect(audit.record).toHaveBeenCalledTimes(1);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: AuditAction.BOOKING_CANCELLED,
+          metadata: expect.objectContaining({ cancelledBy: 'ADMIN' }),
+        }),
+        prisma,
+      );
     });
 
     it('CLIENTE que cancela reserva CONFIRMED não gera strike', async () => {
@@ -1682,7 +1730,7 @@ describe('BookingsService', () => {
       await service.cancel(CLIENT_ID, BOOKING_ID, {});
 
       expect(prisma.providerStrike.create).not.toHaveBeenCalled();
-      expect(audit.record).not.toHaveBeenCalled();
+      expect(audit.record).toHaveBeenCalledTimes(1);
     });
   });
 

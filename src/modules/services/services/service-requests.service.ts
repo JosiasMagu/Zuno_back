@@ -12,6 +12,8 @@ import {
   UserRole,
 } from '@prisma/client';
 
+import { ApiErrors } from '../../../common/exceptions/api.exception';
+import { ErrorCode } from '../../../common/exceptions/error-codes';
 import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { CreateServiceRequestDto } from '../dto/create-service-request.dto';
@@ -37,6 +39,12 @@ const CLIENT_SELECT = {
 } as const;
 
 const DEFAULT_EXPIRY_DAYS = 7;
+
+/** Estados em que o cliente ainda pode cancelar o pedido. */
+const CANCELLABLE: ServiceRequestStatus[] = [
+  ServiceRequestStatus.OPEN,
+  ServiceRequestStatus.QUOTED,
+];
 
 @Injectable()
 export class ServiceRequestsService {
@@ -253,31 +261,38 @@ export class ServiceRequestsService {
       );
     }
 
-    if (
-      request.status !== ServiceRequestStatus.OPEN &&
-      request.status !== ServiceRequestStatus.QUOTED
-    ) {
+    if (!CANCELLABLE.includes(request.status)) {
       throw new BadRequestException(
         'Apenas pedidos em estado OPEN ou QUOTED podem ser cancelados.',
       );
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const cancelled = await tx.serviceRequest.update({
-        where: { id: requestId },
+      // A condição repete-se na escrita: um orçamento pode ter sido aceite
+      // entre a leitura e aqui, e o pedido já tem reserva e pagamento.
+      const { count } = await tx.serviceRequest.updateMany({
+        where: { id: requestId, status: { in: CANCELLABLE } },
         data: { status: ServiceRequestStatus.CANCELLED },
-        include: {
-          service: { select: SERVICE_SELECT },
-          client: { select: CLIENT_SELECT },
-        },
       });
+      if (count === 0) {
+        throw ApiErrors.conflict(
+          ErrorCode.CONFLICT,
+          'O pedido mudou de estado enquanto era cancelado. Actualiza e tenta de novo.',
+        );
+      }
 
       await tx.serviceQuote.updateMany({
         where: { requestId, status: 'PENDING' },
         data: { status: 'REJECTED' },
       });
 
-      return cancelled;
+      return tx.serviceRequest.findUniqueOrThrow({
+        where: { id: requestId },
+        include: {
+          service: { select: SERVICE_SELECT },
+          client: { select: CLIENT_SELECT },
+        },
+      });
     });
 
     return {

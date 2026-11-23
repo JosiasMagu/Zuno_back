@@ -46,7 +46,10 @@ const makePrisma = () => ({
     findUnique: jest.fn(),
     updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+    // Por omissão a conta continua com outra sessão aberta.
+    count: jest.fn().mockResolvedValue(1),
   },
+  user: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
 });
 
 describe('SessionsService', () => {
@@ -318,6 +321,32 @@ describe('SessionsService', () => {
       });
 
       expect(live.closeUser).toHaveBeenCalledWith(USER_ID, SESSION_ID);
+    });
+  });
+
+  describe('token de push', () => {
+    const forgotten = () =>
+      expect(prisma.user.updateMany).toHaveBeenCalledWith({
+        where: { id: USER_ID, pushToken: { not: null } },
+        data: { pushToken: null },
+      });
+
+    it('sai da conta quando termina a última sessão aberta', async () => {
+      prisma.authSession.count.mockResolvedValue(0);
+
+      await makeService().revokeAllForUser(USER_ID);
+
+      forgotten();
+    });
+
+    it('fica enquanto a conta tiver outra sessão aberta', async () => {
+      prisma.authSession.count.mockResolvedValue(1);
+
+      await makeService().revokeAllForUser(USER_ID, {
+        exceptSessionId: 'sessao-que-fica',
+      });
+
+      expect(prisma.user.updateMany).not.toHaveBeenCalled();
     });
   });
 });

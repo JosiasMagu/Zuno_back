@@ -1,6 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
+import { Transform } from 'class-transformer';
 import { IsBoolean, IsOptional, IsUUID } from 'class-validator';
+
+import { toOptionalBoolean } from '../../../common/dto/transforms';
 
 export class UploadServicePhotoDto {
   @ApiProperty({ description: 'ID do serviço alvo do upload' })
@@ -13,12 +15,7 @@ export class UploadServicePhotoDto {
     description: 'Se true, esta foto torna-se a principal.',
   })
   @IsOptional()
-  @Transform(({ value }) => {
-    if (value === 'true' || value === true) return true;
-    if (value === 'false' || value === false) return false;
-    return value;
-  })
-  @Type(() => Boolean)
+  @Transform(({ value }) => toOptionalBoolean(value))
   @IsBoolean()
   isPrimary?: boolean;
 }

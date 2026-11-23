@@ -8,6 +8,8 @@ import {
   MinLength,
 } from 'class-validator';
 
+import { IsProjectMediaUrl } from '../../../shared/cloudinary/project-media-url';
+
 export class UpdateUserDto {
   @ApiPropertyOptional({
     example: 'Daniel Andrade',
@@ -43,13 +45,14 @@ export class UpdateUserDto {
   bio?: string;
 
   @ApiPropertyOptional({
-    example: 'https://example.com/avatar.png',
-    description: 'URL do avatar do utilizador',
+    example: 'https://res.cloudinary.com/<cloud>/image/upload/avatar.jpg',
+    description:
+      'Foto de perfil. Tem de estar no Cloudinary da plataforma: um link de fora é recusado.',
     maxLength: 500,
   })
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
-  @IsString()
   @MaxLength(500)
+  @IsProjectMediaUrl()
   avatarUrl?: string;
 }

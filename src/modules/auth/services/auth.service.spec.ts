@@ -550,6 +550,20 @@ describe('AuthService', () => {
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     });
 
+    it('entrega a conta limpa do número de recebimento e do token de push que lá estivessem', async () => {
+      prisma.user.findUnique.mockResolvedValue(makeUser());
+
+      await service.resetPassword(dto);
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        data: expect.objectContaining({
+          payoutMsisdn: null,
+          pushToken: null,
+        }) as object,
+      });
+    });
+
     it('regista em auditoria a redefinição, com a origem do pedido', async () => {
       prisma.user.findUnique.mockResolvedValue(makeUser());
 

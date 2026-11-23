@@ -25,6 +25,7 @@ import {
   returnsToReview,
 } from '../../../shared/moderation/listing-moderation';
 import { PushService } from '../../../shared/push/push.service';
+import { VerificationsService } from '../../verifications/services/verifications.service';
 import { CreateServiceDto } from '../dto/create-service.dto';
 import {
   FindServicesQueryDto,
@@ -130,6 +131,7 @@ export class ServicesService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly push: PushService,
+    private readonly verifications: VerificationsService,
   ) {}
 
   async create(providerId: string, dto: CreateServiceDto) {
@@ -185,8 +187,7 @@ export class ServicesService {
       );
     }
 
-    // Dev/staging: AUTO_APPROVE_SERVICES=true publica directamente como ACTIVE.
-    const autoApprove = process.env.AUTO_APPROVE_SERVICES === 'true';
+    const autoApprove = await this.publishesWithoutReview(providerId);
 
     // Quem publica passa a PROVIDER, como no equipamento. O papel só serve à
     // app para mostrar a área de provider: as permissões decidem-se pela
@@ -640,7 +641,7 @@ export class ServicesService {
 
     const backToReview = returnsToReview({
       status: existing.status,
-      editor: this.editorOf(editorRole),
+      editor: await this.editorOf(editorRole, existing.providerId),
       changed: changed.length > 0,
       moderatedContentChanged: changed.some((field) =>
         MODERATED_FIELDS.includes(field),
@@ -686,14 +687,14 @@ export class ServicesService {
   async reviewAfterPhotoChange(change: {
     actorId: string;
     actorRole: UserRole;
-    service: { id: string; status: ServiceStatus };
+    service: { id: string; providerId: string; status: ServiceStatus };
     addedPhotos: boolean;
   }): Promise<boolean> {
     const { service } = change;
 
     const backToReview = returnsToReview({
       status: service.status,
-      editor: this.editorOf(change.actorRole),
+      editor: await this.editorOf(change.actorRole, service.providerId),
       changed: true,
       moderatedContentChanged: change.addedPhotos,
     });
@@ -829,15 +830,26 @@ export class ServicesService {
   }
 
   /**
-   * Quem edita: um admin, um provider que publica sem revisão (com a
-   * auto-aprovação ligada no ambiente, em desenvolvimento) ou outro provider.
+   * Este provider publica sem passar pela revisão: é verificado, ou a
+   * auto-aprovação está ligada no ambiente (desenvolvimento). A mesma regra
+   * dos equipamentos.
    */
-  private editorOf(role: UserRole): ListingEditor {
+  private async publishesWithoutReview(providerId: string): Promise<boolean> {
+    return (
+      process.env.AUTO_APPROVE_SERVICES === 'true' ||
+      (await this.verifications.isVerified(providerId))
+    );
+  }
+
+  private async editorOf(
+    role: UserRole,
+    providerId: string,
+  ): Promise<ListingEditor> {
     if (role === UserRole.ADMIN) {
       return 'admin';
     }
 
-    return process.env.AUTO_APPROVE_SERVICES === 'true'
+    return (await this.publishesWithoutReview(providerId))
       ? 'trusted-owner'
       : 'owner';
   }

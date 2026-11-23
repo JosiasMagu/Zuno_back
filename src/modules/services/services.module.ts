@@ -4,6 +4,7 @@ import { AuditModule } from '../../shared/audit/audit.module';
 import { CloudinaryModule } from '../../shared/cloudinary/cloudinary.module';
 import { AuthModule } from '../auth/auth.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { VerificationsModule } from '../verifications/verifications.module';
 import { ServiceBookingsController } from './controllers/service-bookings.controller';
 import { ServicePhotosController } from './controllers/service-photos.controller';
 import { ServiceQuotesController } from './controllers/service-quotes.controller';
@@ -18,7 +19,13 @@ import { ServiceRequestsService } from './services/service-requests.service';
 import { ServicesService } from './services/services.service';
 
 @Module({
-  imports: [AuthModule, CloudinaryModule, AuditModule, PaymentsModule],
+  imports: [
+    AuthModule,
+    CloudinaryModule,
+    AuditModule,
+    PaymentsModule,
+    VerificationsModule,
+  ],
   controllers: [
     ServicesController,
     ServicePhotosController,

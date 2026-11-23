@@ -131,7 +131,10 @@ export class AuthService {
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: user.id },
-        data: { passwordHash },
+        // Quem recupera a conta por código recebe-a limpa do que outra pessoa
+        // lá possa ter posto: o recebimento volta ao telefone da conta, e o
+        // token de push sai com as sessões.
+        data: { passwordHash, payoutMsisdn: null, pushToken: null },
       }),
       this.prisma.authSession.updateMany({
         where: { userId: user.id, revokedAt: null },

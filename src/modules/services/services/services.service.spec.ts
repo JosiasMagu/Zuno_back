@@ -15,6 +15,7 @@ import {
 import { AuditService } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { PushService } from '../../../shared/push/push.service';
+import { VerificationsService } from '../../verifications/services/verifications.service';
 import { ServiceSortBy } from '../dto/find-services-query.dto';
 import { ServicesService } from './services.service';
 
@@ -92,9 +93,11 @@ const makePrisma = () => {
 describe('ServicesService', () => {
   let service: ServicesService;
   let prisma: ReturnType<typeof makePrisma>;
+  const verifications = { isVerified: jest.fn() };
 
   beforeEach(async () => {
     prisma = makePrisma();
+    verifications.isVerified.mockResolvedValue(false);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ServicesService,
@@ -104,6 +107,7 @@ describe('ServicesService', () => {
           provide: PushService,
           useValue: { send: jest.fn().mockResolvedValue(undefined) },
         },
+        { provide: VerificationsService, useValue: verifications },
       ],
     }).compile();
     service = module.get(ServicesService);
@@ -136,6 +140,27 @@ describe('ServicesService', () => {
           data: expect.objectContaining({
             providerId: PROVIDER_ID,
             status: ServiceStatus.PENDING_REVIEW,
+          }),
+        }),
+      );
+    });
+
+    it('publica logo o serviço de um provider verificado', async () => {
+      verifications.isVerified.mockResolvedValue(true);
+      prisma.category.findFirst.mockResolvedValue(makeCategory());
+      prisma.service.create.mockResolvedValue(
+        makeService({ status: ServiceStatus.ACTIVE, isActive: true }),
+      );
+
+      const result = await service.create(PROVIDER_ID, dto);
+
+      expect(verifications.isVerified).toHaveBeenCalledWith(PROVIDER_ID);
+      expect(result.message).toBe('Serviço criado e publicado com sucesso.');
+      expect(prisma.service.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: ServiceStatus.ACTIVE,
+            isActive: true,
           }),
         }),
       );
@@ -819,6 +844,18 @@ describe('ServicesService', () => {
       expect(result.message).toContain('volta à revisão');
     });
 
+    it('fica activo quando o provider que muda a descrição é verificado', async () => {
+      verifications.isVerified.mockResolvedValue(true);
+      asProvider();
+      editing();
+
+      await service.update(PROVIDER_ID, SERVICE_ID, {
+        description: 'Agora também vendo material eléctrico ao balcão.',
+      });
+
+      expect(updateData().status).toBeUndefined();
+    });
+
     it('fica activo quando é um admin a editar', async () => {
       prisma.user.findUnique.mockResolvedValue(makeAdmin());
       editing();
@@ -853,7 +890,11 @@ describe('ServicesService', () => {
       const backToReview = await service.reviewAfterPhotoChange({
         actorId: PROVIDER_ID,
         actorRole: UserRole.PROVIDER,
-        service: { id: SERVICE_ID, status: ServiceStatus.ACTIVE },
+        service: {
+          id: SERVICE_ID,
+          providerId: PROVIDER_ID,
+          status: ServiceStatus.ACTIVE,
+        },
         addedPhotos: true,
       });
 

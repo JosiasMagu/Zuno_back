@@ -464,6 +464,34 @@ describe('Catalog and moderation E2E', () => {
     });
   });
 
+  describe('a provider with an approved identity check', () => {
+    it('publishes equipment and services without waiting for review', async () => {
+      await prisma().userVerification.create({
+        data: {
+          userId: actors.provider.userId,
+          status: 'VERIFIED',
+          documentType: 'BI',
+          documentFrontUrl: 'https://res.cloudinary.com/e2e/frente.jpg',
+          selfieUrl: 'https://res.cloudinary.com/e2e/selfie.jpg',
+        },
+      });
+
+      const equipment = await provider().post('/equipment', wholeForm());
+      const service = await provider().post('/services', {
+        title: 'Reparação eléctrica residencial',
+        description: 'Diagnóstico e reparação eléctrica em residências.',
+        categoryId: actors.seed.categories.electricidade.id,
+        basePrice: 1500,
+        location: 'Maputo, Cidade',
+      });
+
+      expect(equipment.status).toBe(201);
+      expect(equipment.body.data.status).toBe('ACTIVE');
+      expect(service.status).toBe(201);
+      expect(service.body.data.status).toBe('ACTIVE');
+    });
+  });
+
   describe('public limits', () => {
     it.each([
       ['a page beyond the limit', '/equipment?page=1001'],

@@ -1,12 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+import type { CancellingParty } from '../../../shared/bookings/cancelling-party';
 import { SERVICE_AUTO_RELEASE_DAYS } from '../../../shared/constants/policy';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { PushService } from '../../../shared/push/push.service';
 import { describeError } from '../../../shared/scheduling/process-due';
-
-/** Quem cancelou a reserva, pela posição que tem nela. */
-export type CancellingParty = 'CLIENT' | 'PROVIDER' | 'ADMIN';
 
 interface Party {
   name: string;

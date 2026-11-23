@@ -119,12 +119,12 @@ export class SessionsService {
     }
 
     if (session.expiresAt.getTime() <= Date.now()) {
-      await this.revoke(session.id);
+      await this.revoke(session);
       throw new UnauthorizedException('Refresh token expirado.');
     }
 
     if (!session.user.isActive) {
-      await this.revoke(session.id);
+      await this.revoke(session);
       throw new UnauthorizedException('Conta desativada.');
     }
 
@@ -178,7 +178,7 @@ export class SessionsService {
       throw new UnauthorizedException('Sessão inválida ou já revogada.');
     }
 
-    await this.revoke(session.id);
+    await this.revoke(session);
   }
 
   /**
@@ -200,6 +200,7 @@ export class SessionsService {
 
     // Um socket aberto nestas sessões fecha já, e não quando cair sozinho.
     this.live.closeUser(userId, exceptSessionId);
+    await this.forgetPushTokenIfSignedOut(userId);
 
     return revoked.count;
   }
@@ -245,7 +246,7 @@ export class SessionsService {
   }
 
   private async revokeAsCompromised(session: AuthSession): Promise<void> {
-    await this.revoke(session.id);
+    await this.revoke(session);
 
     this.logger.warn(
       { sessionId: session.id, userId: session.userId },
@@ -260,13 +261,30 @@ export class SessionsService {
     });
   }
 
-  private async revoke(sessionId: string): Promise<void> {
+  private async revoke(session: { id: string; userId: string }): Promise<void> {
     await this.prisma.authSession.updateMany({
-      where: { id: sessionId, revokedAt: null },
+      where: { id: session.id, revokedAt: null },
       data: { revokedAt: new Date() },
     });
 
-    this.live.closeSession(sessionId);
+    this.live.closeSession(session.id);
+    await this.forgetPushTokenIfSignedOut(session.userId);
+  }
+
+  /**
+   * Sem sessões abertas não há dispositivo a quem avisar. O token de push sai
+   * da conta, para o telemóvel de onde se saiu deixar de receber as mensagens.
+   */
+  private async forgetPushTokenIfSignedOut(userId: string): Promise<void> {
+    const openSessions = await this.prisma.authSession.count({
+      where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
+    });
+    if (openSessions > 0) return;
+
+    await this.prisma.user.updateMany({
+      where: { id: userId, pushToken: { not: null } },
+      data: { pushToken: null },
+    });
   }
 
   /** Apaga as sessões do utilizador que acabaram há mais tempo do que a retenção. */

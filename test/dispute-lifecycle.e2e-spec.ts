@@ -654,6 +654,25 @@ describe('Dispute lifecycle E2E', () => {
       expect(await prisma().dispute.count({ where: { paymentId } })).toBe(2);
       expect((await readBooking(bookingId)).status).toBe('DISPUTED');
     });
+
+    it('refuses a third dispute from whoever already opened and withdrew two', async () => {
+      const { bookingId, paymentId, disputeId } = await createRentalDispute();
+      await withdrawAs(actors.client.accessToken, disputeId).expect(200);
+      const secondId = await openPaymentDispute(actors, {
+        bookingId,
+        paymentId,
+      });
+      await withdrawAs(actors.client.accessToken, secondId).expect(200);
+
+      const response = await openAs(actors.client.accessToken, {
+        bookingId,
+        paymentId,
+      });
+
+      expect(response.status).toBe(400);
+      expect(response.body.errorCode).toBe('DISPUTE_LIMIT_REACHED');
+      expect((await readBooking(bookingId)).status).toBe('CONFIRMED');
+    });
   });
 
   describe('automatic release after a withdrawal', () => {

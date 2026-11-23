@@ -462,6 +462,18 @@ describe('ServiceBookingsService', () => {
             }) as object,
           }),
         );
+        // A auditoria vai na transacção do reembolso.
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: AuditAction.SERVICE_BOOKING_CANCELLED,
+            metadata: {
+              reason: null,
+              cancelledBy: 'CLIENT',
+              paymentOutcome: 'REFUNDED',
+            },
+          }),
+          prisma,
+        );
       });
 
       it('o provider cancela: o cliente recebe tudo e o provider leva strike', async () => {

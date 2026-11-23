@@ -12,6 +12,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { toOptionalBoolean } from '../../../common/dto/transforms';
 
 export class CreateServiceRequestDto {
   @ApiProperty({ description: 'ID do serviço-alvo' })
@@ -40,7 +41,7 @@ export class CreateServiceRequestDto {
 
   @ApiPropertyOptional({ default: false })
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(({ value }) => toOptionalBoolean(value))
   @IsBoolean()
   isUrgent?: boolean;
 

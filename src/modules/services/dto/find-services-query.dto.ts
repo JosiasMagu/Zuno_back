@@ -14,6 +14,7 @@ import {
   MAX_SEARCH_LENGTH,
   PaginationQueryDto,
 } from '../../../common/dto/pagination-query.dto';
+import { toOptionalBoolean } from '../../../common/dto/transforms';
 
 export enum ServiceSortBy {
   RELEVANT = 'relevant',
@@ -27,13 +28,6 @@ function toOptionalTrimmedString(value: unknown): unknown {
   if (typeof value !== 'string') return value;
   const trimmed = value.trim();
   return trimmed.length ? trimmed : undefined;
-}
-
-function toOptionalBoolean(value: unknown): unknown {
-  if (value === undefined || value === null || value === '') return undefined;
-  if (value === true || value === 'true') return true;
-  if (value === false || value === 'false') return false;
-  return value;
 }
 
 export class FindServicesQueryDto extends PaginationQueryDto {

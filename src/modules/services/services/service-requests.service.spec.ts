@@ -64,7 +64,9 @@ const makePrisma = () => ({
     create: jest.fn(),
     findMany: jest.fn(),
     findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
     count: jest.fn(),
   },
   serviceQuote: { updateMany: jest.fn() },
@@ -283,27 +285,49 @@ describe('ServiceRequestsService', () => {
   });
 
   describe('cancel()', () => {
+    /** A transacção do cancelamento, com o pedido ainda cancelável ou já não. */
+    const runCancelTransaction = ({
+      stillCancellable,
+    }: {
+      stillCancellable: boolean;
+    }) => {
+      prisma.serviceRequest.updateMany.mockResolvedValue({
+        count: stillCancellable ? 1 : 0,
+      });
+      prisma.serviceRequest.findUniqueOrThrow.mockResolvedValue(
+        makeRequest({ status: ServiceRequestStatus.CANCELLED }),
+      );
+      prisma.serviceQuote.updateMany.mockResolvedValue({ count: 0 });
+      prisma.$transaction.mockImplementation(
+        (cb: (tx: typeof prisma) => Promise<unknown>) => cb(prisma),
+      );
+    };
+
     it('cliente dono cancela OPEN com sucesso', async () => {
       prisma.serviceRequest.findUnique.mockResolvedValue({
         id: REQUEST_ID,
         clientId: CLIENT_ID,
         status: ServiceRequestStatus.OPEN,
       });
-      prisma.$transaction.mockImplementation(
-        async (
-          cb: (tx: typeof prisma) => Promise<unknown>,
-        ): Promise<unknown> => {
-          prisma.serviceRequest.update.mockResolvedValue(
-            makeRequest({ status: ServiceRequestStatus.CANCELLED }),
-          );
-          prisma.serviceQuote.updateMany.mockResolvedValue({ count: 0 });
-          return cb(prisma);
-        },
-      );
+      runCancelTransaction({ stillCancellable: true });
 
       const result = await service.cancel(CLIENT_ID, REQUEST_ID);
       expect(result.data.status).toBe(ServiceRequestStatus.CANCELLED);
       expect(prisma.serviceQuote.updateMany).toHaveBeenCalled();
+    });
+
+    it('responde 409 e não rejeita orçamentos se um foi aceite entretanto', async () => {
+      prisma.serviceRequest.findUnique.mockResolvedValue({
+        id: REQUEST_ID,
+        clientId: CLIENT_ID,
+        status: ServiceRequestStatus.QUOTED,
+      });
+      runCancelTransaction({ stillCancellable: false });
+
+      await expect(service.cancel(CLIENT_ID, REQUEST_ID)).rejects.toMatchObject(
+        { status: 409 },
+      );
+      expect(prisma.serviceQuote.updateMany).not.toHaveBeenCalled();
     });
 
     it('não-dono não cancela', async () => {

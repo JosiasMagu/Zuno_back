@@ -426,6 +426,72 @@ describe('PaymentsService', () => {
       );
     });
 
+    describe('o número de onde saiu o dinheiro', () => {
+      const PAYER_NUMBER = '+258840000003';
+      const collectionSeenBy = async (userId: string, role: UserRole) => {
+        prisma.payment.findUnique.mockResolvedValue(
+          makePayment({
+            providerOperations: [
+              {
+                id: 'operacao-1',
+                provider: 'manual',
+                status: 'CONFIRMED',
+                amount: new Prisma.Decimal(2700),
+                msisdn: PAYER_NUMBER,
+                failureCode: null,
+                failureReason: null,
+                createdAt: new Date(),
+                confirmedAt: new Date(),
+              },
+            ],
+          }),
+        );
+        prisma.user.findUnique.mockResolvedValue(makeUser(userId, role));
+
+        const { data } = await service.findOne(userId, PAYMENT_ID);
+        return data.collection;
+      };
+
+      it('chega ao cliente que pagou', async () => {
+        const collection = await collectionSeenBy(CLIENT_ID, UserRole.CLIENT);
+
+        expect(collection?.msisdn).toBe(PAYER_NUMBER);
+      });
+
+      it('chega a um admin', async () => {
+        const collection = await collectionSeenBy(ADMIN_ID, UserRole.ADMIN);
+
+        expect(collection?.msisdn).toBe(PAYER_NUMBER);
+      });
+
+      it('não chega ao provider, que vê o resto da cobrança', async () => {
+        const collection = await collectionSeenBy(OWNER_ID, UserRole.PROVIDER);
+
+        expect(collection).toMatchObject({ status: 'CONFIRMED', msisdn: null });
+      });
+    });
+
+    it('diz em que estado está o depósito e a que reserva de serviço pertence', async () => {
+      prisma.payment.findUnique.mockResolvedValue(
+        makePayment({
+          bookingId: null,
+          serviceBookingId: 'reserva-de-servico-1',
+          depositStatus: DepositStatus.HELD,
+        }),
+      );
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser(CLIENT_ID, UserRole.CLIENT),
+      );
+
+      const { data } = await service.findOne(CLIENT_ID, PAYMENT_ID);
+
+      expect(data).toMatchObject({
+        bookingId: null,
+        serviceBookingId: 'reserva-de-servico-1',
+        depositStatus: DepositStatus.HELD,
+      });
+    });
+
     it('CLIENT pode ver o seu próprio pagamento', async () => {
       prisma.payment.findUnique.mockResolvedValue(makePayment());
       prisma.user.findUnique.mockResolvedValue(
@@ -1107,6 +1173,8 @@ describe('PaymentsService', () => {
       totalCharged: new Prisma.Decimal(2700),
       depositStatus: DepositStatus.HELD,
       clientId: CLIENT_ID,
+      // Sem disputa aberta à hora da releitura.
+      disputes: [],
       ...overrides,
     });
 
@@ -1361,6 +1429,19 @@ describe('PaymentsService', () => {
       await expect(service.refund(ADMIN_ID, PAYMENT_ID)).rejects.toThrow(
         BadRequestException,
       );
+    });
+
+    it('recusa se uma disputa foi aberta entre a leitura e a transacção, sem mexer em nada', async () => {
+      setupHappyPath(
+        heldPayment(),
+        freshRefundable({ disputes: [{ id: 'disputa-nova' }] }),
+      );
+
+      await expect(service.refund(ADMIN_ID, PAYMENT_ID)).rejects.toThrow(
+        'Este pagamento tem uma disputa aberta. O reembolso decide-se na resolução da disputa.',
+      );
+      expect(prisma.booking.update).not.toHaveBeenCalled();
+      expect(ledgerMock.record).not.toHaveBeenCalled();
     });
 
     it('permite reembolso quando as disputas da reserva já estão fechadas', async () => {

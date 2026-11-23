@@ -4,10 +4,10 @@ import {
   ServiceBookingStatus,
 } from '@prisma/client';
 
+import { isProjectMediaUrl } from '../../shared/cloudinary/project-media-url';
 import { DISPUTE_RESPONSE_WINDOW_DAYS } from '../../shared/constants/policy';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const CLOUDINARY_HOST = 'res.cloudinary.com';
 
 /** As duas partes de uma reserva, de aluguer ou de serviço. */
 export interface DisputeParties {
@@ -65,17 +65,8 @@ export function isOwnEvidence(
   url: string,
   owner: { cloudName: string; userId: string },
 ): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-
   return (
-    parsed.protocol === 'https:' &&
-    parsed.hostname === CLOUDINARY_HOST &&
-    parsed.pathname.startsWith(`/${owner.cloudName}/`) &&
-    parsed.pathname.includes(`/zuno/disputes/${owner.userId}/`)
+    isProjectMediaUrl(url, owner.cloudName) &&
+    new URL(url).pathname.includes(`/zuno/disputes/${owner.userId}/`)
   );
 }
