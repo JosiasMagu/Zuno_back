@@ -1,9 +1,7 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { Test, TestingModule } from '@nestjs/testing';
+import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
-import { AppModule } from '../src/app.module';
-import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
+import { createTestApp } from './helpers/app';
 import { truncateAllTables, disconnectTestPrisma } from './helpers/db';
 import {
   seedMinimalTestData,
@@ -31,22 +29,7 @@ describe('Idempotency E2E — POST /bookings', () => {
   let equipmentId: string;
 
   beforeAll(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleFixture.createNestApplication();
-    app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        transform: true,
-        forbidNonWhitelisted: true,
-      }),
-    );
-    app.useGlobalFilters(new HttpExceptionFilter());
-
-    await app.init();
+    app = await createTestApp();
     httpServer = app.getHttpServer();
   }, 30000);
 

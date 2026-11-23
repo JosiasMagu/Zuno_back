@@ -21,6 +21,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
+import { MAX_IMAGE_BYTES } from '../../../shared/cloudinary/cloudinary.service';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { EquipmentPhotosService } from '../services/equipment-photos.service';
@@ -48,7 +49,7 @@ export class EquipmentPhotosController {
   @UseInterceptors(
     FileInterceptor('photo', {
       storage: undefined,
-      limits: { fileSize: 5 * 1024 * 1024 },
+      limits: { fileSize: MAX_IMAGE_BYTES },
     }),
   )
   @ApiBearerAuth('access-token')
@@ -94,7 +95,7 @@ export class EquipmentPhotosController {
   @UseInterceptors(
     FilesInterceptor('photos', 5, {
       storage: undefined,
-      limits: { fileSize: 5 * 1024 * 1024 },
+      limits: { fileSize: MAX_IMAGE_BYTES },
     }),
   )
   @ApiBearerAuth('access-token')

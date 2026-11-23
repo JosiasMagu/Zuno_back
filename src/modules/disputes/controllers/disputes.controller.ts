@@ -28,7 +28,10 @@ import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
-import { CloudinaryService } from '../../../shared/cloudinary/cloudinary.service';
+import {
+  CloudinaryService,
+  MAX_IMAGE_BYTES,
+} from '../../../shared/cloudinary/cloudinary.service';
 import { ClaimDepositDto } from '../dto/claim-deposit.dto';
 import { CreateDisputeDto } from '../dto/create-dispute.dto';
 import { FindDisputesQueryDto } from '../dto/find-disputes-query.dto';
@@ -59,7 +62,7 @@ export class DisputesController {
     },
   })
   @UseInterceptors(
-    FileInterceptor('photo', { limits: { fileSize: 5 * 1024 * 1024 } }),
+    FileInterceptor('photo', { limits: { fileSize: MAX_IMAGE_BYTES } }),
   )
   async uploadEvidence(
     @CurrentUser() user: { id: string },
