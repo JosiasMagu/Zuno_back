@@ -775,9 +775,15 @@ model UserVerification {
   userId           String             @unique
   status           VerificationStatus @default(PENDING)
   documentType     DocumentType
-  documentFrontUrl String
+  // Identificadores das imagens no armazenamento privado. O endereço gera-se
+  // a pedido e expira.
+  documentFrontId  String?
+  documentBackId   String?
+  selfieId         String?
+  // Do tempo em que a submissão trazia endereços. Já não se escrevem.
+  documentFrontUrl String?
   documentBackUrl  String?
-  selfieUrl        String
+  selfieUrl        String?
   submittedAt      DateTime           @default(now())
   reviewedAt       DateTime?
   reviewedBy       String?
@@ -985,6 +991,7 @@ enum AuditAction {
   USER_KYC_SUBMITTED
   USER_KYC_APPROVED
   USER_KYC_REJECTED
+  USER_KYC_DOCUMENTS_VIEWED
   CATEGORY_CREATED
   CATEGORY_UPDATED
   CATEGORY_DEACTIVATED

@@ -6,19 +6,24 @@ import {
   Patch,
   Post,
   Put,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
 import { UserRole } from '@prisma/client';
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiConsumes,
   ApiOperation,
   ApiParam,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 
+import { MAX_IMAGE_BYTES } from '../../../shared/cloudinary/cloudinary.service';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import type { CurrentAuthUser } from '../../auth/decorators/current-user.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
@@ -55,6 +60,34 @@ export class UsersController {
   @ApiResponse({ status: 401, description: 'Não autenticado.' })
   updateMe(@CurrentUser() user: { id: string }, @Body() dto: UpdateUserDto) {
     return this.usersService.updateMe(user.id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('me/avatar')
+  @Throttle({ global: { ttl: 3_600_000, limit: 10 } })
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Carregar a foto de perfil',
+    description:
+      'Substitui a foto anterior. Para a tirar, envia avatarUrl vazio em PATCH /users/me.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { photo: { type: 'string', format: 'binary' } },
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor('photo', { limits: { fileSize: MAX_IMAGE_BYTES } }),
+  )
+  @ApiResponse({ status: 201, description: 'Foto de perfil actualizada.' })
+  @ApiResponse({ status: 400, description: 'Ficheiro inválido.' })
+  setAvatar(
+    @CurrentUser() user: { id: string },
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.usersService.setAvatar(user.id, file);
   }
 
   @UseGuards(JwtAuthGuard)

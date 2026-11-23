@@ -7,6 +7,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { UserRole } from '@prisma/client';
 
 import { AuditService } from '../../../shared/audit/audit.service';
+import { CloudinaryService } from '../../../shared/cloudinary/cloudinary.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { PushService } from '../../../shared/push/push.service';
 import { PasswordConfirmationService } from '../../auth/services/password-confirmation.service';
@@ -73,6 +74,14 @@ const makePasswordConfirmation = () => ({
 
 const makePush = () => ({ send: jest.fn().mockResolvedValue(undefined) });
 
+const AVATAR_URL =
+  'https://res.cloudinary.com/zuno/image/upload/v2/zuno/avatars/user-uuid-001.jpg';
+
+const makeCloudinary = () => ({
+  uploadAvatar: jest.fn().mockResolvedValue({ url: AVATAR_URL }),
+  deleteAvatar: jest.fn().mockResolvedValue(undefined),
+});
+
 describe('UsersService', () => {
   let service: UsersService;
   let prisma: ReturnType<typeof makePrisma>;
@@ -80,6 +89,7 @@ describe('UsersService', () => {
   let sessions: ReturnType<typeof makeSessions>;
   let passwordConfirmation: ReturnType<typeof makePasswordConfirmation>;
   let push: ReturnType<typeof makePush>;
+  let cloudinary: ReturnType<typeof makeCloudinary>;
 
   beforeEach(async () => {
     prisma = makePrisma();
@@ -87,6 +97,7 @@ describe('UsersService', () => {
     sessions = makeSessions();
     passwordConfirmation = makePasswordConfirmation();
     push = makePush();
+    cloudinary = makeCloudinary();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -99,6 +110,7 @@ describe('UsersService', () => {
           useValue: passwordConfirmation,
         },
         { provide: PushService, useValue: push },
+        { provide: CloudinaryService, useValue: cloudinary },
       ],
     }).compile();
 
@@ -212,6 +224,34 @@ describe('UsersService', () => {
     });
   });
 
+  describe('setAvatar()', () => {
+    const photo = { buffer: Buffer.from('foto') } as Express.Multer.File;
+
+    it('guarda a foto na pasta da conta e passa a mostrá-la no perfil', async () => {
+      prisma.user.update.mockResolvedValue(makeUser({ avatarUrl: AVATAR_URL }));
+
+      const result = await service.setAvatar(USER_ID, photo);
+
+      expect(cloudinary.uploadAvatar).toHaveBeenCalledWith(photo, USER_ID);
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        data: { avatarUrl: AVATAR_URL },
+      });
+      expect(result.data.avatarUrl).toBe(AVATAR_URL);
+    });
+
+    it('não mexe no perfil se o carregamento falhar', async () => {
+      cloudinary.uploadAvatar.mockRejectedValue(
+        new BadRequestException('Tipo de ficheiro inválido.'),
+      );
+
+      await expect(service.setAvatar(USER_ID, photo)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('updateMe()', () => {
     it('actualiza o nome com sucesso e devolve o perfil actualizado', async () => {
       const updated = makeUser({ name: 'Daniel Actualizado' });
@@ -266,6 +306,26 @@ describe('UsersService', () => {
 
       const updateCall = prisma.user.update.mock.calls[0][0];
       expect(updateCall.data.avatarUrl).toBe(url);
+    });
+
+    it('apaga do armazenamento a foto de perfil que o utilizador tira', async () => {
+      prisma.user.findUnique.mockResolvedValue(
+        makeUser({ avatarUrl: AVATAR_URL }),
+      );
+      prisma.user.update.mockResolvedValue(makeUser({ avatarUrl: null }));
+
+      await service.updateMe(USER_ID, { avatarUrl: '' });
+
+      expect(cloudinary.deleteAvatar).toHaveBeenCalledWith(USER_ID);
+    });
+
+    it('não chama o armazenamento quando a conta não tinha foto', async () => {
+      prisma.user.findUnique.mockResolvedValue(makeUser());
+      prisma.user.update.mockResolvedValue(makeUser());
+
+      await service.updateMe(USER_ID, { avatarUrl: '', name: 'Zuno' });
+
+      expect(cloudinary.deleteAvatar).not.toHaveBeenCalled();
     });
 
     it('guarda avatarUrl como null quando string vazia é fornecida', async () => {

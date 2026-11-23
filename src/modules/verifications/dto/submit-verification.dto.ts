@@ -1,8 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { DocumentType } from '@prisma/client';
-import { IsEnum, IsOptional, MaxLength } from 'class-validator';
+import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
 
-import { IsProjectMediaUrl } from '../../../shared/cloudinary/project-media-url';
+const DOCUMENT_ID =
+  'Identificador devolvido por `POST /users/me/verification/documents`';
 
 export class SubmitVerificationDto {
   @ApiProperty({
@@ -14,30 +15,27 @@ export class SubmitVerificationDto {
   documentType!: DocumentType;
 
   @ApiProperty({
-    example:
-      'https://res.cloudinary.com/dojumw0as/image/upload/.../bi-front.jpg',
-    description: 'URL Cloudinary da foto do FRENTE do documento.',
+    example: 'zuno/kyc/<userId>/k3j2h1',
+    description: `${DOCUMENT_ID} para a frente do documento.`,
   })
-  @IsProjectMediaUrl()
-  @MaxLength(500)
-  documentFrontUrl!: string;
+  @IsString()
+  @MaxLength(200)
+  documentFrontId!: string;
 
   @ApiPropertyOptional({
-    example:
-      'https://res.cloudinary.com/dojumw0as/image/upload/.../bi-back.jpg',
-    description:
-      'URL Cloudinary do VERSO do documento (opcional para Passaporte).',
+    example: 'zuno/kyc/<userId>/p9o8i7',
+    description: `${DOCUMENT_ID} para o verso (dispensável no passaporte).`,
   })
   @IsOptional()
-  @IsProjectMediaUrl()
-  @MaxLength(500)
-  documentBackUrl?: string;
+  @IsString()
+  @MaxLength(200)
+  documentBackId?: string;
 
   @ApiProperty({
-    example: 'https://res.cloudinary.com/dojumw0as/image/upload/.../selfie.jpg',
-    description: 'URL Cloudinary da selfie segurando o documento.',
+    example: 'zuno/kyc/<userId>/z1x2c3',
+    description: `${DOCUMENT_ID} para a selfie com o documento na mão.`,
   })
-  @IsProjectMediaUrl()
-  @MaxLength(500)
-  selfieUrl!: string;
+  @IsString()
+  @MaxLength(200)
+  selfieId!: string;
 }

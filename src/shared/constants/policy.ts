@@ -75,6 +75,12 @@ export const DISPUTE_RESPONSE_WINDOW_DAYS = 3;
  */
 export const DISPUTES_PER_OPENER = 2;
 
+/**
+ * Minutos que dura o endereço de um documento de identidade aberto por um
+ * admin. Chega para o ver e decidir, e um endereço copiado deixa de servir.
+ */
+export const IDENTITY_DOCUMENT_LINK_MINUTES = 10;
+
 /** Strikes de provider que resultam em suspensão de listagens. */
 export const PROVIDER_STRIKE_LIMIT = 3;
 

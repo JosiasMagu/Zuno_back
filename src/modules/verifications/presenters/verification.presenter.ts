@@ -5,9 +5,7 @@ type VerificationEntity = {
   userId: string;
   status: VerificationStatus;
   documentType: DocumentType;
-  documentFrontUrl: string;
-  documentBackUrl: string | null;
-  selfieUrl: string;
+  documentBackId: string | null;
   submittedAt: Date;
   reviewedAt: Date | null;
   reviewedBy: string | null;
@@ -21,9 +19,8 @@ type VerificationEntity = {
 };
 
 /**
- * Devolve os URLs dos documentos. Em produção pode interessar restringir
- * a URL do BI a apenas ADMINs (ex.: gerar signed URL com curta validade
- * apenas quando o admin abre o painel).
+ * Os documentos não saem por aqui. O admin pede-os à parte, em
+ * `GET /verifications/:id/documents`, com endereços que expiram.
  */
 export class VerificationPresenter {
   static toOwnSummary(v: VerificationEntity) {
@@ -43,9 +40,7 @@ export class VerificationPresenter {
       userId: v.userId,
       status: v.status,
       documentType: v.documentType,
-      documentFrontUrl: v.documentFrontUrl,
-      documentBackUrl: v.documentBackUrl,
-      selfieUrl: v.selfieUrl,
+      hasDocumentBack: v.documentBackId !== null,
       submittedAt: v.submittedAt,
       reviewedAt: v.reviewedAt,
       reviewedBy: v.reviewedBy,

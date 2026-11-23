@@ -104,4 +104,11 @@ describe('describeError()', () => {
     expect(describeError(new Error('falhou'))).toBe('falhou');
     expect(describeError('texto solto')).toBe('texto solto');
   });
+
+  it('lê a mensagem de um objecto simples, como os que o Cloudinary rejeita', () => {
+    const rejected = { message: 'Request Timeout', http_code: 499 };
+
+    expect(describeError(rejected)).toBe('Request Timeout');
+    expect(describeError(null)).toBe('null');
+  });
 });

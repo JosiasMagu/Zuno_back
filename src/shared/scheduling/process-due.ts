@@ -39,7 +39,11 @@ export async function processDue<T extends { id: string }>(job: {
   }
 }
 
-/** O texto de um erro apanhado num job, para o log. */
+/**
+ * O texto de um erro apanhado, para o log. Há bibliotecas (o SDK do
+ * Cloudinary) que rejeitam com um objecto simples em vez de um Error.
+ */
 export function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const message = (error as { message?: unknown } | null)?.message;
+  return typeof message === 'string' ? message : String(error);
 }

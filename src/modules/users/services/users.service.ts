@@ -7,6 +7,7 @@ import {
 import { AuditAction } from '@prisma/client';
 
 import { AuditService } from '../../../shared/audit/audit.service';
+import { CloudinaryService } from '../../../shared/cloudinary/cloudinary.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { PushService } from '../../../shared/push/push.service';
 import { PasswordConfirmationService } from '../../auth/services/password-confirmation.service';
@@ -23,6 +24,7 @@ export class UsersService {
     private readonly sessions: SessionsService,
     private readonly passwordConfirmation: PasswordConfirmationService,
     private readonly push: PushService,
+    private readonly cloudinary: CloudinaryService,
   ) {}
 
   async getMe(userId: string) {
@@ -101,8 +103,27 @@ export class UsersService {
       data,
     });
 
+    // Quem tira a foto de perfil espera que ela deixe de existir.
+    if (data.avatarUrl === null && existingUser.avatarUrl) {
+      await this.cloudinary.deleteAvatar(userId);
+    }
+
     return {
       message: 'Perfil atualizado com sucesso.',
+      data: UserPresenter.toMe(updatedUser),
+    };
+  }
+
+  async setAvatar(userId: string, file: Express.Multer.File) {
+    const { url } = await this.cloudinary.uploadAvatar(file, userId);
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data: { avatarUrl: url },
+    });
+
+    return {
+      message: 'Foto de perfil actualizada com sucesso.',
       data: UserPresenter.toMe(updatedUser),
     };
   }
