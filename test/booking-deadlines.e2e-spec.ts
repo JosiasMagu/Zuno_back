@@ -4,6 +4,7 @@ import request from 'supertest';
 
 import { BookingsService } from '../src/modules/bookings/services/bookings.service';
 import { PaymentsService } from '../src/modules/payments/services/payments.service';
+import { paymentDeadline } from '../src/modules/bookings/booking-deadlines';
 import { createTestApp } from './helpers/app';
 import { authHeader } from './helpers/auth';
 import {
@@ -144,14 +145,22 @@ describe('Booking deadlines E2E', () => {
       expect(hoursToPay).toBeLessThanOrEqual(24);
     });
 
-    it('cuts the deadline two hours before the day the rental starts', async () => {
+    it('counts the deadline from the day the rental starts when that comes first', async () => {
       const equipmentId = await createApprovedEquipment(actors);
 
       const response = await book(equipmentId, 1, 3).expect(201);
 
+      // De dia o prazo acaba duas horas antes do início. Nas últimas quatro
+      // horas do dia vale o mínimo de duas horas para pagar, por isso o
+      // esperado calcula-se com a regra e não com uma hora fixa.
       const booking = await readBooking(response.body.data.id as string);
-      expect(booking.expiresAt).toEqual(
-        new Date(booking.startDate.getTime() - 2 * HOUR_MS),
+      const expected = paymentDeadline(booking.createdAt, booking.startDate);
+      const expiresAt = booking.expiresAt as Date;
+      expect(Math.abs(expiresAt.getTime() - expected.getTime())).toBeLessThan(
+        5000,
+      );
+      expect(expiresAt.getTime()).toBeLessThan(
+        booking.createdAt.getTime() + 24 * HOUR_MS,
       );
     });
 

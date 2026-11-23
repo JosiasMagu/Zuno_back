@@ -21,7 +21,7 @@ export class CreateCategoryDto {
   @IsString()
   @MinLength(2)
   @MaxLength(120)
-  name: string;
+  name!: string;
 
   @ApiPropertyOptional({
     example: 'https://example.com/icon.png',

@@ -9,5 +9,5 @@ export class InitiatePaymentDto {
     description: 'Método de pagamento',
   })
   @IsEnum(PaymentMethod)
-  method: PaymentMethod;
+  method!: PaymentMethod;
 }

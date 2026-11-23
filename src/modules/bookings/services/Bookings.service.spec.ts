@@ -1677,6 +1677,7 @@ describe('BookingsService', () => {
           targetType: 'User',
           targetId: OWNER_ID,
         }),
+        prisma,
       );
     });
 

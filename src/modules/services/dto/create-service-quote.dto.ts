@@ -18,7 +18,7 @@ export class CreateServiceQuoteDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0.01)
-  amount: number;
+  amount!: number;
 
   @ApiPropertyOptional({
     example: 1350,
@@ -39,7 +39,7 @@ export class CreateServiceQuoteDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0.01)
-  totalAmount: number;
+  totalAmount!: number;
 
   @ApiProperty({
     example: 3,
@@ -48,7 +48,7 @@ export class CreateServiceQuoteDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  estimatedDays: number;
+  estimatedDays!: number;
 
   @ApiPropertyOptional({
     example: 'Inclui material básico. Posso começar amanhã.',

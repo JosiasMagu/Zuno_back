@@ -481,16 +481,12 @@ describe('ServiceBookingsService', () => {
 
         await service.cancel(PROVIDER_ID, BOOKING_ID, {});
 
-        expect(strikeMock).toHaveBeenCalledWith(prisma, {
+        // O strike escreve a sua auditoria: recebe a transacção e quem cancelou.
+        expect(strikeMock).toHaveBeenCalledWith(prisma, audit, {
           providerId: PROVIDER_ID,
+          actorId: PROVIDER_ID,
           serviceBookingId: BOOKING_ID,
           reason: 'Cancelamento de serviço já pago.',
-        });
-        expect(auditOf(AuditAction.PROVIDER_STRIKE_ISSUED)).toMatchObject({
-          actorId: PROVIDER_ID,
-          targetType: 'User',
-          targetId: PROVIDER_ID,
-          metadata: { serviceBookingId: BOOKING_ID },
         });
       });
 
@@ -501,23 +497,6 @@ describe('ServiceBookingsService', () => {
 
         expect(escrowRefunds.settleCancelled).toHaveBeenCalledTimes(1);
         expect(strikeMock).not.toHaveBeenCalled();
-      });
-
-      it('regista em auditoria a suspensão dos anúncios ao terceiro strike', async () => {
-        const suspendedUntil = new Date('2030-07-01T10:00:00.000Z');
-        setupCancel(makeFresh());
-        strikeMock.mockResolvedValue(suspendedUntil);
-
-        await service.cancel(PROVIDER_ID, BOOKING_ID, {});
-
-        expect(auditOf(AuditAction.PROVIDER_LISTINGS_SUSPENDED)).toMatchObject({
-          actorId: 'system',
-          targetId: PROVIDER_ID,
-          metadata: {
-            serviceBookingId: BOOKING_ID,
-            suspendedUntil: '2030-07-01T10:00:00.000Z',
-          },
-        });
       });
     });
 

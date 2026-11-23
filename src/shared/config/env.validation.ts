@@ -41,27 +41,27 @@ const emptyAsMissing = ({ value }: { value: unknown }) =>
  */
 export class EnvironmentVariables {
   @IsEnum(NodeEnv)
-  NODE_ENV: NodeEnv;
+  NODE_ENV!: NodeEnv;
 
   @IsString()
   @IsNotEmpty()
-  DATABASE_URL: string;
+  DATABASE_URL!: string;
 
   @IsString()
   @IsNotEmpty()
-  JWT_ACCESS_SECRET: string;
+  JWT_ACCESS_SECRET!: string;
 
   @IsString()
   @IsNotEmpty()
-  CLOUDINARY_CLOUD_NAME: string;
+  CLOUDINARY_CLOUD_NAME!: string;
 
   @IsString()
   @IsNotEmpty()
-  CLOUDINARY_API_KEY: string;
+  CLOUDINARY_API_KEY!: string;
 
   @IsString()
   @IsNotEmpty()
-  CLOUDINARY_API_SECRET: string;
+  CLOUDINARY_API_SECRET!: string;
 
   @IsOptional()
   @Type(() => Number)

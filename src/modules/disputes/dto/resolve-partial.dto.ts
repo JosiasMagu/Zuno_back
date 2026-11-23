@@ -11,5 +11,5 @@ export class ResolvePartialDto {
   @IsInt()
   @Min(1)
   @Max(99)
-  refundPercent: number;
+  refundPercent!: number;
 }

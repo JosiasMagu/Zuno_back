@@ -47,7 +47,7 @@ export class StartConversationDto {
   @IsString()
   @MinLength(1)
   @MaxLength(1000)
-  firstMessage: string;
+  firstMessage!: string;
 }
 
 // Enviar mensagem (via REST)
@@ -63,7 +63,7 @@ export class SendMessageDto {
   @IsString()
   @MinLength(1)
   @MaxLength(1000)
-  content: string;
+  content!: string;
 }
 
 // Query de mensagens

@@ -28,7 +28,7 @@ export class CreateServiceDto {
   @IsString()
   @MinLength(2)
   @MaxLength(150)
-  title: string;
+  title!: string;
 
   @ApiProperty({
     example:
@@ -40,19 +40,19 @@ export class CreateServiceDto {
   @IsString()
   @MinLength(10)
   @MaxLength(3000)
-  description: string;
+  description!: string;
 
   @ApiProperty({ example: 'a1b2c3d4-...', description: 'ID da categoria' })
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsUUID()
-  categoryId: string;
+  categoryId!: string;
 
   @ApiProperty({ example: 1500, description: 'Preço base de referência (MZN)' })
   @Type(() => Number)
   @IsNumber()
   @Min(0.01)
   @Max(MAX_LISTING_PRICE)
-  basePrice: number;
+  basePrice!: number;
 
   @ApiPropertyOptional({
     enum: ServicePricingType,
@@ -78,7 +78,7 @@ export class CreateServiceDto {
   @IsString()
   @MinLength(2)
   @MaxLength(255)
-  location: string;
+  location!: string;
 
   @ApiPropertyOptional({ example: -25.9653 })
   @IsOptional()

@@ -39,7 +39,7 @@ export class CreateReviewDto {
   })
   @Transform(({ value }: { value: unknown }) => toAuthorRole(value))
   @IsEnum(ReviewAuthorRole)
-  authorRole: ReviewAuthorRole;
+  authorRole!: ReviewAuthorRole;
 
   @ApiProperty({
     example: 5,
@@ -50,7 +50,7 @@ export class CreateReviewDto {
   @IsInt()
   @Min(1)
   @Max(5)
-  rating: number;
+  rating!: number;
 
   @ApiPropertyOptional({
     example: 'Equipamento em excelente estado, entrega pontual.',

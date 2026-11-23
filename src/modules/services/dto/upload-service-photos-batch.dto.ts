@@ -6,5 +6,5 @@ export class UploadServicePhotosBatchDto {
   @ApiProperty({ description: 'ID do serviço alvo do upload em batch' })
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsUUID()
-  serviceId: string;
+  serviceId!: string;
 }

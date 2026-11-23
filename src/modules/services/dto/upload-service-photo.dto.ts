@@ -8,7 +8,7 @@ export class UploadServicePhotoDto {
   @ApiProperty({ description: 'ID do serviço alvo do upload' })
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsUUID()
-  serviceId: string;
+  serviceId!: string;
 
   @ApiProperty({
     required: false,

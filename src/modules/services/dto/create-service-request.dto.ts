@@ -18,7 +18,7 @@ export class CreateServiceRequestDto {
   @ApiProperty({ description: 'ID do serviço-alvo' })
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsUUID()
-  serviceId: string;
+  serviceId!: string;
 
   @ApiProperty({
     example: 'Preciso de reparação eléctrica urgente em casa.',
@@ -29,7 +29,7 @@ export class CreateServiceRequestDto {
   @IsString()
   @MinLength(10)
   @MaxLength(3000)
-  description: string;
+  description!: string;
 
   @ApiPropertyOptional({
     example: '2026-05-15T10:00:00Z',
@@ -50,7 +50,7 @@ export class CreateServiceRequestDto {
   @IsString()
   @MinLength(2)
   @MaxLength(500)
-  address: string;
+  address!: string;
 
   @ApiPropertyOptional({ example: -25.9653 })
   @IsOptional()

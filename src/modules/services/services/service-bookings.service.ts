@@ -213,34 +213,10 @@ export class ServiceBookingsService {
       reason: dto.reason?.trim() || null,
     };
 
-    const { cancelled, paymentOutcome, providerStruck, suspendedUntil } =
-      await this.runSerializable(
-        (tx) => this.applyCancellation(tx, cancellation),
-        8000,
-      );
-
-    if (providerStruck) {
-      await this.audit.record({
-        action: AuditAction.PROVIDER_STRIKE_ISSUED,
-        actorId: userId,
-        targetType: 'User',
-        targetId: booking.providerId,
-        metadata: { serviceBookingId: bookingId },
-      });
-    }
-
-    if (suspendedUntil) {
-      await this.audit.record({
-        action: AuditAction.PROVIDER_LISTINGS_SUSPENDED,
-        actorId: SYSTEM_ACTOR_ID,
-        targetType: 'User',
-        targetId: booking.providerId,
-        metadata: {
-          serviceBookingId: bookingId,
-          suspendedUntil: suspendedUntil.toISOString(),
-        },
-      });
-    }
+    const { cancelled, paymentOutcome } = await this.runSerializable(
+      (tx) => this.applyCancellation(tx, cancellation),
+      8000,
+    );
 
     void this.notifier.cancelled(bookingId, party);
 
@@ -421,13 +397,14 @@ export class ServiceBookingsService {
       cancellation.party === 'PROVIDER' &&
       paymentOutcome === CancelledPaymentOutcome.REFUNDED;
 
-    const suspendedUntil = providerStruck
-      ? await issueProviderStrike(tx, {
-          providerId: cancellation.providerId,
-          serviceBookingId: cancellation.bookingId,
-          reason: 'Cancelamento de serviço já pago.',
-        })
-      : null;
+    if (providerStruck) {
+      await issueProviderStrike(tx, this.audit, {
+        providerId: cancellation.providerId,
+        actorId: cancellation.actorId,
+        serviceBookingId: cancellation.bookingId,
+        reason: 'Cancelamento de serviço já pago.',
+      });
+    }
 
     const cancelled = await tx.serviceBooking.update({
       where: { id: cancellation.bookingId },
@@ -455,7 +432,7 @@ export class ServiceBookingsService {
       tx,
     );
 
-    return { cancelled, paymentOutcome, providerStruck, suspendedUntil };
+    return { cancelled, paymentOutcome };
   }
 
   private assertCancellable(

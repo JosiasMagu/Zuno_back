@@ -490,35 +490,11 @@ export class BookingsService {
       issuesProviderStrike: cancelledByProvider && wasConfirmed && !isAdmin,
     };
 
-    const { cancelled: updatedBooking, suspendedUntil } =
-      await this.runSerializable(
-        (tx) => this.applyCancellation(tx, booking, cancellation),
-        BOOKING_CHANGED,
-        8000,
-      );
-
-    if (cancellation.issuesProviderStrike) {
-      await this.audit.record({
-        action: AuditAction.PROVIDER_STRIKE_ISSUED,
-        actorId: userId,
-        targetType: 'User',
-        targetId: booking.ownerId,
-        metadata: { bookingId: booking.id },
-      });
-    }
-
-    if (suspendedUntil) {
-      await this.audit.record({
-        action: AuditAction.PROVIDER_LISTINGS_SUSPENDED,
-        actorId: SYSTEM_ACTOR_ID,
-        targetType: 'User',
-        targetId: booking.ownerId,
-        metadata: {
-          bookingId: booking.id,
-          suspendedUntil: suspendedUntil.toISOString(),
-        },
-      });
-    }
+    const updatedBooking = await this.runSerializable(
+      (tx) => this.applyCancellation(tx, booking, cancellation),
+      BOOKING_CHANGED,
+      8000,
+    );
 
     this.notifyCancellation(booking, cancelledByClient);
 
@@ -1270,15 +1246,16 @@ export class BookingsService {
       tx,
     );
 
-    const suspendedUntil = cancellation.issuesProviderStrike
-      ? await issueProviderStrike(tx, {
-          providerId: booking.ownerId,
-          bookingId: booking.id,
-          reason: 'Cancelamento de reserva confirmada.',
-        })
-      : null;
+    if (cancellation.issuesProviderStrike) {
+      await issueProviderStrike(tx, this.audit, {
+        providerId: booking.ownerId,
+        actorId: cancellation.actorId,
+        bookingId: booking.id,
+        reason: 'Cancelamento de reserva confirmada.',
+      });
+    }
 
-    return { cancelled, suspendedUntil };
+    return cancelled;
   }
 
   /**

@@ -11,7 +11,7 @@ export class RegisterDto {
   })
   @IsString()
   @IsNotEmpty()
-  name: string;
+  name!: string;
 
   @ApiProperty({
     example: '841234567',
@@ -19,7 +19,7 @@ export class RegisterDto {
       'Telemóvel moçambicano, com ou sem o indicativo +258. Fica guardado em E.164.',
   })
   @IsMzPhone()
-  phone: string;
+  phone!: string;
 
   @ApiPropertyOptional({
     example: 'zuno@test.com',
@@ -35,5 +35,5 @@ export class RegisterDto {
     minLength: PASSWORD_MIN_LENGTH,
   })
   @IsNewPassword()
-  password: string;
+  password!: string;
 }

@@ -16,21 +16,21 @@ export class CreateBookingDto {
   })
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsUUID()
-  equipmentId: string;
+  equipmentId!: string;
 
   @ApiProperty({
     example: '2026-04-25',
     description: 'Data inicial da reserva',
   })
   @IsDateString()
-  startDate: string;
+  startDate!: string;
 
   @ApiProperty({
     example: '2026-04-27',
     description: 'Data final da reserva',
   })
   @IsDateString()
-  endDate: string;
+  endDate!: string;
 
   @ApiPropertyOptional({
     example: 'Maputo, Bairro Central',

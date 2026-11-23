@@ -15,11 +15,11 @@ export class LoginDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(32)
-  phone: string;
+  phone!: string;
 
   @ApiProperty({ description: 'Palavra-passe da conta' })
   @IsString()
   @IsNotEmpty()
   @MaxLength(128)
-  password: string;
+  password!: string;
 }
