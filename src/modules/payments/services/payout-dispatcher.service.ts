@@ -11,6 +11,8 @@ import {
   AuditAction,
   PayoutKind,
   PayoutStatus,
+  Prisma,
+  ProviderOperation,
   ProviderOperationKind,
   ProviderOperationStatus,
   UserRole,
@@ -26,6 +28,7 @@ import { PrismaService } from '../../../shared/db/prisma.service';
 import { runSerializable } from '../../../shared/db/serializable-transaction';
 import { itemFailureOf } from '../../../shared/scheduling/job-failures';
 import { processDue } from '../../../shared/scheduling/process-due';
+import { captureUnhandled } from '../../../shared/sentry/sentry';
 import {
   assertFourEyes,
   assertNotOwnPayout,
@@ -42,6 +45,9 @@ import type { PaymentProvider } from '../providers/payment-provider';
 import { toProviderResponse } from '../providers/provider-response';
 import { PayoutPresenter } from '../presenters/payout.presenter';
 import { PaymentNotifier } from './payment-notifier.service';
+import { PayoutsService } from './payouts.service';
+
+type Confirmation = Extract<ProviderOutcome, { status: 'CONFIRMED' }>;
 
 /** Quantos payouts o job envia de cada vez. */
 const BATCH_SIZE = 20;
@@ -91,6 +97,7 @@ export class PayoutDispatcher {
     private readonly audit: AuditService,
     private readonly notifier: PaymentNotifier,
     private readonly config: ConfigService,
+    private readonly payouts: PayoutsService,
     @Inject(PAYMENT_PROVIDER) private readonly provider: PaymentProvider,
   ) {}
 
@@ -206,6 +213,59 @@ export class PayoutDispatcher {
   }
 
   /**
+   * Repõe na fila um payout falhado. Antes pergunta ao fornecedor pelo envio
+   * que falhou: se afinal saiu, o payout fica executado, porque repeti-lo
+   * era pagar duas vezes.
+   */
+  async retry(adminId: string, payoutId: string) {
+    await this.assertAdmin(adminId);
+
+    if (await this.sentAfterAll(payoutId)) {
+      throw ApiErrors.conflict(
+        ErrorCode.CONFLICT,
+        'O fornecedor confirma agora o envio que tinha falhado. O payout ficou executado e não precisa de ser repetido.',
+      );
+    }
+
+    return this.payouts.retry(adminId, payoutId);
+  }
+
+  /** True se o último envio falhado deste payout está confirmado no fornecedor. */
+  private async sentAfterAll(payoutId: string): Promise<boolean> {
+    if (!this.provider.transfers) {
+      return false;
+    }
+
+    const operation = await this.prisma.providerOperation.findFirst({
+      where: {
+        payoutId,
+        provider: this.provider.name,
+        kind: ProviderOperationKind.PAYOUT,
+        status: ProviderOperationStatus.FAILED,
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, reference: true, providerReference: true },
+    });
+    if (!operation) {
+      return false;
+    }
+
+    const outcome = await callProvider(() =>
+      this.provider.queryStatus({
+        kind: 'TRANSFER',
+        reference: operation.reference,
+        providerReference: operation.providerReference,
+      }),
+    );
+    if (outcome.status !== 'CONFIRMED') {
+      return false;
+    }
+
+    await this.settle(operation.id, outcome);
+    return true;
+  }
+
+  /**
    * Reserva o payout e envia-o. Se outro pedido o reservou primeiro, não
    * faz nada.
    */
@@ -284,60 +344,26 @@ export class PayoutDispatcher {
         if (
           !operation?.payoutId ||
           operation.kind !== ProviderOperationKind.PAYOUT ||
-          operation.status === ProviderOperationStatus.CONFIRMED ||
-          operation.status === ProviderOperationStatus.FAILED
+          operation.status === ProviderOperationStatus.CONFIRMED
         ) {
+          return null;
+        }
+
+        // Uma falha já registada só muda se o fornecedor disser que afinal
+        // o dinheiro saiu.
+        const afterFailure =
+          operation.status === ProviderOperationStatus.FAILED;
+        if (afterFailure && outcome.status !== 'CONFIRMED') {
           return null;
         }
 
         const payoutId = operation.payoutId;
 
         if (outcome.status === 'CONFIRMED') {
-          const payout = await tx.payout.findUniqueOrThrow({
-            where: { id: payoutId },
-            select: { approvedById: true, amount: true },
+          return this.applyConfirmation(tx, operation, outcome, {
+            actorId,
+            afterFailure,
           });
-
-          await tx.providerOperation.update({
-            where: { id: operationId },
-            data: {
-              status: ProviderOperationStatus.CONFIRMED,
-              providerReference: outcome.providerReference,
-              feeAmount: outcome.fee ?? null,
-              confirmedAt: new Date(),
-              response: toProviderResponse(outcome),
-            },
-          });
-
-          await tx.payout.update({
-            where: { id: payoutId },
-            data: {
-              status: PayoutStatus.EXECUTED,
-              mpesaReference: outcome.providerReference,
-              executedById: payout.approvedById ?? actorId,
-              executedAt: new Date(),
-              failReason: null,
-            },
-          });
-
-          await this.audit.record(
-            {
-              action: AuditAction.PAYOUT_SENT,
-              actorId: payout.approvedById ?? actorId,
-              targetType: 'Payout',
-              targetId: payoutId,
-              amount: payout.amount,
-              metadata: {
-                provider: operation.provider,
-                reference: operation.reference,
-                providerReference: outcome.providerReference,
-                msisdn: operation.msisdn,
-              },
-            },
-            tx,
-          );
-
-          return { payoutId, executed: true };
         }
 
         if (outcome.status === 'FAILED') {
@@ -371,7 +397,7 @@ export class PayoutDispatcher {
             tx,
           );
 
-          return { payoutId, executed: false };
+          return { payoutId, executed: false, paidTwice: false };
         }
 
         await tx.providerOperation.update({
@@ -393,11 +419,93 @@ export class PayoutDispatcher {
       payoutConflict,
     );
 
-    if (result?.executed) {
+    if (result?.paidTwice) {
+      const message = `O payout ${result.payoutId} saiu duas vezes: o fornecedor confirmou um envio que tinha dado como falhado, depois de o payout ser repetido.`;
+      this.logger.error(message);
+      captureUnhandled(new Error(message));
+    } else if (result?.executed) {
       void this.notifier.payoutExecuted(result.payoutId);
     } else if (result) {
       void this.notifier.payoutFailed(result.payoutId);
     }
+  }
+
+  /**
+   * O fornecedor confirma um envio. O payout fica executado por ele, mesmo
+   * que o envio tivesse sido dado como falhado. Só não fica se, depois dessa
+   * falha, o payout já saiu ou está a sair por outro envio: aí o dinheiro
+   * saiu duas vezes e o que há a fazer é avisar.
+   */
+  private async applyConfirmation(
+    tx: Prisma.TransactionClient,
+    operation: ProviderOperation,
+    outcome: Confirmation,
+    { actorId, afterFailure }: { actorId: string; afterFailure: boolean },
+  ) {
+    const payoutId = operation.payoutId as string;
+    const payout = await tx.payout.findUniqueOrThrow({
+      where: { id: payoutId },
+      select: { status: true, approvedById: true, amount: true },
+    });
+    const sentBy = payout.approvedById ?? actorId;
+    const paidTwice =
+      afterFailure &&
+      (payout.status === PayoutStatus.SENDING ||
+        payout.status === PayoutStatus.EXECUTED);
+
+    await tx.providerOperation.update({
+      where: { id: operation.id },
+      data: {
+        status: ProviderOperationStatus.CONFIRMED,
+        providerReference: outcome.providerReference,
+        feeAmount: outcome.fee ?? null,
+        confirmedAt: new Date(),
+        response: toProviderResponse(outcome),
+      },
+    });
+
+    if (!paidTwice) {
+      if (payout.status === PayoutStatus.FAILED) {
+        // A base só deixa um payout falhado voltar a pendente.
+        await tx.payout.update({
+          where: { id: payoutId },
+          data: { status: PayoutStatus.PENDING },
+        });
+      }
+
+      await tx.payout.update({
+        where: { id: payoutId },
+        data: {
+          status: PayoutStatus.EXECUTED,
+          mpesaReference: outcome.providerReference,
+          // Para onde este envio foi, que pode já não ser o número do payout.
+          msisdn: operation.msisdn,
+          executedById: sentBy,
+          executedAt: new Date(),
+          failReason: null,
+        },
+      });
+    }
+
+    await this.audit.record(
+      {
+        action: AuditAction.PAYOUT_SENT,
+        actorId: sentBy,
+        targetType: 'Payout',
+        targetId: payoutId,
+        amount: payout.amount,
+        metadata: {
+          provider: operation.provider,
+          reference: operation.reference,
+          providerReference: outcome.providerReference,
+          msisdn: operation.msisdn,
+          ...(afterFailure ? { confirmedAfterFailure: true, paidTwice } : {}),
+        },
+      },
+      tx,
+    );
+
+    return { payoutId, executed: !paidTwice, paidTwice };
   }
 
   private async assertAdmin(userId: string) {

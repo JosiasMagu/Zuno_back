@@ -2,7 +2,12 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
 import { PayoutDispatcher } from '../src/modules/payments/services/payout-dispatcher.service';
+import {
+  PAYMENT_PROVIDER,
+  PaymentProvider,
+} from '../src/modules/payments/providers/payment-provider';
 import { ProviderOperationsService } from '../src/modules/payments/services/provider-operations.service';
+import { ReconciliationService } from '../src/modules/payments/services/reconciliation.service';
 import { createTestApp } from './helpers/app';
 import { authHeader, loginViaApi, LoginResult } from './helpers/auth';
 import {
@@ -152,6 +157,40 @@ describe('Payout dispatch E2E', () => {
   const pollLater = () =>
     operations.pollDue(new Date(Date.now() + 10 * 60_000));
 
+  const retryAs = (admin: LoginResult, payoutId: string) =>
+    request(actors.httpServer)
+      .patch(`/api/v1/payouts/${payoutId}/retry`)
+      .set(authHeader(admin.accessToken))
+      .send({});
+
+  /** O fornecedor avisa que um envio foi feito. */
+  const noticeOfTransfer = (reference: string, providerReference: string) =>
+    request(actors.httpServer)
+      .post('/api/v1/payments/providers/simulator/events')
+      .set('x-zuno-webhook-token', WEBHOOK_SECRET)
+      .send({
+        eventId: `evt-${providerReference}`,
+        reference,
+        status: 'CONFIRMED',
+        providerReference,
+        amount: PROVIDER_PAYOUT,
+      });
+
+  const sentAuditsOf = (payoutId: string) =>
+    prisma().auditLog.findMany({
+      where: { action: 'PAYOUT_SENT', targetId: payoutId },
+      orderBy: { createdAt: 'asc' },
+      select: { metadata: true },
+    });
+
+  /** Payout recusado pelo fornecedor, com a operação que falhou. */
+  async function createFailedPayout() {
+    const payout = await createProviderPayout(PHONE('01'));
+    await dispatcher.dispatchDue();
+    const [operation] = await operationsOf(payout.id);
+    return { payout, operation };
+  }
+
   describe('under the automatic limit', () => {
     it('goes out by itself and is recorded as sent by the system', async () => {
       const payout = await createProviderPayout(PHONE('00'));
@@ -286,20 +325,93 @@ describe('Payout dispatch E2E', () => {
   });
 
   describe('when the transfer does not go through at once', () => {
-    it('fails the payout on a refusal, and an admin can put it back in the queue', async () => {
-      const payout = await createProviderPayout(PHONE('01'));
-
-      await dispatcher.dispatchDue();
+    it('fails the payout on a refusal and raises an alert for it', async () => {
+      const { payout } = await createFailedPayout();
 
       const failed = await readPayout(payout.id);
       expect(failed.status).toBe('FAILED');
       expect(failed.failReason).toContain('CUSTOMER_REJECTED');
-      await request(actors.httpServer)
-        .patch(`/api/v1/payouts/${payout.id}/retry`)
-        .set(authHeader(secondAdmin.accessToken))
-        .send({})
-        .expect(200);
-      expect((await readPayout(payout.id)).status).toBe('PENDING');
+
+      const { alerts } = await app.get(ReconciliationService).run();
+      expect(alerts).toContainEqual(
+        expect.objectContaining({ kind: 'PAYOUT_FAILED', targetId: payout.id }),
+      );
+    });
+
+    it('goes back in the queue for the number the account has now, and then goes out', async () => {
+      const { payout } = await createFailedPayout();
+      await setProviderNumber(PHONE('00'));
+
+      await retryAs(secondAdmin, payout.id).expect(200);
+
+      const queued = await readPayout(payout.id);
+      expect(queued).toMatchObject({ status: 'PENDING', msisdn: PHONE('00') });
+      await dispatcher.dispatchDue();
+      expect((await readPayout(payout.id)).status).toBe('EXECUTED');
+    });
+
+    it('is executed after all when the provider confirms a transfer it had refused', async () => {
+      const { payout, operation } = await createFailedPayout();
+
+      await noticeOfTransfer(operation.reference, 'SIMLATE000001').expect(200);
+
+      expect(await readPayout(payout.id)).toMatchObject({
+        status: 'EXECUTED',
+        mpesaReference: 'SIMLATE000001',
+        failReason: null,
+      });
+      expect((await operationsOf(payout.id))[0].status).toBe('CONFIRMED');
+      expect(await sentAuditsOf(payout.id)).toEqual([
+        {
+          metadata: expect.objectContaining({
+            confirmedAfterFailure: true,
+            paidTwice: false,
+          }) as object,
+        },
+      ]);
+    });
+
+    it('refuses the retry when the provider now confirms the failed transfer', async () => {
+      const { payout } = await createFailedPayout();
+      const provider = app.get<PaymentProvider>(PAYMENT_PROVIDER);
+      const asked = jest.spyOn(provider, 'queryStatus').mockResolvedValueOnce({
+        status: 'CONFIRMED',
+        providerReference: 'SIMLATE000002',
+        amount: PROVIDER_PAYOUT,
+      });
+
+      const response = await retryAs(secondAdmin, payout.id);
+      asked.mockRestore();
+
+      expect(response.status).toBe(409);
+      expect(await readPayout(payout.id)).toMatchObject({
+        status: 'EXECUTED',
+        mpesaReference: 'SIMLATE000002',
+      });
+    });
+
+    it('records a payout as paid twice when the confirmation comes after it was sent again', async () => {
+      const { payout, operation } = await createFailedPayout();
+      await setProviderNumber(PHONE('00'));
+      await retryAs(secondAdmin, payout.id).expect(200);
+      await dispatcher.dispatchDue();
+      const sentAgain = await readPayout(payout.id);
+      expect(sentAgain.status).toBe('EXECUTED');
+
+      await noticeOfTransfer(operation.reference, 'SIMLATE000003').expect(200);
+
+      // O payout fica como estava: quem o executou foi o segundo envio.
+      expect((await readPayout(payout.id)).mpesaReference).toBe(
+        sentAgain.mpesaReference,
+      );
+      const [first, second] = await operationsOf(payout.id);
+      expect([first.status, second.status]).toEqual(['CONFIRMED', 'CONFIRMED']);
+      expect((await sentAuditsOf(payout.id)).at(-1)).toEqual({
+        metadata: expect.objectContaining({
+          confirmedAfterFailure: true,
+          paidTwice: true,
+        }) as object,
+      });
     });
 
     it('stays SENDING without an answer, closed to manual changes, until the job asks', async () => {

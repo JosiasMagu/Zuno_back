@@ -569,24 +569,76 @@ describe('PayoutsService', () => {
   });
 
   describe('retry', () => {
-    it('puts a failed payout back in the queue', async () => {
+    const OLD_NUMBER = '+258840000111';
+    const NEW_NUMBER = '+258840000222';
+
+    const retriedData = () =>
+      (
+        prisma.payout.update.mock.calls[0][0] as {
+          data: Record<string, unknown>;
+        }
+      ).data;
+
+    it('puts a failed payout back in the queue, to the number the account has now', async () => {
       prisma.payout.findUnique.mockResolvedValue(
-        makePayout({ status: PayoutStatus.FAILED }),
+        makePayout({
+          status: PayoutStatus.FAILED,
+          kind: PayoutKind.PROVIDER_PAYOUT,
+          msisdn: OLD_NUMBER,
+        }),
       );
+      // A primeira leitura é a do admin; a segunda, a da conta que recebe.
+      prisma.user.findUnique
+        .mockResolvedValueOnce({ id: ADMIN_ID, role: UserRole.ADMIN })
+        .mockResolvedValueOnce({
+          payoutMsisdn: NEW_NUMBER,
+          phone: OLD_NUMBER,
+        });
       prisma.payout.update.mockResolvedValue(makePayout());
 
       const result = await service.retry(ADMIN_ID, PAYOUT_ID);
 
       expect(result.data.status).toBe(PayoutStatus.PENDING);
-      expect(prisma.payout.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: { status: PayoutStatus.PENDING, failReason: null },
-        }),
-      );
+      expect(retriedData()).toEqual({
+        status: PayoutStatus.PENDING,
+        failReason: null,
+        msisdn: NEW_NUMBER,
+        // A aprovação valia para o envio que falhou.
+        approvedById: null,
+        approvedAt: null,
+      });
       expect(auditMock.record).toHaveBeenCalledWith(
-        expect.objectContaining({ action: AuditAction.PAYOUT_RETRIED }),
+        expect.objectContaining({
+          action: AuditAction.PAYOUT_RETRIED,
+          metadata: expect.objectContaining({
+            previousMsisdn: OLD_NUMBER,
+          }) as object,
+        }),
         prisma,
       );
+    });
+
+    it('keeps sending a refund to the number that paid', async () => {
+      prisma.payout.findUnique.mockResolvedValue(
+        makePayout({
+          status: PayoutStatus.FAILED,
+          kind: PayoutKind.CLIENT_REFUND,
+          msisdn: OLD_NUMBER,
+        }),
+      );
+      // A primeira leitura é a do admin; a segunda, a da conta que recebe.
+      prisma.user.findUnique
+        .mockResolvedValueOnce({ id: ADMIN_ID, role: UserRole.ADMIN })
+        .mockResolvedValueOnce({
+          payoutMsisdn: NEW_NUMBER,
+          phone: NEW_NUMBER,
+        });
+      prisma.payment.findUnique.mockResolvedValue({ payerMsisdn: OLD_NUMBER });
+      prisma.payout.update.mockResolvedValue(makePayout());
+
+      await service.retry(ADMIN_ID, PAYOUT_ID);
+
+      expect(retriedData().msisdn).toBe(OLD_NUMBER);
     });
 
     it.each([PayoutStatus.PENDING, PayoutStatus.EXECUTED])(

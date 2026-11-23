@@ -855,11 +855,27 @@ com cada um:
   (`GET /payouts?status=PENDING`), `needsApproval: true` pede
   `PATCH /payouts/:id/approve`. No modo manual, faz-se a transferencia e
   regista-se com `PATCH /payouts/:id/execute`.
+- `PAYOUT_FAILED`: um payout que falhou e continua por resolver. Alerta logo,
+  sem prazo, porque ha alguem a espera desse dinheiro. O motivo vem no
+  detalhe. Confirma-se o numero com a pessoa, que o corrige em
+  `PUT /users/me/payout-number`, e repete-se com `PATCH /payouts/:id/retry`.
+  A repeticao usa o numero que a conta tem nesse momento e apaga a aprovacao
+  anterior, por isso acima do limite automatico pede nova aprovacao. Antes de
+  repetir, o backend pergunta ao fornecedor pelo envio que falhou. Se afinal
+  saiu, responde 409 e o payout fica executado.
 - `UNALLOCATED_OPEN`: dinheiro que entrou sem fechar pagamento e ninguem
   devolveu em 48 horas. Devolve-se por M-Pesa ao `payerMsisdn` e regista-se a
   referencia com `PATCH /payments/admin/unallocated/:id/returned`. Com um
   fornecedor que envia dinheiro, `POST /payments/admin/unallocated/:id/return`
   faz a devolucao.
+
+Se o fornecedor confirmar um envio que tinha dado como falhado, o payout fica
+executado por esse envio. Se nessa altura o payout ja tinha sido repetido e
+enviado, o dinheiro saiu duas vezes. Fica um erro no log e no Sentry («saiu
+duas vezes») e uma linha `PAYOUT_SENT` na auditoria com `paidTwice: true`.
+Recuperar o valor em duplicado faz-se fora da plataforma, com a pessoa ou com
+o fornecedor. A reconciliacao nao o mostra, porque so compara o ledger com os
+payouts.
 
 Uma transferencia que aparece no extracto e nao fecha nenhum pagamento (o
 cliente pagou menos, ou pagou para uma reserva que ja expirou) regista-se com

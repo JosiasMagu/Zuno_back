@@ -684,6 +684,8 @@ Uma segunda revisão do backend procurou o que funcionava no caso feliz e falhav
 - `GET /payments/:id` e as listas de pagamentos trazem dois campos novos: `depositStatus` (`NONE`, `HELD`, `RETURNED`, `CLAIMED` ou `SPLIT`) e `serviceBookingId`, que vem `null` num aluguer.
 - Em `GET /payments/:id`, o número de onde saiu o dinheiro (`collection.msisdn`) só chega ao cliente que pagou e a um admin. O proprietário recebe `null` nesse campo e o resto da cobrança como antes.
 - Um admin deixa de conseguir reembolsar um pagamento em que uma disputa foi aberta no mesmo instante. Responde o 400 que já existia, «Este pagamento tem uma disputa aberta», e o reembolso decide-se na disputa.
+- `PATCH /payouts/:id/retry` (admin) repõe o payout na fila para o número que a conta tem nesse momento e apaga a aprovação anterior. Responde 409 quando o fornecedor confirma, nessa altura, o envio que tinha falhado: o payout fica executado e não se repete.
+- A reconciliação (`GET /payments/admin/reconciliation`) tem um alerta novo, `PAYOUT_FAILED`, para cada payout falhado que continua por resolver.
 
 ### Disputas
 - Cada pessoa abre no máximo duas disputas do mesmo tipo (pagamento ou depósito) sobre a mesma reserva, e as que retirou contam. A terceira responde 400 com `errorCode: DISPUTE_LIMIT_REACHED`.

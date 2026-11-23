@@ -141,6 +141,6 @@ export class PayoutsController {
   @ApiParam({ name: 'id', description: 'ID do payout' })
   @ApiResponse({ status: 200, description: 'Payout recolocado na fila.' })
   retry(@CurrentUser() user: { id: string }, @Param('id') id: string) {
-    return this.payoutsService.retry(user.id, id);
+    return this.dispatcher.retry(user.id, id);
   }
 }

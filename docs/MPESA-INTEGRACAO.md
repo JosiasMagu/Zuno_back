@@ -27,6 +27,7 @@ As regras que o resto do código assume:
 4. O valor confirmado é o que de facto se moveu. Se o cliente pagou menos, o adaptador devolve o valor menor e o backend põe o dinheiro de lado para devolução.
 5. Um adaptador não lança em falhas de rede. Mesmo que lance, `callProvider` converte o erro em `UNKNOWN`.
 6. A cobrança pode demorar o tempo que o cliente leva a pôr o PIN, e o pedido da app fica à espera dela. Se a chamada do fornecedor ficar presa mais do que uns segundos, o adaptador deve cortar e devolver `UNKNOWN` ou `PENDING`. A app mostra a cobrança como em curso e volta a ler `GET /payments/:id`.
+7. Numa consulta (`queryStatus`), uma referência que o fornecedor ainda não conhece é `UNKNOWN`, e nunca `FAILED`. Um envio dado como falhado pode ser repetido por um admin, e se o primeiro afinal saiu o dinheiro sai duas vezes. O backend defende-se: aplica a confirmação que chegue depois de uma falha e pergunta ao fornecedor antes de repetir um payout. Essa defesa só cobre o que o fornecedor já sabe nesse momento. O simulador responde `FAILED` a uma referência desconhecida e não serve de exemplo neste ponto.
 
 O ficheiro `payment-provider.contract.ts` tem `describePaymentProviderContract`, uma bateria de testes que qualquer adaptador tem de passar. Corre hoje contra o simulador (`simulator.provider.spec.ts`). Contra o M-Pesa, corre com as credenciais da sandbox.
 

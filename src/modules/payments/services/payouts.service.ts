@@ -106,35 +106,45 @@ export class PayoutsService {
     const amount = roundMoney(input.amount);
     if (amount <= 0) return null;
 
-    const recipient = await tx.user.findUnique({
-      where: { id: input.recipientId },
-      select: { payoutMsisdn: true, phone: true },
-    });
-
-    // Um reembolso ou a devolução do depósito vai para o número que pagou,
-    // que pode não ser o da conta. Sem esse número (pagamento simulado),
-    // vale o de recebimento e, por fim, o telefone de registo.
-    const payment = RETURNS_TO_PAYER.has(input.kind)
-      ? await tx.payment.findUnique({
-          where: { id: input.paymentId },
-          select: { payerMsisdn: true },
-        })
-      : null;
-
     return tx.payout.create({
       data: {
         paymentId: input.paymentId,
         recipientId: input.recipientId,
         kind: input.kind,
         amount,
-        msisdn:
-          payment?.payerMsisdn ??
-          recipient?.payoutMsisdn ??
-          recipient?.phone ??
-          null,
+        msisdn: await this.destinationOf(tx, input),
         status: PayoutStatus.PENDING,
       },
     });
+  }
+
+  /**
+   * Para onde sai um payout. Um reembolso ou a devolução do depósito vai
+   * para o número que pagou, que pode não ser o da conta. Sem esse número
+   * (pagamento simulado), vale o de recebimento e, por fim, o telefone de
+   * registo.
+   */
+  private async destinationOf(
+    tx: Prisma.TransactionClient,
+    payout: Pick<CreatePayoutInput, 'paymentId' | 'recipientId' | 'kind'>,
+  ): Promise<string | null> {
+    const recipient = await tx.user.findUnique({
+      where: { id: payout.recipientId },
+      select: { payoutMsisdn: true, phone: true },
+    });
+    const payment = RETURNS_TO_PAYER.has(payout.kind)
+      ? await tx.payment.findUnique({
+          where: { id: payout.paymentId },
+          select: { payerMsisdn: true },
+        })
+      : null;
+
+    return (
+      payment?.payerMsisdn ??
+      recipient?.payoutMsisdn ??
+      recipient?.phone ??
+      null
+    );
   }
 
   async findAll(userId: string, query: FindPayoutsQueryDto) {
@@ -424,7 +434,14 @@ export class PayoutsService {
       async (tx) => {
         const payout = await tx.payout.findUnique({
           where: { id: payoutId },
-          select: { id: true, status: true },
+          select: {
+            id: true,
+            status: true,
+            paymentId: true,
+            recipientId: true,
+            kind: true,
+            msisdn: true,
+          },
         });
 
         if (!payout) {
@@ -439,7 +456,15 @@ export class PayoutsService {
 
         const retried = await tx.payout.update({
           where: { id: payoutId },
-          data: { status: PayoutStatus.PENDING, failReason: null },
+          data: {
+            status: PayoutStatus.PENDING,
+            failReason: null,
+            // A pessoa pode ter corrigido o número depois da falha, e a
+            // aprovação valia para o envio que falhou.
+            msisdn: (await this.destinationOf(tx, payout)) ?? payout.msisdn,
+            approvedById: null,
+            approvedAt: null,
+          },
           include: PAYOUT_INCLUDE,
         });
 
@@ -450,6 +475,10 @@ export class PayoutsService {
             targetType: 'Payout',
             targetId: retried.id,
             amount: retried.amount,
+            metadata: {
+              msisdn: retried.msisdn,
+              previousMsisdn: payout.msisdn,
+            },
           },
           tx,
         );

@@ -5,6 +5,7 @@ import {
 } from '../../shared/constants/policy';
 import {
   alertCutoffs,
+  failedPayoutAlert,
   openUnallocatedAlert,
   ReconciliationAlertKind,
   stalePayoutAlert,
@@ -77,6 +78,32 @@ describe('stalePayoutAlert', () => {
     ).toBe(
       'O payout PROVIDER_PAYOUT de 6000.00 MZN está por executar há 50 h.',
     );
+  });
+});
+
+describe('failedPayoutAlert', () => {
+  it('diz há quanto tempo falhou e porquê, sem esperar por prazo nenhum', () => {
+    const now = new Date('2026-11-23T12:00:00Z');
+
+    const alert = failedPayoutAlert(
+      {
+        id: 'payout-1',
+        kind: 'PROVIDER_PAYOUT',
+        amount: 4050,
+        failReason: 'Número inválido (INVALID_MSISDN)',
+        updatedAt: new Date('2026-11-23T09:00:00Z'),
+      },
+      now,
+    );
+
+    expect(alert).toMatchObject({
+      kind: ReconciliationAlertKind.PAYOUT_FAILED,
+      targetType: 'Payout',
+      targetId: 'payout-1',
+      amount: 4050,
+    });
+    expect(alert.detail).toContain('falhou há 3 h');
+    expect(alert.detail).toContain('Número inválido (INVALID_MSISDN)');
   });
 });
 

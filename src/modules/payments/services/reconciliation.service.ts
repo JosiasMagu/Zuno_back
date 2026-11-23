@@ -22,6 +22,7 @@ import {
 } from '../reconciliation';
 import {
   alertCutoffs,
+  failedPayoutAlert,
   openUnallocatedAlert,
   ReconciliationAlert,
   ReconciliationAlertKind,
@@ -388,33 +389,43 @@ export class ReconciliationService {
       status: PayoutStatus.PENDING,
       createdAt: { lte: cutoff.payouts },
     };
+    const failedWhere: Prisma.PayoutWhereInput = {
+      status: PayoutStatus.FAILED,
+    };
     const unallocatedWhere: Prisma.UnallocatedFundsWhereInput = {
       status: UnallocatedStatus.OPEN,
       createdAt: { lte: cutoff.unallocated },
     };
 
-    const [operations, payouts, unallocated, counts] = await Promise.all([
-      this.prisma.providerOperation.findMany({
-        where: operationsWhere,
-        orderBy: { createdAt: 'asc' },
-        take: MAX_ALERTS_PER_KIND,
-      }),
-      this.prisma.payout.findMany({
-        where: payoutsWhere,
-        orderBy: { createdAt: 'asc' },
-        take: MAX_ALERTS_PER_KIND,
-      }),
-      this.prisma.unallocatedFunds.findMany({
-        where: unallocatedWhere,
-        orderBy: { createdAt: 'asc' },
-        take: MAX_ALERTS_PER_KIND,
-      }),
-      Promise.all([
-        this.prisma.providerOperation.count({ where: operationsWhere }),
-        this.prisma.payout.count({ where: payoutsWhere }),
-        this.prisma.unallocatedFunds.count({ where: unallocatedWhere }),
-      ]),
-    ]);
+    const [operations, payouts, failed, unallocated, counts] =
+      await Promise.all([
+        this.prisma.providerOperation.findMany({
+          where: operationsWhere,
+          orderBy: { createdAt: 'asc' },
+          take: MAX_ALERTS_PER_KIND,
+        }),
+        this.prisma.payout.findMany({
+          where: payoutsWhere,
+          orderBy: { createdAt: 'asc' },
+          take: MAX_ALERTS_PER_KIND,
+        }),
+        this.prisma.payout.findMany({
+          where: failedWhere,
+          orderBy: { updatedAt: 'asc' },
+          take: MAX_ALERTS_PER_KIND,
+        }),
+        this.prisma.unallocatedFunds.findMany({
+          where: unallocatedWhere,
+          orderBy: { createdAt: 'asc' },
+          take: MAX_ALERTS_PER_KIND,
+        }),
+        Promise.all([
+          this.prisma.providerOperation.count({ where: operationsWhere }),
+          this.prisma.payout.count({ where: payoutsWhere }),
+          this.prisma.payout.count({ where: failedWhere }),
+          this.prisma.unallocatedFunds.count({ where: unallocatedWhere }),
+        ]),
+      ]);
 
     const items = [
       ...operations.map((operation) =>
@@ -433,12 +444,15 @@ export class ReconciliationService {
           now,
         ),
       ),
+      ...failed.map((payout) =>
+        failedPayoutAlert({ ...payout, amount: Number(payout.amount) }, now),
+      ),
       ...unallocated.map((funds) =>
         openUnallocatedAlert({ ...funds, amount: Number(funds.amount) }, now),
       ),
     ];
 
-    const [stuck, stale, open] = counts;
+    const [stuck, stale, failedTotal, open] = counts;
     this.metrics.reconciliationAlerts.set(
       { kind: ReconciliationAlertKind.OPERATION_STUCK },
       stuck,
@@ -448,11 +462,15 @@ export class ReconciliationService {
       stale,
     );
     this.metrics.reconciliationAlerts.set(
+      { kind: ReconciliationAlertKind.PAYOUT_FAILED },
+      failedTotal,
+    );
+    this.metrics.reconciliationAlerts.set(
       { kind: ReconciliationAlertKind.UNALLOCATED_OPEN },
       open,
     );
 
-    return { total: stuck + stale + open, items };
+    return { total: stuck + stale + failedTotal + open, items };
   }
 
   private toTotals(sums: Sums, extras: AccountExtras): ReconciliationTotals {

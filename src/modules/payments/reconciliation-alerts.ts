@@ -14,6 +14,8 @@ export enum ReconciliationAlertKind {
   OPERATION_STUCK = 'OPERATION_STUCK',
   /** Um payout continua por executar. */
   PAYOUT_STALE = 'PAYOUT_STALE',
+  /** Um payout falhou e ninguém o corrigiu nem repetiu. */
+  PAYOUT_FAILED = 'PAYOUT_FAILED',
   /** Dinheiro por atribuir continua por devolver a quem pagou. */
   UNALLOCATED_OPEN = 'UNALLOCATED_OPEN',
 }
@@ -89,6 +91,27 @@ export function stalePayoutAlert(
     since: payout.createdAt,
     amount: payout.amount,
     detail: `O payout ${payout.kind} de ${mzn(payout.amount)} está ${waiting} há ${hoursSince(payout.createdAt, now)} h.`,
+  };
+}
+
+/** Um payout falhado é dinheiro que alguém espera: alerta logo, sem prazo. */
+export function failedPayoutAlert(
+  payout: {
+    id: string;
+    kind: string;
+    amount: number;
+    failReason: string | null;
+    updatedAt: Date;
+  },
+  now: Date,
+): ReconciliationAlert {
+  return {
+    kind: ReconciliationAlertKind.PAYOUT_FAILED,
+    targetType: 'Payout',
+    targetId: payout.id,
+    since: payout.updatedAt,
+    amount: payout.amount,
+    detail: `O payout ${payout.kind} de ${mzn(payout.amount)} falhou há ${hoursSince(payout.updatedAt, now)} h (${payout.failReason ?? 'sem motivo registado'}). Confirma o número de destino e repete-o, ou executa-o à mão.`,
   };
 }
 
