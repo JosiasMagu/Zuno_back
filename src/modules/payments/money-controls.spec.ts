@@ -1,9 +1,11 @@
+import { SYSTEM_ACTOR_ID } from '../../shared/audit/audit.service';
 import {
   assertFourEyes,
   assertNotOwnPayout,
   assertNotPartyToPayment,
   assertNotPayee,
   payoutAutoMaxAmount,
+  leavesUnapproved,
   payoutNeedsApproval,
 } from './money-controls';
 
@@ -52,22 +54,52 @@ describe('payoutAutoMaxAmount', () => {
   });
 });
 
+const CONTROLS = { autoMaxAmount: 5000, fourEyes: false };
+
+describe('com quatro olhos', () => {
+  const controls = { autoMaxAmount: 5000, fourEyes: true };
+  const small = { status: 'PENDING', amount: 100, approvedAt: null };
+
+  it('um payout pequeno espera por aprovação quando a entrada foi confirmada à mão', () => {
+    const payout = { ...small, payment: { heldById: 'admin-1' } };
+
+    expect(payoutNeedsApproval(payout, controls)).toBe(true);
+    expect(payoutNeedsApproval(payout, CONTROLS)).toBe(false);
+  });
+
+  it('sai sozinho quando foi o fornecedor a confirmar a entrada', () => {
+    const payout = { ...small, payment: { heldById: SYSTEM_ACTOR_ID } };
+
+    expect(payoutNeedsApproval(payout, controls)).toBe(false);
+  });
+
+  it('a consulta dos que saem sozinhos segue a mesma regra', () => {
+    expect(leavesUnapproved(CONTROLS)).toEqual({ amount: { lte: 5000 } });
+    expect(leavesUnapproved(controls)).toEqual({
+      amount: { lte: 5000 },
+      payment: { OR: [{ heldById: null }, { heldById: SYSTEM_ACTOR_ID }] },
+    });
+  });
+});
+
 describe('payoutNeedsApproval', () => {
   const base = { status: 'PENDING', amount: 6000, approvedAt: null };
 
   it('pede aprovação acima do valor automático', () => {
-    expect(payoutNeedsApproval(base, 5000)).toBe(true);
+    expect(payoutNeedsApproval(base, CONTROLS)).toBe(true);
   });
 
   it('não pede no valor automático nem abaixo dele', () => {
-    expect(payoutNeedsApproval({ ...base, amount: 5000 }, 5000)).toBe(false);
+    expect(payoutNeedsApproval({ ...base, amount: 5000 }, CONTROLS)).toBe(
+      false,
+    );
   });
 
   it('não pede depois de aprovado nem fora de PENDING', () => {
-    expect(payoutNeedsApproval({ ...base, approvedAt: new Date() }, 5000)).toBe(
-      false,
-    );
-    expect(payoutNeedsApproval({ ...base, status: 'EXECUTED' }, 5000)).toBe(
+    expect(
+      payoutNeedsApproval({ ...base, approvedAt: new Date() }, CONTROLS),
+    ).toBe(false);
+    expect(payoutNeedsApproval({ ...base, status: 'EXECUTED' }, CONTROLS)).toBe(
       false,
     );
   });

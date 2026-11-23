@@ -1,7 +1,9 @@
 import type { ConfigService } from '@nestjs/config';
+import type { Prisma } from '@prisma/client';
 
 import { ApiErrors } from '../../common/exceptions/api.exception';
 import { ErrorCode } from '../../common/exceptions/error-codes';
+import { SYSTEM_ACTOR_ID } from '../../shared/audit/audit.service';
 import { PAYOUT_AUTO_MAX_AMOUNT } from '../../shared/constants/policy';
 
 /**
@@ -26,16 +28,62 @@ export function payoutAutoMaxAmount(config: ConfigReader): number {
     : Number(configured);
 }
 
-/** Um payout pendente acima do valor automático espera por um admin. */
+/** O que decide se um payout sai sozinho ou espera por um admin. */
+export interface PayoutControls {
+  autoMaxAmount: number;
+  fourEyes: boolean;
+}
+
+export function payoutControls(config: ConfigReader): PayoutControls {
+  return {
+    autoMaxAmount: payoutAutoMaxAmount(config),
+    fourEyes: fourEyesEnabled(config),
+  };
+}
+
+/** A entrada foi confirmada por um admin. O fornecedor confirma como sistema. */
+const confirmedByHand = (payment?: { heldById?: string | null } | null) =>
+  !!payment?.heldById && payment.heldById !== SYSTEM_ACTOR_ID;
+
+/**
+ * Um payout pendente espera por um admin quando passa o valor automático.
+ * Com quatro olhos, espera também, seja qual for o valor, quando a entrada
+ * do dinheiro foi confirmada à mão: quem a confirmou podia reembolsar ou
+ * libertar a seguir e o envio automático tirava o dinheiro sem mais ninguém.
+ */
 export function payoutNeedsApproval(
-  payout: { status: string; amount: unknown; approvedAt: Date | null },
-  autoMaxAmount: number,
+  payout: {
+    status: string;
+    amount: unknown;
+    approvedAt: Date | null;
+    payment?: { heldById?: string | null } | null;
+  },
+  controls: PayoutControls,
 ): boolean {
+  if (payout.status !== 'PENDING' || payout.approvedAt) {
+    return false;
+  }
+
   return (
-    payout.status === 'PENDING' &&
-    !payout.approvedAt &&
-    Number(payout.amount) > autoMaxAmount
+    Number(payout.amount) > controls.autoMaxAmount ||
+    (controls.fourEyes && confirmedByHand(payout.payment))
   );
+}
+
+/** Os payouts que saem sem aprovação: a mesma regra, para uma consulta. */
+export function leavesUnapproved(
+  controls: PayoutControls,
+): Prisma.PayoutWhereInput {
+  return {
+    amount: { lte: controls.autoMaxAmount },
+    ...(controls.fourEyes
+      ? {
+          payment: {
+            OR: [{ heldById: null }, { heldById: SYSTEM_ACTOR_ID }],
+          },
+        }
+      : {}),
+  };
 }
 
 /**

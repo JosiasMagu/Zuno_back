@@ -78,9 +78,9 @@ export class PayoutsController {
   @Throttle({ global: { ttl: 60_000, limit: 20 } })
   @ApiBearerAuth('access-token')
   @ApiOperation({
-    summary: 'Aprovar payout acima do valor automático (ADMIN)',
+    summary: 'Aprovar um payout que espera por aprovação (ADMIN)',
     description:
-      'Acima de PAYOUT_AUTO_MAX_AMOUNT um payout só sai depois de aprovado. Com o fornecedor a enviar, sai logo; no modo manual fica aprovado para ser executado. O admin não aprova um payout para si próprio e, com MONEY_FOUR_EYES ligado, quem confirmou a entrada do dinheiro também não.',
+      'Um payout só sai depois de aprovado quando passa PAYOUT_AUTO_MAX_AMOUNT ou, com MONEY_FOUR_EYES ligado, quando a entrada do dinheiro foi confirmada à mão. Com o fornecedor a enviar, sai logo; no modo manual fica aprovado para ser executado. O admin não aprova um payout para si próprio e, com MONEY_FOUR_EYES ligado, quem confirmou a entrada do dinheiro também não.',
   })
   @ApiParam({ name: 'id', description: 'ID do payout' })
   @ApiResponse({ status: 200, description: 'Payout aprovado.' })

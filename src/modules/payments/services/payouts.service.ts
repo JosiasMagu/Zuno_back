@@ -28,7 +28,7 @@ import {
   assertFourEyes,
   assertNotOwnPayout,
   fourEyesEnabled,
-  payoutAutoMaxAmount,
+  payoutControls,
 } from '../money-controls';
 import { PayoutPresenter } from '../presenters/payout.presenter';
 import { newProviderReference } from '../providers/payment-provider';
@@ -49,6 +49,8 @@ const PAYOUT_INCLUDE = {
     select: {
       id: true,
       receiptNumber: true,
+      // Para saber se o payout espera por aprovação (quatro olhos).
+      heldById: true,
       bookingId: true,
       serviceBookingId: true,
     },
@@ -153,7 +155,7 @@ export class PayoutsService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
-    const autoMaxAmount = payoutAutoMaxAmount(this.config);
+    const controls = payoutControls(this.config);
 
     const where: Prisma.PayoutWhereInput = {
       ...(query.status ? { status: query.status } : {}),
@@ -172,9 +174,7 @@ export class PayoutsService {
 
     return {
       message: 'Payouts obtidos com sucesso.',
-      data: items.map((item) =>
-        PayoutPresenter.toListItem(item, { autoMaxAmount }),
-      ),
+      data: items.map((item) => PayoutPresenter.toListItem(item, controls)),
       meta: {
         page,
         limit,
@@ -490,9 +490,7 @@ export class PayoutsService {
 
     return {
       message: 'Payout recolocado na fila.',
-      data: PayoutPresenter.toListItem(updated, {
-        autoMaxAmount: payoutAutoMaxAmount(this.config),
-      }),
+      data: PayoutPresenter.toListItem(updated, payoutControls(this.config)),
     };
   }
 

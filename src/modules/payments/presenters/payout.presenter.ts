@@ -1,4 +1,5 @@
 import { payoutNeedsApproval } from '../money-controls';
+import type { PayoutControls } from '../money-controls';
 
 type PayoutEntity = {
   id: string;
@@ -24,6 +25,7 @@ type PayoutEntity = {
   payment?: {
     id: string;
     receiptNumber: string;
+    heldById?: string | null;
     bookingId: string | null;
     serviceBookingId: string | null;
   };
@@ -31,13 +33,10 @@ type PayoutEntity = {
 
 export class PayoutPresenter {
   /**
-   * Com autoMaxAmount (listagem do admin), diz também se o payout espera por
+   * Com os controlos (listagem do admin), diz também se o payout espera por
    * aprovação para sair pelo fornecedor.
    */
-  static toListItem(
-    payout: PayoutEntity,
-    options?: { autoMaxAmount?: number },
-  ) {
+  static toListItem(payout: PayoutEntity, controls?: PayoutControls) {
     return {
       id: payout.id,
       paymentId: payout.paymentId,
@@ -50,14 +49,14 @@ export class PayoutPresenter {
       executedAt: payout.executedAt,
       failReason: payout.failReason,
       approvedAt: payout.approvedAt ?? null,
-      ...(options?.autoMaxAmount === undefined
-        ? {}
-        : {
+      ...(controls
+        ? {
             needsApproval: payoutNeedsApproval(
               { ...payout, approvedAt: payout.approvedAt ?? null },
-              options.autoMaxAmount,
+              controls,
             ),
-          }),
+          }
+        : {}),
       createdAt: payout.createdAt,
       updatedAt: payout.updatedAt,
       recipient: payout.recipient

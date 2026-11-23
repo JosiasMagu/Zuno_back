@@ -14,7 +14,7 @@ import { roundMoney } from '../../../shared/constants/policy';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { MetricsService } from '../../../shared/metrics/metrics.service';
 import { captureUnhandled } from '../../../shared/sentry/sentry';
-import { payoutAutoMaxAmount, payoutNeedsApproval } from '../money-controls';
+import { payoutControls, payoutNeedsApproval } from '../money-controls';
 import {
   PaymentSnapshot,
   reconcilePayment,
@@ -379,7 +379,7 @@ export class ReconciliationService {
     now: Date,
   ): Promise<{ total: number; items: ReconciliationAlert[] }> {
     const cutoff = alertCutoffs(now);
-    const autoMaxAmount = payoutAutoMaxAmount(this.config);
+    const controls = payoutControls(this.config);
 
     const operationsWhere: Prisma.ProviderOperationWhereInput = {
       status: { in: ACTIVE_OPERATION },
@@ -408,6 +408,7 @@ export class ReconciliationService {
           where: payoutsWhere,
           orderBy: { createdAt: 'asc' },
           take: MAX_ALERTS_PER_KIND,
+          include: { payment: { select: { heldById: true } } },
         }),
         this.prisma.payout.findMany({
           where: failedWhere,
@@ -439,7 +440,7 @@ export class ReconciliationService {
           {
             ...payout,
             amount: Number(payout.amount),
-            needsApproval: payoutNeedsApproval(payout, autoMaxAmount),
+            needsApproval: payoutNeedsApproval(payout, controls),
           },
           now,
         ),

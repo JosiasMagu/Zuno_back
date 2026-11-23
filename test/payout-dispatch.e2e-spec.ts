@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
@@ -96,24 +97,44 @@ describe('Payout dispatch E2E', () => {
       data: { payoutMsisdn: msisdn },
     });
 
-  /** Reserva paga, com o pagamento confirmado pelo primeiro admin. */
-  async function createHeld() {
+  /**
+   * Reserva paga. A entrada do dinheiro é confirmada pelo fornecedor, numa
+   * cobrança ao telemóvel do cliente, ou à mão pelo primeiro admin.
+   */
+  async function createHeld(confirmedBy: 'provider' | 'admin') {
     const equipmentId = await createApprovedEquipment(actors);
     const bookingId = await createBooking(actors, equipmentId, 5);
     await confirmBooking(actors, bookingId);
     const paymentId = await initiatePayment(actors, bookingId);
-    await request(actors.httpServer)
-      .patch(`/api/v1/payments/${paymentId}/mark-held`)
-      .set(authHeader(actors.admin.accessToken))
-      .send({ ...(await paymentReceipt(paymentId)), payerMsisdn: PAYER })
-      .expect(200);
+
+    if (confirmedBy === 'provider') {
+      await request(actors.httpServer)
+        .post(`/api/v1/payments/${paymentId}/collect`)
+        .set(authHeader(actors.client.accessToken))
+        .set('Idempotency-Key', randomUUID())
+        .send({ msisdn: PAYER });
+    } else {
+      await request(actors.httpServer)
+        .patch(`/api/v1/payments/${paymentId}/mark-held`)
+        .set(authHeader(actors.admin.accessToken))
+        .send({ ...(await paymentReceipt(paymentId)), payerMsisdn: PAYER })
+        .expect(200);
+    }
+
+    const payment = await prisma().payment.findUniqueOrThrow({
+      where: { id: paymentId },
+    });
+    expect(payment.status).toBe('HELD');
     return { bookingId, paymentId };
   }
 
   /** Payout do provider depois de o cliente confirmar a entrega. */
-  async function createProviderPayout(msisdn: string) {
+  async function createProviderPayout(
+    msisdn: string,
+    confirmedBy: 'provider' | 'admin' = 'provider',
+  ) {
     await setProviderNumber(msisdn);
-    const { paymentId } = await createHeld();
+    const { paymentId } = await createHeld(confirmedBy);
     await releasePayment(actors, paymentId);
     return prisma().payout.findFirstOrThrow({
       where: { paymentId, kind: 'PROVIDER_PAYOUT' },
@@ -122,7 +143,7 @@ describe('Payout dispatch E2E', () => {
 
   /** Reembolso do total, acima do valor automático. */
   async function createRefundPayout() {
-    const { paymentId } = await createHeld();
+    const { paymentId } = await createHeld('admin');
     await request(actors.httpServer)
       .patch(`/api/v1/payments/${paymentId}/refund`)
       .set(authHeader(actors.admin.accessToken))
@@ -236,6 +257,27 @@ describe('Payout dispatch E2E', () => {
       ]);
 
       expect(await operationsOf(payout.id)).toHaveLength(1);
+      expect((await readPayout(payout.id)).status).toBe('EXECUTED');
+    });
+  });
+
+  describe('when an admin confirmed the money coming in by hand', () => {
+    it('waits for another admin, however small the amount', async () => {
+      const payout = await createProviderPayout(PHONE('00'), 'admin');
+
+      expect(await dispatcher.dispatchDue()).toBe(0);
+      expect((await readPayout(payout.id)).status).toBe('PENDING');
+      const queue = await request(actors.httpServer)
+        .get('/api/v1/payouts?status=PENDING')
+        .set(authHeader(actors.admin.accessToken))
+        .expect(200);
+      expect(queue.body.data).toContainEqual(
+        expect.objectContaining({ id: payout.id, needsApproval: true }),
+      );
+
+      // Quem confirmou a entrada não aprova a saída.
+      await approveAs(actors.admin, payout.id).expect(403);
+      await approveAs(secondAdmin, payout.id).expect(200);
       expect((await readPayout(payout.id)).status).toBe('EXECUTED');
     });
   });

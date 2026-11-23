@@ -830,7 +830,10 @@ A integracao do M-Pesa esta descrita em `docs/MPESA-INTEGRACAO.md`.
 Duas variaveis mexem em quem decide as saidas. `PAYOUT_AUTO_MAX_AMOUNT`
 (5000 por omissao) e o valor ate ao qual um payout sai pelo fornecedor sem
 aprovacao. `MONEY_FOUR_EYES=true` impede quem confirmou a entrada de um
-pagamento de aprovar ou executar as saidas dele. Sempre, mesmo sem quatro
+pagamento de aprovar ou executar as saidas dele. Com quatro olhos, o
+dinheiro que um admin confirmou a mao tambem nunca sai sozinho: o payout
+espera a aprovacao de outro admin, seja qual for o valor. So o dinheiro
+confirmado pelo fornecedor sai sem aprovacao ate ao limite. Sempre, mesmo sem quatro
 olhos: um admin nao confirma, nao reembolsa nem liberta o dinheiro de uma
 reserva em que e parte, e nao aprova nem executa um payout para si proprio.
 

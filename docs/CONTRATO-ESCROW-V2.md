@@ -685,6 +685,7 @@ Uma segunda revisão do backend procurou o que funcionava no caso feliz e falhav
 - Em `GET /payments/:id`, o número de onde saiu o dinheiro (`collection.msisdn`) só chega ao cliente que pagou e a um admin. O proprietário recebe `null` nesse campo e o resto da cobrança como antes.
 - Um admin deixa de conseguir reembolsar um pagamento em que uma disputa foi aberta no mesmo instante. Responde o 400 que já existia, «Este pagamento tem uma disputa aberta», e o reembolso decide-se na disputa.
 - `PATCH /payouts/:id/retry` (admin) repõe o payout na fila para o número que a conta tem nesse momento e apaga a aprovação anterior. Responde 409 quando o fornecedor confirma, nessa altura, o envio que tinha falhado: o payout fica executado e não se repete.
+- Com `MONEY_FOUR_EYES=true`, `needsApproval` na fila de payouts passa a vir `true` também para valores pequenos, quando a entrada do dinheiro foi confirmada à mão por um admin. Esse payout só sai depois de `PATCH /payouts/:id/approve` por outro admin.
 - A reconciliação (`GET /payments/admin/reconciliation`) tem um alerta novo, `PAYOUT_FAILED`, para cada payout falhado que continua por resolver.
 
 ### Disputas

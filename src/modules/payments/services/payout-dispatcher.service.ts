@@ -33,7 +33,9 @@ import {
   assertFourEyes,
   assertNotOwnPayout,
   fourEyesEnabled,
+  leavesUnapproved,
   payoutAutoMaxAmount,
+  payoutControls,
 } from '../money-controls';
 import {
   callProvider,
@@ -68,6 +70,8 @@ const PAYOUT_INCLUDE = {
     select: {
       id: true,
       receiptNumber: true,
+      // Para saber se o payout espera por aprovação (quatro olhos).
+      heldById: true,
       bookingId: true,
       serviceBookingId: true,
     },
@@ -116,7 +120,7 @@ export class PayoutDispatcher {
       return 0;
     }
 
-    const autoMax = this.autoMaxAmount();
+    const unapproved = leavesUnapproved(payoutControls(this.config));
 
     return processDue({
       fetchBatch: (seenIds) =>
@@ -127,7 +131,7 @@ export class PayoutDispatcher {
             msisdn: { not: null },
             // Para uma conta suspensa nada sai sozinho: espera por um admin.
             recipient: { isActive: true },
-            OR: [{ amount: { lte: autoMax } }, { approvedAt: { not: null } }],
+            OR: [unapproved, { approvedAt: { not: null } }],
           },
           select: { id: true },
           orderBy: { createdAt: 'asc' },

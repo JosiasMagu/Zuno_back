@@ -75,6 +75,6 @@ Mudar de `manual` para `mpesa` não deixa nada a meio: as operações manuais na
 
 - Quem paga as taxas. Hoje a plataforma absorve-as: a taxa fica na operação (`feeAmount`), a reconciliação desconta-a ao que devia estar na conta (`providerFees`) e os payouts saem pelo valor inteiro.
 - `PAYOUT_AUTO_MAX_AMOUNT`: proposta de 5000 MZN. Acima disso, um payout espera aprovação de um admin.
-- `MONEY_FOUR_EYES`: desligado. Ligado, quem confirmou a entrada de um pagamento não aprova nem executa as saídas dele.
+- `MONEY_FOUR_EYES`: desligado. Ligado, quem confirmou a entrada de um pagamento não aprova nem executa as saídas dele, e o dinheiro confirmado à mão nunca sai sozinho: espera a aprovação de outro admin, seja qual for o valor. O dinheiro confirmado pelo fornecedor continua a sair sem aprovação até `PAYOUT_AUTO_MAX_AMOUNT`.
 - Pagamento a mais: o pagamento fica retido pelo total e a diferença fica por atribuir, para devolver. A alternativa era recusar tudo e devolver o valor inteiro.
 - Só M-Pesa ou também e-Mola e mKesh. Uma transacção conta uma vez, e a regra compara só a referência, sem o canal. Com uma segunda rede, as referências de redes diferentes podem coincidir e a regra tem de passar a comparar a rede.
