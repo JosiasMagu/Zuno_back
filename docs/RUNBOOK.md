@@ -241,6 +241,34 @@ SELECT id, status, "heldAt", "mpesaReference", "payerMsisdn", "receivedAmount"
 FROM "Payment" WHERE id = '<paymentId>';
 ```
 
+### Anular uma confirmacao dada por engano
+
+Se o admin confirmou a entrada de dinheiro que nao entrou, ou que era de
+outra reserva, a confirmacao anula-se. Nao se reembolsa: um reembolso criava
+um payout de dinheiro que nunca existiu.
+
+```bash
+curl -X PATCH http://API_HOST/api/v1/payments/<paymentId>/void-hold   -H "Authorization: Bearer <TOKEN_DE_OUTRO_ADMIN>"   -H "Content-Type: application/json"   -d '{"reason":"A referencia era do pagamento da reserva seguinte."}'
+```
+
+- Tem de ser outro admin. Quem confirmou a entrada recebe 403, e quem e
+  parte da reserva tambem.
+- So enquanto o pagamento esta `HELD`, sem disputa aberta e sem a entrega
+  confirmada (aluguer `CONFIRMED`, servico `PENDING`). Depois disso resolve-se
+  pela disputa ou pelo reembolso.
+- So para confirmacoes feitas a mao. O que o fornecedor confirmou entrou de
+  facto na conta e devolve-se com um reembolso.
+- Se a confirmacao deixou dinheiro em excesso por atribuir, resolve-se esse
+  primeiro (seccao 22).
+
+O pagamento volta a `PENDING`, a reserva ganha novo prazo de pagamento e a
+referencia M-Pesa fica livre para o pagamento certo. O ledger nao se apaga:
+fica a entrada errada e, ao lado, um estorno do mesmo valor (`OUTFLOW` com a
+parte `REVERSAL`). A auditoria guarda `PAYMENT_HOLD_VOIDED` com quem anulou,
+quem tinha confirmado, a referencia e o motivo. O cliente e o proprietario
+recebem um aviso, porque o proprietario ja tinha sido informado de que podia
+entregar.
+
 ---
 
 ## 11. Incidente: API caida

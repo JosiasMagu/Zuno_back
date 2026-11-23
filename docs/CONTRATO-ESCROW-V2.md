@@ -686,6 +686,7 @@ Uma segunda revisão do backend procurou o que funcionava no caso feliz e falhav
 - Um admin deixa de conseguir reembolsar um pagamento em que uma disputa foi aberta no mesmo instante. Responde o 400 que já existia, «Este pagamento tem uma disputa aberta», e o reembolso decide-se na disputa.
 - `PATCH /payouts/:id/retry` (admin) repõe o payout na fila para o número que a conta tem nesse momento e apaga a aprovação anterior. Responde 409 quando o fornecedor confirma, nessa altura, o envio que tinha falhado: o payout fica executado e não se repete.
 - Com `MONEY_FOUR_EYES=true`, `needsApproval` na fila de payouts passa a vir `true` também para valores pequenos, quando a entrada do dinheiro foi confirmada à mão por um admin. Esse payout só sai depois de `PATCH /payouts/:id/approve` por outro admin.
+- `PATCH /payments/:id/void-hold` (admin), com `{ reason }` de pelo menos 10 caracteres, anula uma confirmação de entrada dada por engano. Só outro admin a pode pedir, e só com o pagamento `HELD`, sem disputa aberta e sem a entrega confirmada. O pagamento volta a `PENDING` e a reserva volta a ter `expiresAt`. Para a app, é um pagamento que passa de retido a por pagar: o cliente e o proprietário recebem um aviso push, e os ecrãs que mostram «pagamento confirmado» devem voltar a ler o pagamento.
 - A reconciliação (`GET /payments/admin/reconciliation`) tem um alerta novo, `PAYOUT_FAILED`, para cada payout falhado que continua por resolver.
 
 ### Disputas

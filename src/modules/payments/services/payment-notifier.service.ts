@@ -72,6 +72,29 @@ export class PaymentNotifier {
   }
 
   /**
+   * A confirmação do pagamento foi anulada. O provider tinha sido avisado de
+   * que podia avançar, por isso tem de saber que afinal não pode.
+   */
+  holdVoided(paymentId: string): Promise<void> {
+    return this.forPayment(paymentId, ({ title, isService, data, payment }) => [
+      {
+        pushToken: payment.client.pushToken,
+        title: 'Pagamento por confirmar',
+        body: `A confirmação do pagamento de "${title}" foi anulada. A reserva volta a estar por pagar.`,
+        data,
+      },
+      {
+        pushToken: payment.owner.pushToken,
+        title: 'Pagamento por confirmar',
+        body: isService
+          ? `A confirmação do pagamento de "${title}" foi anulada. Não comeces o serviço até o pagamento ser confirmado.`
+          : `A confirmação do pagamento de "${title}" foi anulada. Não entregues o equipamento até o pagamento ser confirmado.`,
+        data,
+      },
+    ]);
+  }
+
+  /**
    * O pagamento foi libertado ao provider. O envio para o M-Pesa dele ainda
    * está por fazer, por isso o aviso não diz que já recebeu.
    */

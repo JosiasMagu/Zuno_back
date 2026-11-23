@@ -18,6 +18,7 @@ import { PayoutDispatcher } from './services/payout-dispatcher.service';
 import { PayoutsService } from './services/payouts.service';
 import { ProviderEventsService } from './services/provider-events.service';
 import { ProviderOperationsService } from './services/provider-operations.service';
+import { HoldVoidService } from './services/hold-void.service';
 import { ReconciliationService } from './services/reconciliation.service';
 import { UnallocatedFundsService } from './services/unallocated-funds.service';
 
@@ -33,6 +34,7 @@ import { UnallocatedFundsService } from './services/unallocated-funds.service';
     paymentProviderFactory,
     PaymentsService,
     PaymentDeclarationsService,
+    HoldVoidService,
     PaymentNotifier,
     LedgerService,
     PayoutsService,

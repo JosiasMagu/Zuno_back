@@ -29,12 +29,14 @@ import { RolesGuard } from '../../auth/guards/roles.guard';
 import { CollectPaymentDto } from '../dto/collect-payment.dto';
 import { InitiatePaymentDto } from '../dto/initiate-payment.dto';
 import { MarkPaymentHeldDto } from '../dto/mark-payment-held.dto';
+import { VoidHoldDto } from '../dto/void-hold.dto';
 import { DeclarePaymentDto } from '../dto/declare-payment.dto';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 import { FindPaymentsQueryDto } from '../dto/find-payments-query.dto';
 import { CollectionsService } from '../services/collections.service';
 import { PaymentDeclarationsService } from '../services/payment-declarations.service';
 import { PaymentsService } from '../services/payments.service';
+import { HoldVoidService } from '../services/hold-void.service';
 import { ReconciliationService } from '../services/reconciliation.service';
 
 @ApiTags('Payments')
@@ -45,6 +47,7 @@ export class PaymentsController {
     private readonly paymentsService: PaymentsService,
     private readonly declarations: PaymentDeclarationsService,
     private readonly reconciliation: ReconciliationService,
+    private readonly holdVoids: HoldVoidService,
     private readonly collections: CollectionsService,
   ) {}
 
@@ -204,6 +207,32 @@ export class PaymentsController {
     @Body() dto: DeclarePaymentDto,
   ) {
     return this.declarations.declare(user.id, id, dto);
+  }
+
+  @Patch(':id/void-hold')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Anular uma confirmação de entrada dada por engano',
+    description:
+      'Só para confirmações feitas à mão, com o pagamento ainda retido, sem disputa aberta e sem entrega confirmada. Tem de ser outro admin a anular. O pagamento volta a estar por pagar, com prazo novo, e a referência M-Pesa fica livre.',
+  })
+  @ApiParam({ name: 'id', description: 'ID do pagamento' })
+  @ApiBody({ type: VoidHoldDto })
+  @ApiResponse({ status: 200, description: 'Confirmação anulada.' })
+  @ApiResponse({ status: 400, description: 'A confirmação já não se anula.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Quem confirmou a entrada, ou é parte da reserva, não anula.',
+  })
+  @ApiResponse({ status: 404, description: 'Pagamento não encontrado.' })
+  voidHold(
+    @CurrentUser() user: { id: string },
+    @Param('id') id: string,
+    @Body() dto: VoidHoldDto,
+  ) {
+    return this.holdVoids.voidHold(user.id, id, dto.reason);
   }
 
   @Patch(':id/mark-held')

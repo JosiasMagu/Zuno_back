@@ -319,6 +319,13 @@ export class ReconciliationService {
       return;
     }
 
+    // Um estorno anula uma entrada que não chegou a existir.
+    if (row.party === LedgerParty.REVERSAL) {
+      snapshot.ledger.inflow -= amount;
+      sums.received -= amount;
+      return;
+    }
+
     sums.outflow += amount;
 
     if (row.party === LedgerParty.CLIENT) {

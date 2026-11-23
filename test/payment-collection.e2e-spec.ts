@@ -161,6 +161,19 @@ describe('Payment collection on the phone E2E', () => {
       expect(booking.expiresAt).toBeNull();
     });
 
+    it('cannot be voided by an admin: the provider confirmed that the money came in', async () => {
+      const { paymentId } = await createPendingPayment();
+      await collect(paymentId, PHONE('00')).expect(201);
+
+      const response = await request(actors.httpServer)
+        .patch(`/api/v1/payments/${paymentId}/void-hold`)
+        .set(authHeader(actors.admin.accessToken))
+        .send({ reason: 'Tentativa de anular dinheiro que entrou de facto.' });
+
+      expect(response.status).toBe(400);
+      expect((await readPayment(paymentId)).status).toBe('HELD');
+    });
+
     it('shows the charge on the payment', async () => {
       const { paymentId } = await createPendingPayment();
       await collect(paymentId, PHONE('00')).expect(201);

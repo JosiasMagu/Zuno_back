@@ -869,6 +869,8 @@ enum LedgerParty {
   CLIENT
   PROVIDER
   PLATFORM
+  // Estorno de uma entrada confirmada por engano. Não sai para ninguém.
+  REVERSAL
 }
 
 enum PayoutKind {
@@ -945,6 +947,7 @@ enum DisputeStatus {
 enum AuditAction {
   PAYMENT_INITIATED
   PAYMENT_MARKED_HELD
+  PAYMENT_HOLD_VOIDED
   PAYMENT_RELEASED
   PAYMENT_AUTO_RELEASED
   PAYMENT_REFUNDED
