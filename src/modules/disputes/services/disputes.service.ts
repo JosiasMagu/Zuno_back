@@ -41,10 +41,8 @@ import {
   OPEN_DISPUTE_SELECT,
   OPEN_DISPUTE_STATUSES,
 } from '../../../shared/disputes/open-disputes';
-import {
-  describeError,
-  processDue,
-} from '../../../shared/scheduling/process-due';
+import { itemFailureOf } from '../../../shared/scheduling/job-failures';
+import { processDue } from '../../../shared/scheduling/process-due';
 import { depositClaimDeadline } from '../../bookings/booking-deadlines';
 import { assertNotPartyToPayment } from '../../payments/money-controls';
 import { RENTAL_PAID_OUT_STATUSES } from '../../payments/payment-states';
@@ -790,10 +788,7 @@ export class DisputesService {
           take: JOB_BATCH_SIZE,
         }),
       handle: (dispute) => this.closeResponseWindow(dispute.id, now),
-      onFailure: (dispute, error) =>
-        this.logger.warn(
-          `Fecho do prazo falhou para a disputa ${dispute.id}: ${describeError(error)}`,
-        ),
+      onFailure: itemFailureOf('disputes-response-window'),
     });
   }
 

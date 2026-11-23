@@ -3,7 +3,6 @@ import { CronExpression } from '@nestjs/schedule';
 import { ServiceQuoteStatus, ServiceRequestStatus } from '@prisma/client';
 
 import { PrismaService } from '../../../shared/db/prisma.service';
-import { describeError } from '../../../shared/scheduling/process-due';
 import { ServiceBookingsService } from '../services/service-bookings.service';
 import { Job } from '../../../shared/scheduling/job.decorator';
 
@@ -22,30 +21,14 @@ export class ServicesScheduler {
    */
   @Job(CronExpression.EVERY_10_MINUTES, 'services-expire-unpaid')
   async expireUnpaidBookings() {
-    if (process.env.NODE_ENV === 'test') {
-      return;
-    }
-
-    try {
-      const expired = await this.serviceBookings.expireUnpaid();
-      if (expired > 0) {
-        this.logger.log(
-          `Expiração: ${expired} reserva(s) de serviço por pagar.`,
-        );
-      }
-    } catch (error) {
-      this.logger.error(
-        `Expiração de reservas de serviço falhou: ${describeError(error)}`,
-      );
+    const expired = await this.serviceBookings.expireUnpaid();
+    if (expired > 0) {
+      this.logger.log(`Expiração: ${expired} reserva(s) de serviço por pagar.`);
     }
   }
 
   @Job(CronExpression.EVERY_5_MINUTES, 'services-expire-stale')
   async expireStaleEntities() {
-    if (process.env.NODE_ENV === 'test') {
-      return;
-    }
-
     const now = new Date();
 
     const expiredQuotes = await this.prisma.serviceQuote.updateMany({

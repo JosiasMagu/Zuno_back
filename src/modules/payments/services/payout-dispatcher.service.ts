@@ -24,10 +24,8 @@ import {
 } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { runSerializable } from '../../../shared/db/serializable-transaction';
-import {
-  describeError,
-  processDue,
-} from '../../../shared/scheduling/process-due';
+import { itemFailureOf } from '../../../shared/scheduling/job-failures';
+import { processDue } from '../../../shared/scheduling/process-due';
 import {
   assertFourEyes,
   assertNotOwnPayout,
@@ -131,10 +129,7 @@ export class PayoutDispatcher {
       handle: async (payout) => {
         await this.send(payout.id, SYSTEM_ACTOR_ID);
       },
-      onFailure: (payout, error) =>
-        this.logger.warn(
-          `Envio do payout ${payout.id} falhou: ${describeError(error)}`,
-        ),
+      onFailure: itemFailureOf('payout-dispatch'),
     });
   }
 

@@ -41,10 +41,8 @@ import {
   OPEN_DISPUTE_SELECT,
 } from '../../../shared/disputes/open-disputes';
 import { runSerializable } from '../../../shared/db/serializable-transaction';
-import {
-  describeError,
-  processDue,
-} from '../../../shared/scheduling/process-due';
+import { itemFailureOf } from '../../../shared/scheduling/job-failures';
+import { processDue } from '../../../shared/scheduling/process-due';
 import { InitiatePaymentDto } from '../dto/initiate-payment.dto';
 import { MarkPaymentHeldDto } from '../dto/mark-payment-held.dto';
 import { FindPaymentsQueryDto } from '../dto/find-payments-query.dto';
@@ -582,10 +580,7 @@ export class PaymentsService {
           take: JOB_BATCH_SIZE,
         }),
       handle: (payment) => this.releaseAutomatically(payment),
-      onFailure: (payment, error) =>
-        this.logger.warn(
-          `Auto-release falhou para o pagamento ${payment.id}: ${describeError(error)}`,
-        ),
+      onFailure: itemFailureOf('auto-release'),
     });
   }
 
@@ -677,10 +672,7 @@ export class PaymentsService {
           take: JOB_BATCH_SIZE,
         }),
       handle: (payment) => this.remindAutoRelease(payment),
-      onFailure: (payment, error) =>
-        this.logger.warn(
-          `Lembrete da libertação falhou para o pagamento ${payment.id}: ${describeError(error)}`,
-        ),
+      onFailure: itemFailureOf('payment-auto-release-reminders'),
     });
   }
 

@@ -21,10 +21,8 @@ import {
 } from '../../../shared/audit/audit.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { runSerializable } from '../../../shared/db/serializable-transaction';
-import {
-  describeError,
-  processDue,
-} from '../../../shared/scheduling/process-due';
+import { itemFailureOf } from '../../../shared/scheduling/job-failures';
+import { processDue } from '../../../shared/scheduling/process-due';
 import type { CancellingParty } from '../../../shared/bookings/cancelling-party';
 import { issueProviderStrike } from '../../../shared/strikes/provider-strikes';
 import {
@@ -271,10 +269,7 @@ export class ServiceBookingsService {
           take: JOB_BATCH_SIZE,
         }),
       handle: (booking) => this.expire(booking.id, now),
-      onFailure: (booking, error) =>
-        this.logger.warn(
-          `Expiração falhou para a reserva de serviço ${booking.id}: ${describeError(error)}`,
-        ),
+      onFailure: itemFailureOf('services-expire-unpaid'),
     });
   }
 

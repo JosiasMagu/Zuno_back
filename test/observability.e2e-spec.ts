@@ -225,5 +225,7 @@ describe('Observability E2E: /metrics with a token', () => {
       .expect(200);
 
     expect(response.text).toContain('zuno_http_requests_total');
+    // As falhas dos jobs têm de estar expostas para um alerta as vigiar.
+    expect(response.text).toContain('zuno_job_failures_total');
   });
 });

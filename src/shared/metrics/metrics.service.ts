@@ -7,6 +7,8 @@ import {
   Registry,
 } from 'prom-client';
 
+import { jobFailuresTotal } from '../scheduling/job-failures';
+
 /**
  * Registry isolado da Zuno + métricas custom.
  *
@@ -86,6 +88,7 @@ export class MetricsService implements OnModuleInit {
   });
 
   onModuleInit(): void {
+    this.registry.registerMetric(jobFailuresTotal);
     collectDefaultMetrics({
       register: this.registry,
       prefix: 'zuno_node_',

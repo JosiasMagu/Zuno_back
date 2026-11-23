@@ -7,10 +7,8 @@ import {
 
 import { PROVIDER_STATUS_CHECK_AFTER_SECONDS } from '../../../shared/constants/policy';
 import { PrismaService } from '../../../shared/db/prisma.service';
-import {
-  describeError,
-  processDue,
-} from '../../../shared/scheduling/process-due';
+import { itemFailureOf } from '../../../shared/scheduling/job-failures';
+import { processDue } from '../../../shared/scheduling/process-due';
 import {
   callProvider,
   PAYMENT_PROVIDER,
@@ -113,10 +111,7 @@ export class ProviderOperationsService {
         }
         await this.check(operation);
       },
-      onFailure: (operation, error) =>
-        this.logger.warn(
-          `Consulta da operação ${operation.reference} falhou: ${describeError(error)}`,
-        ),
+      onFailure: itemFailureOf('provider-operations-poll'),
     });
   }
 

@@ -13,7 +13,8 @@
 export async function processDue<T extends { id: string }>(job: {
   fetchBatch: (seenIds: string[]) => Promise<T[]>;
   handle: (item: T) => Promise<void>;
-  onFailure: (item: T, error: unknown) => void;
+  // O tipo do item vem do lote, e não de quem trata a falha.
+  onFailure: (item: NoInfer<T>, error: unknown) => void;
 }): Promise<number> {
   const seenIds = new Set<string>();
   let handled = 0;

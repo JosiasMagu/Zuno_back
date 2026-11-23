@@ -42,10 +42,8 @@ import { OPEN_DISPUTES } from '../../../shared/disputes/open-disputes';
 import { carriesOnWork } from '../../../shared/moderation/listing-moderation';
 import { runSerializable } from '../../../shared/db/serializable-transaction';
 import { PushService } from '../../../shared/push/push.service';
-import {
-  describeError,
-  processDue,
-} from '../../../shared/scheduling/process-due';
+import { itemFailureOf } from '../../../shared/scheduling/job-failures';
+import { processDue } from '../../../shared/scheduling/process-due';
 import { issueProviderStrike } from '../../../shared/strikes/provider-strikes';
 import {
   CancelledPaymentOutcome,
@@ -616,10 +614,7 @@ export class BookingsService {
           take: JOB_BATCH_SIZE,
         }),
       handle: (booking) => this.returnDepositAutomatically(booking.id),
-      onFailure: (booking, error) =>
-        this.logger.warn(
-          `Auto-devolução falhou para a reserva ${booking.id}: ${describeError(error)}`,
-        ),
+      onFailure: itemFailureOf('deposit-auto-return'),
     });
   }
 
@@ -639,10 +634,7 @@ export class BookingsService {
           take: JOB_BATCH_SIZE,
         }),
       handle: (booking) => this.expireBooking(booking.id, now),
-      onFailure: (booking, error) =>
-        this.logger.warn(
-          `Expiração falhou para a reserva ${booking.id}: ${describeError(error)}`,
-        ),
+      onFailure: itemFailureOf('bookings-expire-unpaid'),
     });
   }
 

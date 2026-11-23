@@ -572,10 +572,24 @@ curl -s "$HOST/metrics" -H "Authorization: Bearer $METRICS_TOKEN"
   para qualquer valor acima de zero.
 - `zuno_escrow_held_mzn` e `zuno_payouts_owed_mzn`: dinheiro no escrow e
   payouts por executar, actualizados em cada reconciliacao.
+- `zuno_job_failures_total{job,scope}`: falhas dos jobs agendados. Com
+  `scope="run"` falhou a execucao ou um passo inteiro. Com `scope="item"`
+  falhou um item, que fica para a execucao seguinte. Cada falha sai tambem no
+  log, com o contexto `Jobs`, e vai para o Sentry quando nao e um conflito
+  com outro pedido nem uma regra que deixou de se cumprir.
+
+Valores de `job`: `bookings-expire-unpaid`, `auto-release`,
+`deposit-auto-return`, `disputes-response-window`, `provider-operations-poll`,
+`provider-events`, `payout-dispatch`, `payment-auto-release-reminders`,
+`money-reconciliation`, `services-expire-unpaid`, `services-expire-stale` e
+`idempotency-purge`.
 
 Alertas uteis: taxa de `status=~"5.."`, subida de `status="401"` ou
-`status="429"` em `/api/v1/auth/login` (forca bruta), e
-`zuno_reconciliation_findings > 0`.
+`status="429"` em `/api/v1/auth/login` (forca bruta),
+`zuno_reconciliation_findings > 0`, qualquer subida de
+`zuno_job_failures_total{scope="run"}`, e `scope="item"` a subir hora apos
+hora no mesmo `job`. Este ultimo e um item que falha em todas as execucoes,
+por exemplo um pagamento que nunca chega a ser libertado.
 
 ### Seguir um pedido
 
