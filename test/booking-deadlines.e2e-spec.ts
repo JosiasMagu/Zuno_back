@@ -355,6 +355,28 @@ describe('Booking deadlines E2E', () => {
       expect((await readPayment(paymentId)).status).toBe('HELD');
     });
 
+    it('keeps the money of a suspended provider in escrow, and releases it once the account is back', async () => {
+      const { paymentId } = await createHeldRental({
+        startedDaysAgo: 4,
+        heldDaysAgo: 6,
+      });
+      const moderate = (action: 'suspend' | 'reactivate') =>
+        request(actors.httpServer)
+          .patch(`/api/v1/users/${actors.provider.userId}/${action}`)
+          .set(authHeader(actors.admin.accessToken))
+          .send({})
+          .expect(200);
+
+      await moderate('suspend');
+      const whileSuspended = await payments.autoReleaseDue();
+      await moderate('reactivate');
+      const onceBack = await payments.autoReleaseDue();
+
+      expect(whileSuspended).toBe(0);
+      expect(onceBack).toBe(1);
+      expect((await readPayment(paymentId)).status).toBe('RELEASED');
+    });
+
     it('leaves a disputed payment in escrow', async () => {
       const { bookingId, paymentId } = await createHeldRental({
         startedDaysAgo: 4,

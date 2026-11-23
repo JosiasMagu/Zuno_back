@@ -120,6 +120,8 @@ export class PayoutDispatcher {
             id: { notIn: seenIds },
             status: PayoutStatus.PENDING,
             msisdn: { not: null },
+            // Para uma conta suspensa nada sai sozinho: espera por um admin.
+            recipient: { isActive: true },
             OR: [{ amount: { lte: autoMax } }, { approvedAt: { not: null } }],
           },
           select: { id: true },

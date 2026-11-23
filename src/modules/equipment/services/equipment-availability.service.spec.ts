@@ -10,7 +10,7 @@ const reserved = (equipmentId: string, units: number) => ({
 
 describe('EquipmentAvailabilityService', () => {
   const prisma = {
-    booking: { groupBy: jest.fn() },
+    booking: { groupBy: jest.fn(), findMany: jest.fn() },
     equipment: { findMany: jest.fn() },
   };
   const service = new EquipmentAvailabilityService(
@@ -69,6 +69,13 @@ describe('EquipmentAvailabilityService', () => {
       endDate: new Date('2030-06-05'),
     };
 
+    const booking = (equipmentId: string, from: string, to: string) => ({
+      equipmentId,
+      status: BookingStatus.CONFIRMED,
+      startDate: new Date(from),
+      endDate: new Date(to),
+    });
+
     it('devolve só os equipamentos com todas as unidades ocupadas no período', async () => {
       prisma.booking.groupBy.mockResolvedValue([
         reserved('betoneira', 1),
@@ -78,9 +85,41 @@ describe('EquipmentAvailabilityService', () => {
         { id: 'betoneira', quantity: 1 },
         { id: 'gerador', quantity: 2 },
       ]);
+      prisma.booking.findMany.mockResolvedValue([
+        booking('betoneira', '2030-06-02', '2030-06-04'),
+      ]);
 
       await expect(service.findFullyBookedIds(period)).resolves.toEqual([
         'betoneira',
+      ]);
+    });
+
+    it('não dá por cheio o equipamento cujas reservas nunca coincidem', async () => {
+      // 2 andaimes, duas reservas em dias diferentes: há sempre um livre.
+      prisma.booking.groupBy.mockResolvedValue([reserved('andaime', 2)]);
+      prisma.equipment.findMany.mockResolvedValue([
+        { id: 'andaime', quantity: 2 },
+      ]);
+      prisma.booking.findMany.mockResolvedValue([
+        booking('andaime', '2030-06-01', '2030-06-02'),
+        booking('andaime', '2030-06-03', '2030-06-05'),
+      ]);
+
+      await expect(service.findFullyBookedIds(period)).resolves.toEqual([]);
+    });
+
+    it('dá por cheio quando as reservas coincidem em tantas unidades como as que há', async () => {
+      prisma.booking.groupBy.mockResolvedValue([reserved('andaime', 2)]);
+      prisma.equipment.findMany.mockResolvedValue([
+        { id: 'andaime', quantity: 2 },
+      ]);
+      prisma.booking.findMany.mockResolvedValue([
+        booking('andaime', '2030-06-01', '2030-06-04'),
+        booking('andaime', '2030-06-03', '2030-06-05'),
+      ]);
+
+      await expect(service.findFullyBookedIds(period)).resolves.toEqual([
+        'andaime',
       ]);
     });
 

@@ -7,6 +7,8 @@ import {
 } from '@nestjs/common';
 import {
   BookingStatus,
+  DisputeStatus,
+  PaymentStatus,
   Prisma,
   ReviewAuthorRole,
   ServiceBookingStatus,
@@ -17,6 +19,7 @@ import { PushService } from '../../../shared/push/push.service';
 import { CreateReviewDto } from '../dto/create-review.dto';
 import { FindReviewsQueryDto } from '../dto/find-reviews-query.dto';
 import { ReviewPresenter } from '../presenters/review.presenter';
+import { mayReviewAs, Reviewers, whoMayReview } from '../review-eligibility';
 
 const AUTHOR_SELECT = {
   id: true,
@@ -37,6 +40,23 @@ const REVIEWABLE_SERVICE_BOOKING_STATUSES: ServiceBookingStatus[] = [
 type TxClient = Prisma.TransactionClient;
 
 const ALREADY_REVIEWED = 'Já submeteste uma avaliação para esta reserva.';
+const NOTHING_TO_REVIEW =
+  'Esta reserva foi cancelada e o valor foi todo devolvido, por isso não há o que avaliar.';
+
+/** O pagamento de uma reserva, no que as regras de avaliação precisam. */
+const PAYMENT_OUTCOME_SELECT = {
+  id: true,
+  heldAt: true,
+  status: true,
+} as const;
+
+/** Uma reserva concluída ou cancelada, vista por quem a quer avaliar. */
+interface FinishedReservation {
+  finished: 'completed' | 'cancelled';
+  payment: { id: string; heldAt: Date | null; status: PaymentStatus } | null;
+  /** Como encontrar um strike dado ao provider por esta reserva. */
+  strikeWhere: Prisma.ProviderStrikeWhereInput;
+}
 
 /**
  * As linhas cuja nota muda com uma avaliação: o anúncio e o provider quando
@@ -126,7 +146,7 @@ export class ReviewsService {
         ownerId: true,
         equipmentId: true,
         status: true,
-        payment: { select: { heldAt: true } },
+        payment: { select: PAYMENT_OUTCOME_SELECT },
       },
     });
 
@@ -145,6 +165,13 @@ export class ReviewsService {
     this.assertAuthorRole(userId, dto.authorRole, {
       clientId: booking.clientId,
       providerId: booking.ownerId,
+    });
+
+    await this.assertSomethingToReview(dto.authorRole, {
+      finished:
+        booking.status === BookingStatus.COMPLETED ? 'completed' : 'cancelled',
+      payment: booking.payment,
+      strikeWhere: { bookingId },
     });
 
     const existing = await this.prisma.review.findFirst({
@@ -199,7 +226,7 @@ export class ReviewsService {
         providerId: true,
         serviceId: true,
         status: true,
-        payment: { select: { heldAt: true } },
+        payment: { select: PAYMENT_OUTCOME_SELECT },
       },
     });
 
@@ -218,6 +245,15 @@ export class ReviewsService {
     this.assertAuthorRole(userId, dto.authorRole, {
       clientId: booking.clientId,
       providerId: booking.providerId,
+    });
+
+    await this.assertSomethingToReview(dto.authorRole, {
+      finished:
+        booking.status === ServiceBookingStatus.COMPLETED
+          ? 'completed'
+          : 'cancelled',
+      payment: booking.payment,
+      strikeWhere: { serviceBookingId },
     });
 
     const existing = await this.prisma.review.findFirst({
@@ -428,7 +464,7 @@ export class ReviewsService {
         clientId: true,
         ownerId: true,
         status: true,
-        payment: { select: { heldAt: true } },
+        payment: { select: PAYMENT_OUTCOME_SELECT },
       },
     });
 
@@ -444,6 +480,15 @@ export class ReviewsService {
       },
       statusAllowed: REVIEWABLE_BOOKING_STATUSES.includes(booking.status),
       wasPaid: Boolean(booking.payment?.heldAt),
+      reviewers: () =>
+        this.reviewersOf({
+          finished:
+            booking.status === BookingStatus.COMPLETED
+              ? 'completed'
+              : 'cancelled',
+          payment: booking.payment,
+          strikeWhere: { bookingId },
+        }),
       existingReviewWhere: { bookingId, authorId: userId },
     });
   }
@@ -456,7 +501,7 @@ export class ReviewsService {
         clientId: true,
         providerId: true,
         status: true,
-        payment: { select: { heldAt: true } },
+        payment: { select: PAYMENT_OUTCOME_SELECT },
       },
     });
 
@@ -474,6 +519,15 @@ export class ReviewsService {
         booking.status,
       ),
       wasPaid: Boolean(booking.payment?.heldAt),
+      reviewers: () =>
+        this.reviewersOf({
+          finished:
+            booking.status === ServiceBookingStatus.COMPLETED
+              ? 'completed'
+              : 'cancelled',
+          payment: booking.payment,
+          strikeWhere: { serviceBookingId },
+        }),
       existingReviewWhere: { serviceBookingId, authorId: userId },
     });
   }
@@ -488,6 +542,51 @@ export class ReviewsService {
       throw new BadRequestException(
         'Só é possível avaliar uma reserva que chegou a ser paga.',
       );
+    }
+  }
+
+  /**
+   * Quem pode avaliar esta reserva (ver `whoMayReview`). Só pergunta se o
+   * provider falhou quando isso muda a resposta: num cancelamento com o
+   * dinheiro todo devolvido.
+   */
+  private async reviewersOf(
+    reservation: FinishedReservation,
+  ): Promise<Reviewers> {
+    const { finished, payment } = reservation;
+    const providerAtFault =
+      finished === 'cancelled' && payment?.status === PaymentStatus.REFUNDED
+        ? await this.providerFailed(payment.id, reservation.strikeWhere)
+        : false;
+
+    return whoMayReview({ finished, payment, providerAtFault });
+  }
+
+  /** O provider levou strike por esta reserva ou perdeu a disputa por inteiro. */
+  private async providerFailed(
+    paymentId: string,
+    strikeWhere: Prisma.ProviderStrikeWhereInput,
+  ): Promise<boolean> {
+    const [strike, lostDispute] = await Promise.all([
+      this.prisma.providerStrike.findFirst({
+        where: strikeWhere,
+        select: { id: true },
+      }),
+      this.prisma.dispute.findFirst({
+        where: { paymentId, status: DisputeStatus.RESOLVED_CLIENT },
+        select: { id: true },
+      }),
+    ]);
+
+    return Boolean(strike ?? lostDispute);
+  }
+
+  private async assertSomethingToReview(
+    role: ReviewAuthorRole,
+    reservation: FinishedReservation,
+  ) {
+    if (!mayReviewAs(await this.reviewersOf(reservation), role)) {
+      throw new BadRequestException(NOTHING_TO_REVIEW);
     }
   }
 
@@ -524,6 +623,8 @@ export class ReviewsService {
     statusAllowed: boolean;
     /** O dinheiro chegou a entrar no escrow. */
     wasPaid: boolean;
+    /** Quem pode avaliar, pelo que aconteceu à reserva e ao dinheiro. */
+    reviewers: () => Promise<Reviewers>;
     existingReviewWhere: Prisma.ReviewWhereInput;
   }) {
     const isParticipant =
@@ -560,6 +661,18 @@ export class ReviewsService {
       };
     }
 
+    const role =
+      params.participants.clientId === params.userId
+        ? ReviewAuthorRole.CLIENT
+        : ReviewAuthorRole.PROVIDER;
+
+    if (!mayReviewAs(await params.reviewers(), role)) {
+      return {
+        message: 'Verificação concluída.',
+        data: { canReview: false, reason: NOTHING_TO_REVIEW },
+      };
+    }
+
     const existing = await this.prisma.review.findFirst({
       where: params.existingReviewWhere,
     });
@@ -570,11 +683,6 @@ export class ReviewsService {
         data: { canReview: false, reason: 'Já avaliaste esta reserva.' },
       };
     }
-
-    const role =
-      params.participants.clientId === params.userId
-        ? ReviewAuthorRole.CLIENT
-        : ReviewAuthorRole.PROVIDER;
 
     return {
       message: 'Verificação concluída.',

@@ -76,6 +76,26 @@ export class EnvironmentVariables {
   @Min(0)
   TRUST_PROXY_HOPS?: number;
 
+  // Limites do pool de ligações à base (shared/db/pool-config.ts).
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  DATABASE_POOL_MAX?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(100)
+  DATABASE_POOL_ACQUIRE_TIMEOUT_MS?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(100)
+  DATABASE_STATEMENT_TIMEOUT_MS?: number;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()

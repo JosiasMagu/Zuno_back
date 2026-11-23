@@ -33,6 +33,10 @@ este endpoint - quando falha, o orquestrador reinicia o container.
 | `SENTRY_DSN` | nao | sem DSN, nao envia erros |
 | `LOG_LEVEL` | nao (default info) | debug em alpha, info em prod |
 | `METRICS_TOKEN` | sim, em producao | 32+ chars aleatorios. O scraper envia-o como Bearer para ler `/metrics`. Sem ele a aplicacao nao arranca em producao |
+| `PAYMENTS_MANUAL_RECEIVER_NUMBER` | sim, em producao no modo manual | o numero M-Pesa para onde os clientes pagam. A app mostra-o |
+| `TRUST_PROXY_HOPS` | nao (default 0) | numero de proxies a frente da API. Atras de nginx ou de um balanceador tem de ser 1 ou mais, senao todos os clientes contam como um so IP no rate limit |
+| `POSTGRES_PASSWORD` | sim, com o docker-compose | password da base que o compose cria. Sem ela o compose recusa arrancar |
+| `DATABASE_POOL_MAX` e afins | nao | limites do pool de ligacoes (ver `.env.example`) |
 | `NOTIFICATIONS_DRIVER` | nao | log\|silent. `log` e recusado em producao, porque escreve os codigos no log. Sem a variavel: log em development, silent nos outros. Com silent os codigos nao sao entregues, por isso a recuperacao de password e a verificacao do telefone nao funcionam ate haver fornecedor de SMS ou e-mail |
 
 Validar antes de deploy:
@@ -63,8 +67,8 @@ API em `http://localhost:3000/api/v1`. Swagger em `/docs`.
 # Build da imagem local
 docker build -t zuno-back:latest .
 
-# Compose com Postgres
-JWT_ACCESS_SECRET=$(openssl rand -hex 64) \
+# Compose com Postgres. O .env do servidor tem de trazer POSTGRES_PASSWORD e
+# as variaveis de producao da seccao 2: a API recebe-as todas por env_file.
 docker compose up -d --build
 
 # Logs
@@ -77,6 +81,10 @@ docker compose ps   # coluna STATUS deve mostrar (healthy)
 As migrations correm no servico `migrate` do compose (`prisma migrate deploy`),
 que termina antes de a API arrancar. A imagem da API nao traz o CLI do Prisma;
 para as aplicar a mao: `docker compose run --rm migrate`.
+
+O Postgres do compose nao publica porta: so responde dentro da rede do
+compose. Para lhe chegar a partir do servidor:
+`docker compose exec postgres psql -U zuno zuno_db`.
 
 ---
 

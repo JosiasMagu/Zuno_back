@@ -30,7 +30,24 @@ export default tseslint.config(
       '@typescript-eslint/no-floating-promises': 'warn',
       '@typescript-eslint/no-unsafe-argument': 'warn',
       'prettier/prettier': ['error', { endOfLine: 'auto' }],
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@nestjs/schedule',
+              importNames: ['Cron'],
+              message:
+                'Usa @Job (shared/scheduling/job.decorator), que impede o job de correr por cima de si próprio.',
+            },
+          ],
+        },
+      ],
     },
+  },
+  {
+    files: ['src/shared/scheduling/job.decorator.ts'],
+    rules: { 'no-restricted-imports': 'off' },
   },
   {
     files: ['**/*.spec.ts', '**/*.test.ts', '**/test/**/*.ts'],

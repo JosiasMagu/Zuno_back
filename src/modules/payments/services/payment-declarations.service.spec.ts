@@ -271,10 +271,15 @@ describe('PaymentDeclarationsService', () => {
         }),
       );
 
-      const attempt = service.declare(CLIENT_ID, PAYMENT_ID, DECLARATION);
+      const failure = service
+        .declare(CLIENT_ID, PAYMENT_ID, DECLARATION)
+        .catch((error: unknown) => error);
+      // A transacção repete, com uma pausa entre tentativas.
+      await jest.runAllTimersAsync();
 
-      await expect(attempt).rejects.toThrow(ApiException);
-      await expect(attempt).rejects.toMatchObject({ status: 409 });
+      const error = await failure;
+      expect(error).toBeInstanceOf(ApiException);
+      expect(error).toMatchObject({ status: 409 });
       expect(auditMock.record).not.toHaveBeenCalled();
     });
   });

@@ -1,10 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { CronExpression } from '@nestjs/schedule';
 import { ServiceQuoteStatus, ServiceRequestStatus } from '@prisma/client';
 
 import { PrismaService } from '../../../shared/db/prisma.service';
 import { describeError } from '../../../shared/scheduling/process-due';
 import { ServiceBookingsService } from '../services/service-bookings.service';
+import { Job } from '../../../shared/scheduling/job.decorator';
 
 @Injectable()
 export class ServicesScheduler {
@@ -19,7 +20,7 @@ export class ServicesScheduler {
    * Expira as reservas de serviço que passaram o prazo sem o dinheiro entrar
    * no escrow, para o provider não ficar preso a um trabalho que não foi pago.
    */
-  @Cron(CronExpression.EVERY_10_MINUTES, { name: 'services-expire-unpaid' })
+  @Job(CronExpression.EVERY_10_MINUTES, 'services-expire-unpaid')
   async expireUnpaidBookings() {
     if (process.env.NODE_ENV === 'test') {
       return;
@@ -39,7 +40,7 @@ export class ServicesScheduler {
     }
   }
 
-  @Cron(CronExpression.EVERY_5_MINUTES, { name: 'services-expire-stale' })
+  @Job(CronExpression.EVERY_5_MINUTES, 'services-expire-stale')
   async expireStaleEntities() {
     if (process.env.NODE_ENV === 'test') {
       return;

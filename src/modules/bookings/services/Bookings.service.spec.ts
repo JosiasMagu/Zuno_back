@@ -194,11 +194,45 @@ const makeDepositPayment = (
 // A abordagem de fabrica (makePrismaMock) garante isolamento entre testes.
 
 type TxClient = {
+  equipment: { findUnique: jest.Mock };
   booking: {
-    count: jest.Mock;
+    findMany: jest.Mock;
     create: jest.Mock;
   };
 };
+
+/** `count` reservas que ocupam o período pedido nos testes (dias 5 a 8). */
+const occupyingBookings = (count: number) =>
+  Array.from({ length: count }, () => ({
+    status: BookingStatus.CONFIRMED,
+    startDate: future(5),
+    endDate: future(8),
+  }));
+
+/**
+ * O que a criação de uma reserva lê dentro da transacção: o anúncio, as
+ * reservas por pagar do cliente e, depois, as que ocupam o período.
+ */
+const makeCreateTx = ({
+  occupying = 0,
+  unpaid = [],
+  equipment = makeEquipment(),
+  create = jest.fn().mockResolvedValue(makeBooking()),
+}: {
+  occupying?: number;
+  unpaid?: Array<{ equipmentId: string; totalDays: number }>;
+  equipment?: unknown;
+  create?: jest.Mock;
+} = {}): TxClient => ({
+  equipment: { findUnique: jest.fn().mockResolvedValue(equipment) },
+  booking: {
+    findMany: jest
+      .fn()
+      .mockResolvedValueOnce(unpaid)
+      .mockResolvedValueOnce(occupyingBookings(occupying)),
+    create,
+  },
+});
 
 const makePrismaMock = () => ({
   equipment: {
@@ -291,15 +325,13 @@ describe('BookingsService', () => {
       txCreateResult: unknown = makeBooking(),
     ) => {
       prisma.$transaction.mockImplementation(
-        async (callback: (tx: TxClient) => Promise<unknown>) => {
-          const tx: TxClient = {
-            booking: {
-              count: jest.fn().mockResolvedValue(txConflictCount),
+        (callback: (tx: TxClient) => Promise<unknown>) =>
+          callback(
+            makeCreateTx({
+              occupying: txConflictCount,
               create: jest.fn().mockResolvedValue(txCreateResult),
-            },
-          };
-          return callback(tx);
-        },
+            }),
+          ),
       );
     };
 
@@ -421,16 +453,73 @@ describe('BookingsService', () => {
       );
     });
 
-    it('lança BadRequestException se as reservas conflituosas esgotam as unidades (dentro da transacção)', async () => {
+    it('responde BOOKING_OVERLAP quando as reservas do período esgotam as unidades', async () => {
       // quantity = 1 e já existe 1 reserva sobreposta → sem unidades livres
       prisma.equipment.findUnique.mockResolvedValue(makeEquipment());
       setupHappyTransaction(1);
 
-      await expect(service.create(CLIENT_ID, validDto)).rejects.toThrow(
-        new BadRequestException(
+      await expect(service.create(CLIENT_ID, validDto)).rejects.toMatchObject({
+        errorCode: ErrorCode.BOOKING_OVERLAP,
+        message:
           'Não há unidades disponíveis para este equipamento nesse período.',
-        ),
-      );
+      });
+    });
+
+    describe('o que se relê dentro da transacção', () => {
+      const createWith = (tx: Parameters<typeof makeCreateTx>[0]) => {
+        prisma.equipment.findUnique.mockResolvedValue(makeEquipment());
+        prisma.$transaction.mockImplementation(
+          (callback: (tx: TxClient) => Promise<unknown>) =>
+            callback(makeCreateTx(tx)),
+        );
+        return service.create(CLIENT_ID, validDto);
+      };
+      const unpaidElsewhere = (count: number) =>
+        Array.from({ length: count }, (_, i) => ({
+          equipmentId: `outro-equipamento-${i}`,
+          totalDays: 3,
+        }));
+
+      it('recusa se o anúncio foi pausado entre a leitura e a transacção', async () => {
+        await expect(
+          createWith({ equipment: makeEquipment({ isAvailable: false }) }),
+        ).rejects.toMatchObject({
+          errorCode: ErrorCode.EQUIPMENT_NOT_AVAILABLE,
+        });
+      });
+
+      it('recusa quando os dias por pagar no mesmo anúncio passariam de 90', async () => {
+        // O pedido é de 3 dias: com 88 já por pagar ficava em 91.
+        await expect(
+          createWith({
+            unpaid: [{ equipmentId: EQUIPMENT_ID, totalDays: 88 }],
+          }),
+        ).rejects.toMatchObject({
+          errorCode: ErrorCode.BOOKING_TOO_MANY_UNPAID,
+        });
+      });
+
+      it('aceita outra reserva por pagar no mesmo anúncio enquanto couber nos 90 dias', async () => {
+        await expect(
+          createWith({
+            unpaid: [{ equipmentId: EQUIPMENT_ID, totalDays: 87 }],
+          }),
+        ).resolves.toMatchObject({ message: 'Reserva criada com sucesso.' });
+      });
+
+      it('recusa a sexta reserva por pagar, mesmo em anúncios diferentes', async () => {
+        await expect(
+          createWith({ unpaid: unpaidElsewhere(5) }),
+        ).rejects.toMatchObject({
+          errorCode: ErrorCode.BOOKING_TOO_MANY_UNPAID,
+        });
+      });
+
+      it('aceita com quatro reservas por pagar noutros anúncios', async () => {
+        await expect(
+          createWith({ unpaid: unpaidElsewhere(4) }),
+        ).resolves.toMatchObject({ message: 'Reserva criada com sucesso.' });
+      });
     });
 
     it('converte erro P2034 (serialization failure) em BadRequestException legível', async () => {
@@ -468,18 +557,15 @@ describe('BookingsService', () => {
       // inferiria `capturedData` como `never` apos o await.
       const captured = { data: {} as Record<string, unknown> };
       prisma.$transaction.mockImplementation(
-        async (callback: (tx: TxClient) => Promise<unknown>) => {
-          const tx: TxClient = {
-            booking: {
-              count: jest.fn().mockResolvedValue(0),
+        (callback: (tx: TxClient) => Promise<unknown>) =>
+          callback(
+            makeCreateTx({
               create: jest.fn().mockImplementation(({ data }) => {
                 captured.data = data as Record<string, unknown>;
                 return Promise.resolve(makeBooking());
               }),
-            },
-          };
-          return callback(tx);
-        },
+            }),
+          ),
       );
 
       await service.create(CLIENT_ID, {
@@ -497,18 +583,15 @@ describe('BookingsService', () => {
 
       const captured = { data: {} as Record<string, unknown> };
       prisma.$transaction.mockImplementation(
-        async (callback: (tx: TxClient) => Promise<unknown>) => {
-          const tx: TxClient = {
-            booking: {
-              count: jest.fn().mockResolvedValue(0),
+        (callback: (tx: TxClient) => Promise<unknown>) =>
+          callback(
+            makeCreateTx({
               create: jest.fn().mockImplementation(({ data }) => {
                 captured.data = data as Record<string, unknown>;
                 return Promise.resolve(makeBooking());
               }),
-            },
-          };
-          return callback(tx);
-        },
+            }),
+          ),
       );
 
       await service.create(CLIENT_ID, validDto);
@@ -820,19 +903,25 @@ describe('BookingsService', () => {
     /**
      * Configura as re-leituras dentro da transacção Serializable:
      * tx.booking.findUnique (status), tx.equipment.findUnique
-     * (quantity/status) e tx.booking.count (overlaps).
+     * (quantity/status) e tx.booking.findMany (as que ocupam o período).
      */
     const setupConfirmTx = ({
-      freshBooking = { status: BookingStatus.PENDING } as unknown,
+      freshBooking = { status: BookingStatus.PENDING },
       freshEquipment = {
         quantity: 1,
         status: EquipmentStatus.ACTIVE,
-      } as unknown,
+      },
       overlapCount = 0,
+    }: {
+      freshBooking?: unknown;
+      freshEquipment?: unknown;
+      overlapCount?: number;
     } = {}) => {
       prisma.booking.findUnique.mockResolvedValueOnce(freshBooking);
       prisma.equipment.findUnique.mockResolvedValue(freshEquipment);
-      prisma.booking.count.mockResolvedValue(overlapCount);
+      prisma.booking.findMany.mockResolvedValue(
+        occupyingBookings(overlapCount),
+      );
       prisma.booking.update.mockResolvedValue(confirmedBooking);
       prisma.equipment.update.mockResolvedValue({});
       useRealTransaction();
@@ -917,7 +1006,7 @@ describe('BookingsService', () => {
       expect(prisma.booking.update).not.toHaveBeenCalled();
     });
 
-    it('lança BadRequestException se as reservas confirmadas sobrepostas esgotam as unidades', async () => {
+    it('responde BOOKING_OVERLAP se as reservas já confirmadas esgotam as unidades', async () => {
       prisma.booking.findUnique.mockResolvedValueOnce(
         makeBookingWithEquipment(),
       );
@@ -926,10 +1015,11 @@ describe('BookingsService', () => {
       );
       setupConfirmTx({ overlapCount: 1 });
 
-      await expect(service.confirm(OWNER_ID, BOOKING_ID)).rejects.toThrow(
-        new BadRequestException(
-          'Todas as unidades já estão reservadas para este período.',
-        ),
+      await expect(service.confirm(OWNER_ID, BOOKING_ID)).rejects.toMatchObject(
+        {
+          errorCode: ErrorCode.BOOKING_OVERLAP,
+          message: 'Todas as unidades já estão reservadas para este período.',
+        },
       );
     });
 
@@ -965,7 +1055,8 @@ describe('BookingsService', () => {
 
       await service.confirm(OWNER_ID, BOOKING_ID);
 
-      expect(prisma.booking.count).toHaveBeenCalledWith({
+      expect(prisma.booking.findMany).toHaveBeenCalledWith({
+        select: expect.any(Object),
         where: expect.objectContaining({
           id: { not: BOOKING_ID },
           equipmentId: EQUIPMENT_ID,
@@ -1082,9 +1173,15 @@ describe('BookingsService', () => {
     const setupCancelTx = ({
       booking = makeBooking(),
       user = makeUser(CLIENT_ID, UserRole.CLIENT),
-      freshPayment = null as unknown,
-      freshEquipment = { availableQuantity: 0, quantity: 1 } as unknown,
+      freshPayment = null,
+      freshEquipment = { availableQuantity: 0, quantity: 1 },
       strikeCount = 1,
+    }: {
+      booking?: ReturnType<typeof makeBooking>;
+      user?: ReturnType<typeof makeUser>;
+      freshPayment?: unknown;
+      freshEquipment?: unknown;
+      strikeCount?: number;
     } = {}) => {
       prisma.booking.findUnique
         .mockResolvedValueOnce(booking) // leitura externa (include)
@@ -1616,8 +1713,13 @@ describe('BookingsService', () => {
     const setupCompleteTx = ({
       booking = makeActiveBooking(),
       user = makeUser(OWNER_ID, UserRole.PROVIDER),
-      freshPayment = makeDepositPayment() as unknown,
-      freshEquipment = { availableQuantity: 0, quantity: 1 } as unknown,
+      freshPayment = makeDepositPayment(),
+      freshEquipment = { availableQuantity: 0, quantity: 1 },
+    }: {
+      booking?: ReturnType<typeof makeBooking>;
+      user?: ReturnType<typeof makeUser>;
+      freshPayment?: unknown;
+      freshEquipment?: unknown;
     } = {}) => {
       prisma.booking.findUnique
         .mockResolvedValueOnce(booking) // leitura externa (include)
@@ -2084,7 +2186,7 @@ describe('BookingsService', () => {
 
     beforeEach(() => {
       prisma.equipment.findUnique.mockResolvedValue(makeEquipment());
-      prisma.booking.count.mockResolvedValue(0);
+      prisma.booking.findMany.mockResolvedValue([]);
       prisma.booking.create.mockResolvedValue(makeBooking());
       useRealTransaction();
     });

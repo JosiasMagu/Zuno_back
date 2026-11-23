@@ -9,6 +9,7 @@ import { Logger as PinoLogger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { applyApiPrefix } from './shared/http/api-prefix';
+import { corsOrigin } from './shared/http/cors';
 import { initSentry } from './shared/sentry/sentry';
 
 async function bootstrap() {
@@ -44,17 +45,7 @@ async function bootstrap() {
     .map((o) => o.trim())
     .filter(Boolean);
 
-  app.enableCors({
-    origin: (
-      origin: string | undefined,
-      callback: (err: Error | null, allow?: boolean) => void,
-    ) => {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      callback(new Error(`CORS: origem não permitida (${origin})`));
-    },
-    credentials: true,
-  });
+  app.enableCors({ origin: corsOrigin(allowedOrigins), credentials: true });
 
   app.useGlobalFilters(new HttpExceptionFilter());
 

@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { CronExpression } from '@nestjs/schedule';
 
 import { describeError } from '../../../shared/scheduling/process-due';
 import { DisputesService } from '../services/disputes.service';
+import { Job } from '../../../shared/scheduling/job.decorator';
 
 /**
  * Relógio das disputas: de hora a hora, as que ficaram sem resposta dentro
@@ -15,7 +16,7 @@ export class DisputesScheduler {
 
   constructor(private readonly disputes: DisputesService) {}
 
-  @Cron(CronExpression.EVERY_HOUR, { name: 'disputes-response-window' })
+  @Job(CronExpression.EVERY_HOUR, 'disputes-response-window')
   async closeResponseWindows() {
     if (process.env.NODE_ENV === 'test') {
       return;

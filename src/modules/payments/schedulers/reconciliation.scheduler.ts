@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { CronExpression } from '@nestjs/schedule';
 
 import { describeError } from '../../../shared/scheduling/process-due';
 import { ReconciliationService } from '../services/reconciliation.service';
+import { Job } from '../../../shared/scheduling/job.decorator';
 
 /**
  * Confere de hora a hora se o dinheiro bate certo. Só lê, por isso pode
@@ -15,7 +16,7 @@ export class ReconciliationScheduler {
 
   constructor(private readonly reconciliation: ReconciliationService) {}
 
-  @Cron(CronExpression.EVERY_HOUR, { name: 'money-reconciliation' })
+  @Job(CronExpression.EVERY_HOUR, 'money-reconciliation')
   async reconcile() {
     if (process.env.NODE_ENV === 'test') {
       return;

@@ -1494,6 +1494,15 @@ describe('PaymentsService', () => {
       expect(orderBy).toEqual({ heldAt: 'asc' });
     });
 
+    it('deixa de fora o dinheiro que iria para uma conta suspensa', async () => {
+      prisma.payment.findMany.mockResolvedValue([]);
+
+      await service.autoReleaseDue();
+
+      const { where } = prisma.payment.findMany.mock.calls[0][0];
+      expect(where.owner).toEqual({ isActive: true });
+    });
+
     it('procura também serviços que o provider concluiu há mais de 3 dias', async () => {
       prisma.payment.findMany.mockResolvedValue([]);
 

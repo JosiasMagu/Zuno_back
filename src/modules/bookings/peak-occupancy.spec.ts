@@ -1,6 +1,6 @@
 import { BookingStatus } from '@prisma/client';
 
-import { peakOccupancy } from './booking-occupancy';
+import { peakOccupancy, peakOccupancyDuring } from './booking-occupancy';
 
 const NOW = new Date('2026-11-17T10:00:00.000Z');
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -54,5 +54,57 @@ describe('peakOccupancy', () => {
         NOW,
       ),
     ).toBe(1);
+  });
+});
+
+describe('peakOccupancyDuring', () => {
+  const period = (from: number, to: number) => ({
+    startDate: day(from),
+    endDate: day(to),
+  });
+
+  it('conta uma unidade para reservas que tocam no período e nunca coincidem', () => {
+    // Com 2 unidades, um pedido de 1 a 20 tem uma livre o tempo todo.
+    expect(
+      peakOccupancyDuring([booking(1, 3), booking(10, 12)], period(1, 20), NOW),
+    ).toBe(1);
+  });
+
+  it('conta as reservas que coincidem dentro do período', () => {
+    expect(
+      peakOccupancyDuring([booking(1, 6), booking(4, 9)], period(3, 8), NOW),
+    ).toBe(2);
+  });
+
+  it('não conta como coincidentes a que acaba no dia em que a outra começa', () => {
+    expect(
+      peakOccupancyDuring([booking(1, 4), booking(4, 7)], period(1, 7), NOW),
+    ).toBe(1);
+  });
+
+  it('ignora a parte das reservas que fica fora do período', () => {
+    expect(
+      peakOccupancyDuring([booking(1, 5), booking(3, 12)], period(8, 10), NOW),
+    ).toBe(1);
+  });
+
+  it('a unidade que não voltou ocupa o período todo, se ele já começou', () => {
+    expect(
+      peakOccupancyDuring(
+        [booking(-10, -5, BookingStatus.ACTIVE), booking(1, 2)],
+        period(0, 3),
+        NOW,
+      ),
+    ).toBe(2);
+  });
+
+  it('não conta a unidade em atraso num período que ainda não começou', () => {
+    expect(
+      peakOccupancyDuring(
+        [booking(-10, -5, BookingStatus.ACTIVE)],
+        period(3, 6),
+        NOW,
+      ),
+    ).toBe(0);
   });
 });

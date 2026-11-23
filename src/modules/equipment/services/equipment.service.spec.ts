@@ -270,7 +270,7 @@ describe('EquipmentService', () => {
         operatorAvailable: false,
       };
 
-      await service.create(OWNER_ID, dtoSemCondition as typeof validDto);
+      await service.create(OWNER_ID, dtoSemCondition);
 
       const createCall = prisma.equipment.create.mock.calls[0][0] as {
         data: Record<string, unknown>;
@@ -291,7 +291,7 @@ describe('EquipmentService', () => {
         location: 'Maputo',
       };
 
-      await service.create(OWNER_ID, dtoMinimo as typeof validDto);
+      await service.create(OWNER_ID, dtoMinimo);
 
       const createCall = prisma.equipment.create.mock.calls[0][0] as {
         data: Record<string, unknown>;

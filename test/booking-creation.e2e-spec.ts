@@ -140,6 +140,35 @@ describe('Booking creation E2E', () => {
       expect(third.status).toBe(400);
     });
 
+    it('accepts a long booking on a two-unit listing whose other bookings never overlap each other', async () => {
+      const equipmentId = await createApprovedEquipment(actors, {
+        quantity: 2,
+      });
+      await book(equipmentId, 5, 7).expect(201);
+      await book(equipmentId, 12, 14).expect(201);
+
+      // Há sempre uma unidade livre do dia 5 ao 20, com as outras duas reservas.
+      const acrossBoth = await book(equipmentId, 5, 20);
+      // Já não há: do dia 5 ao 7 as duas unidades estão ocupadas.
+      const third = await book(equipmentId, 6, 8);
+
+      expect(acrossBoth.status).toBe(201);
+      expect(third.status).toBe(400);
+      expect(third.body.errorCode).toBe('BOOKING_OVERLAP');
+    });
+
+    it('returns 400 once the days a client holds unpaid on one listing would pass 90', async () => {
+      const equipmentId = await createApprovedEquipment(actors);
+      await book(equipmentId, 5, 65).expect(201);
+
+      const beyond = await book(equipmentId, 70, 101);
+      const within = await book(equipmentId, 70, 100);
+
+      expect(beyond.status).toBe(400);
+      expect(beyond.body.errorCode).toBe('BOOKING_TOO_MANY_UNPAID');
+      expect(within.status).toBe(201);
+    });
+
     it('accepts other dates while the only unit is confirmed elsewhere', async () => {
       const equipmentId = await createApprovedEquipment(actors);
       const bookingId = await createBooking(actors, equipmentId, 5);

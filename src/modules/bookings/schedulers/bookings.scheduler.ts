@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { CronExpression } from '@nestjs/schedule';
 
 import { PaymentsService } from '../../payments/services/payments.service';
 import { BookingsService } from '../services/bookings.service';
+import { Job } from '../../../shared/scheduling/job.decorator';
 
 /**
  * Relógio do ciclo de vida do aluguer (decisão D1 em docs/DECISOES-FASE-0.md):
@@ -25,7 +26,7 @@ export class BookingsScheduler {
     private readonly bookingsService: BookingsService,
   ) {}
 
-  @Cron(CronExpression.EVERY_10_MINUTES)
+  @Job(CronExpression.EVERY_10_MINUTES, 'bookings-expire-unpaid')
   async expireUnpaidBookings() {
     if (process.env.NODE_ENV === 'test') return;
 
@@ -41,7 +42,7 @@ export class BookingsScheduler {
     }
   }
 
-  @Cron(CronExpression.EVERY_HOUR)
+  @Job(CronExpression.EVERY_HOUR, 'bookings-lifecycle-deadlines')
   async handleLifecycleDeadlines() {
     if (process.env.NODE_ENV === 'test') return;
 

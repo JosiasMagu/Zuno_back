@@ -558,6 +558,9 @@ export class PaymentsService {
           where: {
             id: { notIn: seenIds },
             status: PaymentStatus.HELD,
+            // Dinheiro para uma conta suspensa não sai sozinho: fica retido
+            // até um admin o libertar ou reembolsar.
+            owner: { isActive: true },
             OR: [
               {
                 heldAt: { lte: rentalDeadline },

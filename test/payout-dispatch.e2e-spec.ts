@@ -177,6 +177,17 @@ describe('Payout dispatch E2E', () => {
       expect(audits[0].actorId).toBe('system');
     });
 
+    it('waits for an admin while the account that would receive it is suspended', async () => {
+      const payout = await createProviderPayout(PHONE('00'));
+      await prisma().user.update({
+        where: { id: payout.recipientId },
+        data: { isActive: false },
+      });
+
+      expect(await dispatcher.dispatchDue()).toBe(0);
+      expect((await readPayout(payout.id)).status).toBe('PENDING');
+    });
+
     it('is sent once when two sends race for it', async () => {
       const payout = await createProviderPayout(PHONE('00'));
 

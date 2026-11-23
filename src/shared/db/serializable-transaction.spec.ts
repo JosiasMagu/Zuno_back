@@ -43,6 +43,41 @@ describe('runSerializable()', () => {
     ).rejects.toThrow(new ConflictException('Tenta de novo.'));
   });
 
+  describe('repetição de quem perdeu a corrida', () => {
+    it('repete a transacção e devolve o resultado da repetição', async () => {
+      transaction
+        .mockRejectedValueOnce(prismaError('P2034'))
+        .mockResolvedValueOnce('feito à segunda');
+
+      const result = await runSerializable(
+        prisma,
+        () => Promise.resolve('ignorado pelo mock'),
+        onConflict,
+      );
+
+      expect(result).toBe('feito à segunda');
+      expect(transaction).toHaveBeenCalledTimes(2);
+    });
+
+    it('desiste ao fim de três tentativas', async () => {
+      transaction.mockRejectedValue(prismaError('P2034'));
+
+      await expect(
+        runSerializable(prisma, () => Promise.resolve(), onConflict),
+      ).rejects.toThrow(ConflictException);
+      expect(transaction).toHaveBeenCalledTimes(3);
+    });
+
+    it('não repete um erro que não é conflito', async () => {
+      transaction.mockRejectedValue(prismaError('P2002'));
+
+      await expect(
+        runSerializable(prisma, () => Promise.resolve(), onConflict),
+      ).rejects.toThrow();
+      expect(transaction).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('trata do mesmo modo o conflito que o Postgres só dá no COMMIT', async () => {
     // No COMMIT o adaptador pg lança o erro do driver, sem código do Prisma.
     const atCommit = Object.assign(new Error('TransactionWriteConflict'), {

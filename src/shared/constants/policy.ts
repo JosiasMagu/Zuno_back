@@ -36,6 +36,16 @@ export const BOOKING_PAYMENT_MIN_WINDOW_HOURS = 2;
 export const BOOKING_MAX_DAYS = 90;
 
 /**
+ * Tectos do que um cliente pode ter reservado sem pagar: o número de reservas
+ * no total e os dias no mesmo anúncio. Uma reserva por pagar ocupa as datas
+ * sem custo, e sem tecto uma conta fechava o calendário de um concorrente o
+ * ano inteiro. Dois fins-de-semana ou duas unidades na mesma semana cabem
+ * folgados nos dias de um anúncio.
+ */
+export const UNPAID_BOOKINGS_PER_CLIENT = 5;
+export const UNPAID_DAYS_PER_LISTING = BOOKING_MAX_DAYS;
+
+/**
  * Horas que o admin tem para confirmar no extracto um pagamento que o cliente
  * declarou. Enquanto correm, a reserva não expira: o prazo de pagamento mede
  * o que o cliente fez, e não a demora de quem confirma.

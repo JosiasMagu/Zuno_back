@@ -28,6 +28,8 @@ import {
 import { calculatePlatformFee } from '../../../shared/constants/fees';
 import {
   BOOKING_MAX_DAYS,
+  UNPAID_BOOKINGS_PER_CLIENT,
+  UNPAID_DAYS_PER_LISTING,
   CANCELLATION_FREE_WINDOW_HOURS,
   DEPOSIT_CLAIM_WINDOW_HOURS,
   LATE_CANCELLATION_RETENTION_PERCENT,
@@ -52,10 +54,13 @@ import { expiryReason } from '../../payments/unpaid-reservation';
 import { paymentDeadline } from '../booking-deadlines';
 import {
   COMMITTED_STATUSES,
+  OCCUPANCY_SELECT,
   occupyingDuring,
+  peakOccupancyDuring,
   RESERVING_STATUSES,
   startOfDay,
 } from '../booking-occupancy';
+import type { OccupancyPeriod } from '../booking-occupancy';
 import { CreateBookingDto } from '../dto/create-booking.dto';
 import { FindBookingsQueryDto } from '../dto/find-bookings-query.dto';
 import { UpdateBookingStatusDto } from '../dto/update-booking-status.dto';
@@ -126,7 +131,7 @@ interface BookingPrice {
 /** Uma reserva validada e com preço, pronta a inserir se houver unidade livre. */
 interface NewBooking extends BookingPeriod, BookingPrice {
   clientId: string;
-  equipment: Pick<Equipment, 'id' | 'ownerId' | 'quantity'>;
+  equipment: Pick<Equipment, 'id' | 'ownerId'>;
   deliveryAddress: string | null;
   clientNote: string | null;
 }
@@ -878,9 +883,10 @@ export class BookingsService {
   }
 
   /**
-   * Conta as reservas que ocupam o mesmo período e só insere a nova se ainda
-   * houver uma unidade livre. Corre numa transacção serializável, para que
-   * dois pedidos em simultâneo não fiquem com a mesma unidade.
+   * Só insere a reserva se ainda houver uma unidade livre no período. Corre
+   * numa transacção serializável, para que dois pedidos em simultâneo não
+   * fiquem com a mesma unidade, e relê o anúncio, que pode ter sido pausado
+   * ou reduzido desde a leitura de fora.
    */
   private async insertIfUnitFree(
     tx: Prisma.TransactionClient,
@@ -888,15 +894,27 @@ export class BookingsService {
   ) {
     const { equipment } = booking;
 
-    const reservedUnits = await tx.booking.count({
-      where: {
-        equipmentId: equipment.id,
-        ...occupyingDuring(booking, RESERVING_STATUSES),
-      },
+    const current = await tx.equipment.findUnique({
+      where: { id: equipment.id },
+      select: { quantity: true, status: true, isAvailable: true },
     });
+    if (current?.status !== EquipmentStatus.ACTIVE || !current.isAvailable) {
+      throw ApiErrors.badRequest(
+        ErrorCode.EQUIPMENT_NOT_AVAILABLE,
+        'Este equipamento não está disponível para reserva.',
+      );
+    }
 
-    if (reservedUnits >= equipment.quantity) {
-      throw new BadRequestException(
+    await this.assertUnpaidBookingsWithinLimit(tx, booking);
+
+    const unitsTaken = await this.unitsTakenDuring(tx, {
+      equipmentId: equipment.id,
+      period: booking,
+      statuses: RESERVING_STATUSES,
+    });
+    if (unitsTaken >= current.quantity) {
+      throw ApiErrors.badRequest(
+        ErrorCode.BOOKING_OVERLAP,
         'Não há unidades disponíveis para este equipamento nesse período.',
       );
     }
@@ -926,6 +944,69 @@ export class BookingsService {
         },
       },
     });
+  }
+
+  /**
+   * Unidades do equipamento ocupadas ao mesmo tempo dentro do período, pelas
+   * reservas nestes estados. É o pico, e não o número de reservas: duas que
+   * nunca coincidem ocupam uma unidade só.
+   */
+  private async unitsTakenDuring(
+    tx: Prisma.TransactionClient,
+    query: {
+      equipmentId: string;
+      period: OccupancyPeriod;
+      statuses: BookingStatus[];
+      exceptBookingId?: string;
+    },
+  ): Promise<number> {
+    const occupying = await tx.booking.findMany({
+      where: {
+        equipmentId: query.equipmentId,
+        ...(query.exceptBookingId
+          ? { id: { not: query.exceptBookingId } }
+          : {}),
+        ...occupyingDuring(query.period, query.statuses),
+      },
+      select: OCCUPANCY_SELECT,
+    });
+
+    return peakOccupancyDuring(occupying, query.period);
+  }
+
+  /**
+   * Uma reserva por pagar ocupa as datas sem custo para quem a faz. Os tectos
+   * impedem uma conta de fechar o calendário de outra. Conta como por pagar
+   * a que ainda tem prazo de pagamento a correr.
+   */
+  private async assertUnpaidBookingsWithinLimit(
+    tx: Prisma.TransactionClient,
+    booking: Pick<NewBooking, 'clientId' | 'equipment' | 'totalDays'>,
+  ) {
+    const unpaid = await tx.booking.findMany({
+      where: {
+        clientId: booking.clientId,
+        status: { in: [BookingStatus.PENDING, BookingStatus.CONFIRMED] },
+        expiresAt: { not: null },
+      },
+      select: { equipmentId: true, totalDays: true },
+    });
+    const unpaidDaysHere = unpaid
+      .filter(({ equipmentId }) => equipmentId === booking.equipment.id)
+      .reduce((days, { totalDays }) => days + totalDays, 0);
+
+    if (unpaidDaysHere + booking.totalDays > UNPAID_DAYS_PER_LISTING) {
+      throw ApiErrors.badRequest(
+        ErrorCode.BOOKING_TOO_MANY_UNPAID,
+        `Já tens ${unpaidDaysHere} dias reservados e por pagar neste equipamento. Paga ou cancela antes de reservares mais.`,
+      );
+    }
+    if (unpaid.length >= UNPAID_BOOKINGS_PER_CLIENT) {
+      throw ApiErrors.badRequest(
+        ErrorCode.BOOKING_TOO_MANY_UNPAID,
+        `Tens ${unpaid.length} reservas por pagar. Paga ou cancela alguma antes de fazeres outra.`,
+      );
+    }
   }
 
   private assertConfirmable(status: BookingStatus | undefined) {
@@ -972,16 +1053,15 @@ export class BookingsService {
     });
     this.assertEquipmentIsActive(freshEquipment);
 
-    const committedUnits = await tx.booking.count({
-      where: {
-        id: { not: booking.id },
-        equipmentId: booking.equipmentId,
-        ...occupyingDuring(booking, COMMITTED_STATUSES),
-      },
+    const committedUnits = await this.unitsTakenDuring(tx, {
+      equipmentId: booking.equipmentId,
+      period: booking,
+      statuses: COMMITTED_STATUSES,
+      exceptBookingId: booking.id,
     });
-
     if (committedUnits >= freshEquipment.quantity) {
-      throw new BadRequestException(
+      throw ApiErrors.badRequest(
+        ErrorCode.BOOKING_OVERLAP,
         'Todas as unidades já estão reservadas para este período.',
       );
     }

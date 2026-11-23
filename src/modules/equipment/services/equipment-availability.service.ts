@@ -2,7 +2,9 @@ import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../../../shared/db/prisma.service';
 import {
+  OCCUPANCY_SELECT,
   occupyingDuring,
+  peakOccupancyDuring,
   RESERVING_STATUSES,
   todayAsPeriod,
 } from '../../bookings/booking-occupancy';
@@ -39,7 +41,12 @@ export class EquipmentAvailabilityService {
     );
   }
 
-  /** Ids dos equipamentos sem nenhuma unidade livre durante o período. */
+  /**
+   * Ids dos equipamentos sem nenhuma unidade livre durante o período todo.
+   *
+   * Decide-se pelo pico de ocupação. O número de reservas no período só serve
+   * para afastar depressa os que têm menos reservas do que unidades.
+   */
   async findFullyBookedIds(period: OccupancyPeriod): Promise<string[]> {
     const reserved = await this.countReservedUnits(period);
     if (reserved.size === 0) {
@@ -50,13 +57,33 @@ export class EquipmentAvailabilityService {
       where: { id: { in: [...reserved.keys()] } },
       select: { id: true, quantity: true },
     });
+    const candidates = equipments.filter(
+      ({ id, quantity }) => (reserved.get(id) ?? 0) >= quantity,
+    );
+    if (candidates.length === 0) {
+      return [];
+    }
 
-    return equipments
-      .filter(({ id, quantity }) => (reserved.get(id) ?? 0) >= quantity)
+    const bookings = await this.prisma.booking.findMany({
+      where: {
+        equipmentId: { in: candidates.map(({ id }) => id) },
+        ...occupyingDuring(period, RESERVING_STATUSES),
+      },
+      select: { equipmentId: true, ...OCCUPANCY_SELECT },
+    });
+
+    return candidates
+      .filter(({ id, quantity }) => {
+        const own = bookings.filter((booking) => booking.equipmentId === id);
+        return peakOccupancyDuring(own, period) >= quantity;
+      })
       .map(({ id }) => id);
   }
 
-  /** Unidades que as reservas ocupam no período, por id de equipamento. */
+  /**
+   * Reservas que tocam no período, por id de equipamento. Num só dia é o
+   * mesmo que as unidades ocupadas, porque todas coincidem nesse dia.
+   */
   private async countReservedUnits(
     period: OccupancyPeriod,
     equipmentIds?: string[],

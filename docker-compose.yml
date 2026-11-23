@@ -1,14 +1,16 @@
-x-database-url: &database-url postgresql://${POSTGRES_USER:-zuno}:${POSTGRES_PASSWORD:-zuno}@postgres:5432/${POSTGRES_DB:-zuno_db}?schema=public
+# A password da base é obrigatória: sem POSTGRES_PASSWORD no .env o compose
+# recusa arrancar. Evitar nela caracteres com significado num URL (@ : / ?).
+x-database-url: &database-url postgresql://${POSTGRES_USER:-zuno}:${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD no .env}@postgres:5432/${POSTGRES_DB:-zuno_db}?schema=public
 
 services:
+  # Sem `ports`: a base só responde dentro da rede do compose. Para lhe chegar
+  # da máquina: docker compose exec postgres psql -U zuno zuno_db
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-zuno}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zuno}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD no .env}
       POSTGRES_DB: ${POSTGRES_DB:-zuno_db}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - zuno_pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -37,19 +39,13 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    # As variáveis da aplicação vêm todas do .env, para uma variável nova não
+    # ficar esquecida aqui. As três de baixo são as que o compose decide.
+    env_file: .env
     environment:
       NODE_ENV: production
       PORT: 3000
       DATABASE_URL: *database-url
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
-      JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
-      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
-      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
-      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
-      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      SENTRY_DSN: ${SENTRY_DSN:-}
     ports:
       - "${API_PORT:-3000}:3000"
     restart: unless-stopped

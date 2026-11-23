@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { CronExpression } from '@nestjs/schedule';
 
 import { IdempotencyService } from './idempotency.service';
+import { Job } from '../../shared/scheduling/job.decorator';
 
 /**
  * Limpa de hora a hora os registos de idempotência fora de prazo, para a
@@ -13,7 +14,7 @@ export class IdempotencyScheduler {
 
   constructor(private readonly idempotency: IdempotencyService) {}
 
-  @Cron(CronExpression.EVERY_HOUR, { name: 'idempotency-purge' })
+  @Job(CronExpression.EVERY_HOUR, 'idempotency-purge')
   async purgeExpired() {
     if (process.env.NODE_ENV === 'test') {
       return;

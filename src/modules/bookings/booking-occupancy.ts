@@ -83,38 +83,29 @@ export function todayAsPeriod(now: Date = new Date()): OccupancyPeriod {
   return { startDate, endDate: new Date(startDate.getTime() + DAY_MS) };
 }
 
-/**
- * O maior número de unidades que estas reservas ocupam ao mesmo tempo, de
- * hoje em diante. É até onde se pode baixar a quantidade de um equipamento
- * sem deixar uma reserva sem unidade.
- *
- * Segue a regra de `occupyingDuring`: cada reserva ocupa de `startDate` a
- * `endDate`, e a que foi entregue e ainda não voltou continua a ocupar hoje.
- */
-export function peakOccupancy(
-  bookings: Array<{ status: BookingStatus; startDate: Date; endDate: Date }>,
-  now: Date = new Date(),
-): number {
-  const today = todayAsPeriod(now);
-  const changes: Array<{ at: number; units: number }> = [];
+/** O que a ocupação precisa de saber de uma reserva. */
+export const OCCUPANCY_SELECT = {
+  status: true,
+  startDate: true,
+  endDate: true,
+} as const;
 
-  for (const booking of bookings) {
-    const stillOut = UNRETURNED_STATUSES.includes(booking.status);
-    const end = Math.max(
-      booking.endDate.getTime(),
-      stillOut ? today.endDate.getTime() : 0,
-    );
+type OccupyingBooking = {
+  status: BookingStatus;
+  startDate: Date;
+  endDate: Date;
+};
 
-    if (end <= today.startDate.getTime()) {
-      continue;
-    }
-
-    changes.push({ at: booking.startDate.getTime(), units: 1 });
-    changes.push({ at: end, units: -1 });
-  }
-
-  // No mesmo instante, quem sai liberta a unidade antes de quem entra.
-  changes.sort((a, b) => a.at - b.at || a.units - b.units);
+/** O máximo de intervalos abertos ao mesmo tempo. */
+function peakOf(intervals: Array<{ from: number; to: number }>): number {
+  const changes = intervals
+    .filter(({ from, to }) => to > from)
+    .flatMap(({ from, to }) => [
+      { at: from, units: 1 },
+      { at: to, units: -1 },
+    ])
+    // No mesmo instante, quem sai liberta a unidade antes de quem entra.
+    .sort((a, b) => a.at - b.at || a.units - b.units);
 
   let occupied = 0;
   let peak = 0;
@@ -124,4 +115,58 @@ export function peakOccupancy(
   }
 
   return peak;
+}
+
+/**
+ * O maior número de unidades que estas reservas ocupam ao mesmo tempo, de
+ * hoje em diante. É até onde se pode baixar a quantidade de um equipamento
+ * sem deixar uma reserva sem unidade.
+ *
+ * Segue a regra de `occupyingDuring`: cada reserva ocupa de `startDate` a
+ * `endDate`, e a que foi entregue e ainda não voltou continua a ocupar hoje.
+ */
+export function peakOccupancy(
+  bookings: OccupyingBooking[],
+  now: Date = new Date(),
+): number {
+  const today = todayAsPeriod(now);
+
+  return peakOf(
+    bookings
+      .map((booking) => ({
+        from: booking.startDate.getTime(),
+        to: UNRETURNED_STATUSES.includes(booking.status)
+          ? Math.max(booking.endDate.getTime(), today.endDate.getTime())
+          : booking.endDate.getTime(),
+      }))
+      .filter(({ to }) => to > today.startDate.getTime()),
+  );
+}
+
+/**
+ * O maior número de unidades ocupadas ao mesmo tempo dentro de `period`. É
+ * este valor que se compara com a quantidade, e não o número de reservas que
+ * tocam no período: duas reservas que nunca coincidem ocupam uma unidade só.
+ *
+ * `bookings` são as que `occupyingDuring` apanha para o mesmo período. A que
+ * foi entregue e ainda não voltou ocupa o período todo, se ele já começou.
+ */
+export function peakOccupancyDuring(
+  bookings: OccupyingBooking[],
+  period: OccupancyPeriod,
+  now: Date = new Date(),
+): number {
+  const periodStart = period.startDate.getTime();
+  const periodEnd = period.endDate.getTime();
+  const periodHasBegun = period.startDate <= now;
+
+  return peakOf(
+    bookings.map((booking) => ({
+      from: Math.max(booking.startDate.getTime(), periodStart),
+      to:
+        periodHasBegun && UNRETURNED_STATUSES.includes(booking.status)
+          ? periodEnd
+          : Math.min(booking.endDate.getTime(), periodEnd),
+    })),
+  );
 }

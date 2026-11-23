@@ -147,6 +147,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # O compose nao corre aqui, mas um erro nele so se via no servidor.
+      - name: Validate docker-compose.yml
+        run: |
+          cp .env.example .env
+          POSTGRES_PASSWORD=ci docker compose config --quiet
+
       - name: Build migrate image
         run: docker build --target migrate --tag zuno-back-migrate:ci .
 

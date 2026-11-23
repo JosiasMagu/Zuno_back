@@ -23,12 +23,25 @@ export function isWriteConflict(error: unknown): boolean {
   return cause?.kind === DRIVER_WRITE_CONFLICT;
 }
 
+/** Quantas vezes a transacção corre antes de o conflito chegar a quem chamou. */
+const MAX_ATTEMPTS = 3;
+
+/** Espera curta e desigual, para as duas transacções não voltarem a chocar. */
+const backoffMs = (attempt: number) => attempt * 20 + Math.random() * 30;
+
+const pause = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 /**
  * Corre `work` numa transacção serializável.
  *
- * Quando duas transacções mexem no mesmo estado ao mesmo tempo, o Postgres
- * aborta uma delas. Quem perdeu a corrida recebe o erro de `onConflict`, em
- * vez de um 500.
+ * O Postgres aborta uma de duas transacções que mexem no mesmo estado ao mesmo
+ * tempo e, em tabelas pequenas, também aborta transacções que não se tocam.
+ * Por isso a que perdeu repete: relê o estado e ou passa ou recebe o erro de
+ * negócio certo. Só ao fim de MAX_ATTEMPTS sai o erro de `onConflict`.
+ *
+ * `work` só pode mexer na base, e sempre por `tx`: é o que torna a repetição
+ * segura.
  */
 export async function runSerializable<T>(
   prisma: PrismaService,
@@ -36,15 +49,16 @@ export async function runSerializable<T>(
   onConflict: () => Error,
   timeoutMs = 5000,
 ): Promise<T> {
-  try {
-    return await prisma.$transaction(work, {
-      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-      timeout: timeoutMs,
-    });
-  } catch (error) {
-    if (isWriteConflict(error)) {
-      throw onConflict();
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await prisma.$transaction(work, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        timeout: timeoutMs,
+      });
+    } catch (error) {
+      if (!isWriteConflict(error)) throw error;
+      if (attempt === MAX_ATTEMPTS) throw onConflict();
+      await pause(backoffMs(attempt));
     }
-    throw error;
   }
 }

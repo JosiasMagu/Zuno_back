@@ -1,11 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { CronExpression } from '@nestjs/schedule';
 
 import { describeError } from '../../../shared/scheduling/process-due';
 import { PaymentsService } from '../services/payments.service';
 import { PayoutDispatcher } from '../services/payout-dispatcher.service';
 import { ProviderEventsService } from '../services/provider-events.service';
 import { ProviderOperationsService } from '../services/provider-operations.service';
+import { Job } from '../../../shared/scheduling/job.decorator';
 
 /**
  * Jobs do fornecedor de pagamentos: de minuto a minuto, pergunta pelas
@@ -28,7 +29,7 @@ export class PaymentOperationsScheduler {
     private readonly payments: PaymentsService,
   ) {}
 
-  @Cron(CronExpression.EVERY_MINUTE, { name: 'payment-provider-operations' })
+  @Job(CronExpression.EVERY_MINUTE, 'payment-provider-operations')
   async everyMinute() {
     if (process.env.NODE_ENV === 'test') {
       return;
@@ -39,7 +40,7 @@ export class PaymentOperationsScheduler {
     await this.run('envio dos payouts', () => this.dispatcher.dispatchDue());
   }
 
-  @Cron(CronExpression.EVERY_HOUR, { name: 'payment-auto-release-reminders' })
+  @Job(CronExpression.EVERY_HOUR, 'payment-auto-release-reminders')
   async everyHour() {
     if (process.env.NODE_ENV === 'test') {
       return;

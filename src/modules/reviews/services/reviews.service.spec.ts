@@ -4,7 +4,12 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { BookingStatus, Prisma, ReviewAuthorRole } from '@prisma/client';
+import {
+  BookingStatus,
+  PaymentStatus,
+  Prisma,
+  ReviewAuthorRole,
+} from '@prisma/client';
 
 import { ReviewsService } from './reviews.service';
 import { PrismaService } from '../../../shared/db/prisma.service';
@@ -28,7 +33,7 @@ const makeBooking = (overrides: Record<string, unknown> = {}) => ({
   equipmentId: EQUIPMENT_ID,
   status: BookingStatus.COMPLETED,
   // O dinheiro chegou a entrar no escrow.
-  payment: { heldAt: new Date('2030-06-01T10:00:00.000Z') },
+  payment: paidAndKept(),
   ...overrides,
 });
 
@@ -40,7 +45,7 @@ const makeServiceBooking = (overrides: Record<string, unknown> = {}) => ({
   providerId: OWNER_ID,
   serviceId: 'service-uuid-001',
   status: 'CANCELLED',
-  payment: { heldAt: new Date('2030-06-01T10:00:00.000Z') },
+  payment: paidAndKept(),
   ...overrides,
 });
 
@@ -61,12 +66,24 @@ const makeReview = (overrides: Record<string, unknown> = {}) => ({
 // MOCK DO PRISMA
 // Inclui os modelos usados dentro das transaccoes (tx)
 
+/** Um pagamento que entrou no escrow e com que o provider ficou. */
+function paidAndKept(status: PaymentStatus = PaymentStatus.RELEASED) {
+  return {
+    id: 'payment-uuid-001',
+    heldAt: new Date('2030-06-01T10:00:00.000Z'),
+    status,
+  };
+}
+
 const makePrismaMock = () => {
   const mock = {
     booking: { findUnique: jest.fn() },
     serviceBooking: { findUnique: jest.fn() },
     equipment: { findUnique: jest.fn(), update: jest.fn() },
     user: { findUnique: jest.fn(), update: jest.fn() },
+    // Por omissão o provider não falhou: nem strike, nem disputa perdida.
+    providerStrike: { findFirst: jest.fn().mockResolvedValue(null) },
+    dispute: { findFirst: jest.fn().mockResolvedValue(null) },
     review: {
       findUnique: jest.fn(),
       findFirst: jest.fn(),
@@ -244,15 +261,80 @@ describe('ReviewsService', () => {
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
-    it('permite avaliação de booking CANCELLED', async () => {
-      prisma.booking.findUnique.mockResolvedValue(
-        makeBooking({ status: BookingStatus.CANCELLED }),
-      );
-      prisma.review.findFirst.mockResolvedValue(null);
-      setupHappyTx();
+    describe('reserva cancelada', () => {
+      const cancelled = (status: PaymentStatus) =>
+        makeBooking({
+          status: BookingStatus.CANCELLED,
+          payment: paidAndKept(status),
+        });
+      const NOTHING_TO_REVIEW =
+        'Esta reserva foi cancelada e o valor foi todo devolvido, por isso não há o que avaliar.';
 
-      const result = await service.create(CLIENT_ID, clientDto);
-      expect(result.message).toBe('Avaliação submetida com sucesso.');
+      it('aceita a avaliação quando o provider ficou com parte do valor', async () => {
+        prisma.booking.findUnique.mockResolvedValue(
+          cancelled(PaymentStatus.PARTIALLY_REFUNDED),
+        );
+        prisma.review.findFirst.mockResolvedValue(null);
+        setupHappyTx();
+
+        const result = await service.create(CLIENT_ID, clientDto);
+
+        expect(result.message).toBe('Avaliação submetida com sucesso.');
+      });
+
+      it('recusa quando o valor voltou todo ao cliente, que é o caso de reservar, pagar e cancelar', async () => {
+        prisma.booking.findUnique.mockResolvedValue(
+          cancelled(PaymentStatus.REFUNDED),
+        );
+
+        await expect(service.create(CLIENT_ID, clientDto)).rejects.toThrow(
+          NOTHING_TO_REVIEW,
+        );
+      });
+
+      it('aceita a do cliente quando o valor voltou por o provider ter levado strike', async () => {
+        prisma.booking.findUnique.mockResolvedValue(
+          cancelled(PaymentStatus.REFUNDED),
+        );
+        prisma.providerStrike.findFirst.mockResolvedValue({ id: 'strike-1' });
+        prisma.review.findFirst.mockResolvedValue(null);
+        setupHappyTx();
+
+        const result = await service.create(CLIENT_ID, clientDto);
+
+        expect(result.message).toBe('Avaliação submetida com sucesso.');
+        expect(prisma.providerStrike.findFirst).toHaveBeenCalledWith({
+          where: { bookingId: BOOKING_ID },
+          select: { id: true },
+        });
+      });
+
+      it('aceita a do cliente quando ganhou a disputa por inteiro', async () => {
+        prisma.booking.findUnique.mockResolvedValue(
+          cancelled(PaymentStatus.REFUNDED),
+        );
+        prisma.dispute.findFirst.mockResolvedValue({ id: 'dispute-1' });
+        prisma.review.findFirst.mockResolvedValue(null);
+        setupHappyTx();
+
+        await expect(
+          service.create(CLIENT_ID, clientDto),
+        ).resolves.toBeDefined();
+      });
+
+      it('recusa a do provider que falhou e viu o valor voltar ao cliente', async () => {
+        prisma.booking.findUnique.mockResolvedValue(
+          cancelled(PaymentStatus.REFUNDED),
+        );
+        prisma.providerStrike.findFirst.mockResolvedValue({ id: 'strike-1' });
+
+        await expect(
+          service.create(OWNER_ID, {
+            ...clientDto,
+            authorRole: ReviewAuthorRole.PROVIDER,
+          }),
+        ).rejects.toThrow(NOTHING_TO_REVIEW);
+      });
     });
 
     it('lança ForbiddenException se utilizador não é parte da booking', async () => {
@@ -737,7 +819,7 @@ describe('ReviewsService', () => {
       });
     });
 
-    it('deixa avaliar um serviço cancelado depois de pago', async () => {
+    it('deixa avaliar um serviço cancelado em que o provider ficou com o valor', async () => {
       prisma.serviceBooking.findUnique.mockResolvedValue(makeServiceBooking());
       prisma.review.findFirst.mockResolvedValue(null);
 
@@ -749,14 +831,34 @@ describe('ReviewsService', () => {
       expect(result.data.canReview).toBe(true);
     });
 
-    it('booking CANCELLED também permite avaliar', async () => {
+    it('reserva cancelada com retenção também se avalia', async () => {
       prisma.booking.findUnique.mockResolvedValue(
-        makeBooking({ status: BookingStatus.CANCELLED }),
+        makeBooking({
+          status: BookingStatus.CANCELLED,
+          payment: paidAndKept(PaymentStatus.PARTIALLY_REFUNDED),
+        }),
       );
       prisma.review.findFirst.mockResolvedValue(null);
 
       const result = await service.canReview(CLIENT_ID, BOOKING_ID);
       expect(result.data.canReview).toBe(true);
+    });
+
+    it('reserva cancelada com o valor todo devolvido não se avalia', async () => {
+      prisma.booking.findUnique.mockResolvedValue(
+        makeBooking({
+          status: BookingStatus.CANCELLED,
+          payment: paidAndKept(PaymentStatus.REFUNDED),
+        }),
+      );
+
+      const result = await service.canReview(CLIENT_ID, BOOKING_ID);
+
+      expect(result.data).toEqual({
+        canReview: false,
+        reason:
+          'Esta reserva foi cancelada e o valor foi todo devolvido, por isso não há o que avaliar.',
+      });
     });
   });
 

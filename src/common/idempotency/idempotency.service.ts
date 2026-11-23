@@ -136,8 +136,7 @@ export class IdempotencyService {
           where: this.identify(args),
           data: {
             responseStatus: args.statusCode,
-            responseBody: (args.body ??
-              Prisma.JsonNull) as Prisma.InputJsonValue,
+            responseBody: args.body ?? Prisma.JsonNull,
           },
         });
         return;

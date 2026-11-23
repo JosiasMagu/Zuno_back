@@ -37,19 +37,18 @@ const makePhoto = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-const makeFile = (name = 'file.jpg'): Express.Multer.File =>
-  ({
-    fieldname: 'photo',
-    originalname: name,
-    encoding: '7bit',
-    mimetype: 'image/jpeg',
-    size: 1024,
-    buffer: Buffer.from('fake'),
-    destination: '',
-    filename: '',
-    path: '',
-    stream: undefined as never,
-  }) as Express.Multer.File;
+const makeFile = (name = 'file.jpg'): Express.Multer.File => ({
+  fieldname: 'photo',
+  originalname: name,
+  encoding: '7bit',
+  mimetype: 'image/jpeg',
+  size: 1024,
+  buffer: Buffer.from('fake'),
+  destination: '',
+  filename: '',
+  path: '',
+  stream: undefined as never,
+});
 
 const makePrismaMock = () => ({
   user: { findUnique: jest.fn() },

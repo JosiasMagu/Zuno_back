@@ -662,3 +662,24 @@ O que falta na app, por ordem de gravidade:
 5. Disputas. Falta a resposta da outra parte (`PATCH /disputes/:id/respond`) e a retirada (`withdraw`). O painel de admin mostra os botões de resolver em `OPEN` e `AWAITING_OWNER`, e o backend só resolve em `UNDER_REVIEW` (secção 10).
 
 Mais pequeno: o ecrã de registo aceita passwords de 6 caracteres e o backend exige 8. Ao abrir a app directamente num endereço, antes de a sessão carregar, o perfil mostra os dados pessoais como «Não definido» e `/admin` volta ao início. O resumo do painel de admin lê `total` no topo de `GET /disputes/me`, que só o tem em `meta.total`, e não filtra por estado, por isso mostra 0 disputas abertas com uma à espera de resposta. Na versão web não se consegue criar uma reserva, porque o selector de datas só existe para iOS e Android, e os botões que pedem confirmação não fazem nada.
+
+## 16. Regras que mudaram depois da revisão de 2026-11-20 (lote 12)
+
+Uma segunda revisão do backend procurou o que funcionava no caso feliz e falhava com utilizadores desonestos, pedidos em simultâneo ou muito volume. Nada do que a app envia mudou. Mudam algumas respostas.
+
+### Criar uma reserva
+- A recusa passa a trazer `errorCode`, além da mensagem: `BOOKING_OVERLAP` quando não há unidade livre nas datas, `EQUIPMENT_NOT_AVAILABLE` quando o anúncio foi pausado ou saiu do catálogo, e `BOOKING_TOO_MANY_UNPAID` quando o cliente passou um dos tectos de reservas por pagar. A confirmação pelo proprietário também responde `BOOKING_OVERLAP`.
+- Tectos de reservas por pagar: 5 ao mesmo tempo por cliente, e 90 dias por pagar no mesmo anúncio. Conta como por pagar a reserva `PENDING` ou `CONFIRMED` que ainda tem `expiresAt`. A mensagem diz ao cliente para pagar ou cancelar antes de reservar mais.
+- Num anúncio com várias unidades, a disponibilidade conta as unidades ocupadas ao mesmo tempo, e não o número de reservas no período. Com 2 unidades e reservas de 1 a 3 e de 10 a 12, um pedido de 1 a 20 é aceite. Antes era recusado. O filtro `availableFrom` e `availableTo` do catálogo segue a mesma regra.
+- Dois pedidos em simultâneo deixam de receber «tenta de novo» quando não se cruzam. O servidor repete a transacção e responde com o resultado certo.
+
+### Avaliações
+- Uma reserva cancelada com o valor todo devolvido deixa de se poder avaliar. `can-review` responde `canReview: false` com o motivo, e `POST /reviews` responde 400. Fecha a brecha de reservar, pagar, cancelar a tempo e deixar uma nota.
+- Há uma excepção: se o valor voltou por falha do provider (strike por esta reserva, ou disputa ganha por inteiro pelo cliente), o cliente pode avaliar e o provider não.
+- Uma reserva cancelada em que o provider ficou com parte do valor continua a poder ser avaliada pelos dois.
+
+### Dinheiro
+- A libertação automática e o envio automático de payouts não correm para uma conta suspensa. O dinheiro fica retido até um admin decidir. Para a app nada muda: o pagamento continua `HELD`.
+
+### Infra-estrutura
+- Um pedido de um browser com uma origem fora de `ALLOWED_ORIGINS` deixa de receber 500. Fica sem os cabeçalhos CORS e é o browser que o bloqueia.

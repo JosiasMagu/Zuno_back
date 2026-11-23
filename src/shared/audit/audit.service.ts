@@ -70,7 +70,7 @@ export class AuditService {
       amount:
         entry.amount === undefined || entry.amount === null
           ? null
-          : new Prisma.Decimal(entry.amount as Prisma.Decimal.Value),
+          : new Prisma.Decimal(entry.amount),
       metadata: (entry.metadata as Prisma.InputJsonValue) ?? Prisma.JsonNull,
     };
   }
